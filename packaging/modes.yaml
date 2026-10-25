@@ -1,0 +1,12 @@
+# DubTool mode definitions, shipped in the exe and user-overridable via
+# Settings -> Advanced (AGENT_UPDATE_4.md 6.4). Keep the fast/accurate keys.
+fast:
+  label_key: mode.fast
+  provider: gemini
+  model: gemini-3.5-flash-lite
+  translate_concurrency: 1
+accurate:
+  label_key: mode.accurate
+  provider: gemini
+  model: gemini-3.8-flash
+  translate_concurrency: 3

@@ -1,0 +1,81 @@
+# Defaults, overridable by CLI flags. Edit values, not keys.
+llm_provider: gemini          # gemini | ollama | anthropic
+whisper_model: small          # small | medium | large-v3 (large-v3 if GPU present)
+device: cpu                   # cpu | cuda
+chars_per_sec: 12.5  # AGENT_UPDATE_4 task A1, re-measured on TRIMMED clips (job test1-e5df32ffda, 82 segments, chars incl. spaces / trimmed tts_duration): p25 12.88, median 15.02, p75 17.31, min 7.81, max 20.36 -> p25 floored to 12.5. Old value 8.0 came from untrimmed clips (median 9.98, p25 8.03, ~0.94 s avg silence/clip).
+max_stretch: 1.15
+max_fit_attempts: 3
+tts_voice: vi-VN-HoaiMyNeural # or vi-VN-NamMinhNeural
+
+# edge-tts extras (AGENT_UPDATE_3 task 2). rate is the edge-tts speaking-rate
+# parameter; a small positive rate (e.g. +5%) is an option if clips still
+# overflow — the user decides, the default stays +0%.
+tts_rate: "+0%"
+tts_trim_silence: true  # measured: avg 1.148 s of lead+tail silence per clip (10-clip sample) -> trimming is on
+
+tts_silence_threshold_db: -35  # silencedetect threshold used both for measuring and trimming
+tts_silence_margin_s: 0.05     # keep ~0.05 s of margin so word on/endings are never cut
+
+# Per-provider LLM settings. chunk_size is smaller for free/local models
+# because they follow segment counts and length limits less reliably.
+llm:
+  gemini:
+    model: gemini-3.5-flash-lite   # default: stable, free-of-charge tier (checked official docs 2026-10-25)
+    chunk_size: 25
+  ollama:
+    host: http://localhost:11434
+    model: gemma3:12b              # example: any multilingual model you have pulled
+    chunk_size: 20
+    timeout_sec: 300
+  anthropic:
+    model: claude-sonnet-5-5
+    chunk_size: 40
+
+# Audio mixing (stage 6): Vietnamese voice is laid on top of the lowered
+# original audio. Later phases can swap the "original full mix" for a
+# background-only track without touching the mixing code.
+mix:
+  mode: static           # static | duck
+  original_gain_db: -14  # how much to lower the original audio
+  dub_gain_db: 0
+  duck:                  # sidechaincompress params, duck mode only
+    threshold: 0.03
+    ratio: 8
+    attack_ms: 20
+    release_ms: 400
+
+# Translation (stage 3, AGENT_UPDATE_3 task 7): sentence-level by default.
+translate:
+  unit_mode: sentence    # sentence | segment (segment = previous behavior)
+  budget_overshoot: 1.15 # enforcement pass triggers only above max_chars * this
+  concurrency: 1         # parallel translation chunk calls (235AGU4 A3)
+  pronouns:              # one pick per video, kept consistent (AGU4 A2)
+    first: "tôi"
+    second_plural: "các bạn"
+    second_singular: "bạn"
+
+# Sentence-unit grouping (stage 3)
+units:
+  max_segments: 4
+  max_duration_s: 14
+  max_gap_s: 1.0
+
+# ASR post-processing (stage 2)
+asr:
+  dedupe_min_words: 3            # shortest repeated run removed across a boundary
+  condition_on_previous_text: false  # passed to faster-whisper for new transcriptions
+
+# Playback schedule (stage 6/7, AGENT_UPDATE_3 task 3): clips never overlap.
+schedule:
+  gap_s: 0.08            # pause between adjacent Vietnamese clips
+  max_shift_s: 2.0       # cap for delaying a clip; beyond -> overlap: true
+
+# Vietnamese subtitles (stage 7): soft .srt + optionally burned in.
+subtitles:
+  burn: true             # false = copy the video stream unchanged
+  font: Arial            # Windows font with Vietnamese diacritics
+  size_ratio: 24         # FontSize px = video_height / size_ratio (libass units auto-converted)
+  margin_ratio: 18       # MarginV px = video_height / margin_ratio
+  max_line_chars: 42     # cue text cap per line; portrait video defaults to 28
+  crf: 18                # burn encode quality
+  preset: medium

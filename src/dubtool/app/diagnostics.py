@@ -1,0 +1,100 @@
+"""Export a redacted diagnostics zip (AGU4 7): settings (no secrets), stage
+state, the last run's log tail, dependency versions, and system info. Logs
+are scrubbed line-by-line for anything that looks like a Gemini key.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import platform
+import re
+import sys
+import zipfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+# Gemini keys start with "AIza" and are 35–40 chars; also scrub generic
+# assignments like GEMINI_API_KEY=... just in case.
+_KEY_PATTERNS = re.compile(r"AIza[0-9A-Za-z_\-]{20,}|GEMINI_API_KEY\s*[=:]\s*\S+")
+
+
+def scrub_line(line: str) -> str:
+    return _KEY_PATTERNS.sub("[REDACTED]", line)
+
+
+def scrub_text(text: str) -> str:
+    return "\n".join(scrub_line(l) for l in text.splitlines())
+
+
+def collect_info() -> dict:
+    from dubtool import config as config_mod
+    from dubtool.app import paths
+
+    versions: dict[str, str] = {}
+    for mod, name in (
+        ("PySide6", "PySide6"),
+        ("faster_whisper", "faster-whisper"),
+        ("ctranslate2", "ctranslate2"),
+        ("edge_tts", "edge-tts"),
+        ("keyring", "keyring"),
+        ("google.genai", "google-genai"),
+    ):
+        try:
+            m = __import__(mod, fromlist=["x"])
+            versions[name] = str(getattr(m, "__version__", "unknown"))
+        except Exception as exc:
+            versions[name] = f"unavailable: {type(exc).__name__}"
+    info = {
+        "time_utc": datetime.now(timezone.utc).isoformat(),
+        "python": sys.version,
+        "platform": platform.platform(),
+        "frozen": paths.is_frozen(),
+        "app_version": _app_version(),
+        "key_source": _key_source(),
+        "language": os.environ.get("DUBTOOL_LANG", ""),
+        "packages": versions,
+        "config_defaults_chars_per_sec": config_mod.DEFAULTS.get("chars_per_sec"),
+    }
+    return info
+
+
+def _app_version() -> str:
+    try:
+        from dubtool.app.main import app_version
+
+        return app_version()
+    except Exception:
+        return "unknown"
+
+
+def _key_source() -> str:
+    try:
+        from dubtool.app.secrets import key_source
+
+        return key_source()  # 'keyring' | 'env' | 'none' — never the key itself
+    except Exception:
+        return "unknown"
+
+
+def export_diagnostics(out_path: Path, jobs_dir: Path | None = None) -> Path:
+    """Write the zip; returns its path. Contents are redacted."""
+    from dubtool.app import paths
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    info = collect_info()
+    with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("diagnostics.json", json.dumps(info, indent=2, ensure_ascii=False))
+        # settings.json never contains secrets, but scrub defensively anyway
+        sp = paths.settings_dir() / "settings.json"
+        if sp.exists():
+            zf.writestr("settings.json", scrub_text(sp.read_text(encoding="utf-8")))
+        # last few job logs, tail only
+        root = Path(jobs_dir) if jobs_dir else paths.jobs_dir()
+        if root.exists():
+            logs = sorted(root.glob("*/pipeline.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+            for log_file in logs[:3]:
+                text = log_file.read_text(encoding="utf-8", errors="replace")[-20000:]
+                zf.writestr(f"logs/{log_file.parent.name}/pipeline.log.tail", scrub_text(text))
+    return out_path

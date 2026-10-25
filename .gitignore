@@ -1,0 +1,18 @@
+# Environment / secrets
+.env
+
+# Runtime output
+jobs/
+sample/
+review/
+vendor/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
