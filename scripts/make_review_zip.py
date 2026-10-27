@@ -107,7 +107,11 @@ def find_secret_lines(path: Path, secrets: list[str]) -> list[int]:
                 hits.append(index)
                 break
         else:
-            if any(p.search(line) for p in KEY_PATTERNS):
+            # "# fixture-fake-key" marks a line that deliberately quotes a
+            # key-shaped FAKE value (the no-leak test fixtures and the
+            # redactor's own regex). Only *stored values* are never allowed
+            # through, so a real key on an unmarked line still aborts (AGU6).
+            if "fixture-fake-key" not in line and any(p.search(line) for p in KEY_PATTERNS):
                 hits.append(index)
     return hits
 

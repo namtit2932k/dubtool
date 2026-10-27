@@ -75,11 +75,11 @@ def test_planted_key_redacted_in_log_excerpt(project_root, monkeypatch):
 def test_key_like_patterns_redacted(project_root):
     # Built from parts so our own test source never contains the raw pattern.
     gemini_like = "AI" + "za" + "SyFAKE012345678X"
-    anthropic_like = "sk-ant-" + "api03-abcdef0123456789"
+    anthropic_like = "sk-ant-" + "api03-abcdef0123456789"  # fixture-fake-key
     text = f"token = {gemini_like} and {anthropic_like}"
     redacted = redact_text(text, [])
     assert ("AI" + "za") not in redacted
-    assert ("sk-ant-" + "api03") not in redacted
+    assert ("sk-ant-" + "api03") not in redacted  # fixture-fake-key
     assert "[REDACTED]" in redacted
 
 

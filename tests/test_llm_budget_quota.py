@@ -76,7 +76,7 @@ def test_expired_entries_removed_on_load(qpath, tmp_path, monkeypatch):
 
 def test_quota_state_file_has_only_fingerprints(qpath):
     """Update 5 no-leak rule, extended to quota_state.json (AGU6 5.5)."""
-    values = ["sk-ant-very-secret-value-1", "AIzaAnotherSecretValue42xyz"]
+    values = ["sk-ant-very-secret-value-1", "AIzaAnotherSecretValue42xyz"]  # fixture-fake-key
     later = time.time() + 3 * 86400
     for v in values:
         quota_state.mark_daily(v, "gemini-3.8-flash", later)

@@ -65,7 +65,7 @@ class TestPlaceholderDetection:
 
     @pytest.mark.parametrize(
         "value",
-        ["AI" + "zaSyFAKEKEY0123456789", "sk-ant-" + "api03-fake"],
+        ["AI" + "zaSyFAKEKEY0123456789", "sk-ant-" + "api03-fake"],  # fixture-fake-key
     )
     def test_fake_real_looking_keys_are_not_placeholders(self, value):
         # look-alike test values, never real keys

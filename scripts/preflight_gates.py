@@ -8,13 +8,19 @@ never a matched value. Exit code 0 = all gates pass.
 
 from __future__ import annotations
 
-import os
 import re
-import subprocess
-import sys
 from pathlib import Path
 
+from dubtool import proc  # every call goes through the helper (AGU6 task 1)
+
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _git(*args: str, **kw) -> str:
+    done = proc.run(["git", *args], cwd=str(ROOT), **kw)
+    if done.returncode != 0:
+        raise RuntimeError(f"git {args[0]} failed")
+    return done.stdout
 
 PATTERNS = [
     ("google-key", re.compile(r"AIza[0-9A-Za-z_-]{20,}")),
@@ -29,15 +35,12 @@ FORBIDDEN_PREFIXES = ("jobs/", "sample/", "dist/", "build/", "vendor/",
 
 
 def tracked_files() -> list[str]:
-    out = subprocess.run(["git", "ls-files", "--cached"], capture_output=True,
-                         text=True, check=True, cwd=str(ROOT))
-    return [line for line in out.stdout.splitlines() if line]
+    out = _git("ls-files", "--cached")
+    return [line for line in out.splitlines() if line]
 
 
 def blob_content(path: str) -> bytes:
-    out = subprocess.run(["git", "show", f":{path}"], capture_output=True,
-                         check=True, cwd=str(ROOT))
-    return out.stdout
+    return _git("show", f":{path}").encode("utf-8", errors="surrogateescape")
 
 
 def stored_key_values() -> list[bytes]:
@@ -99,7 +102,8 @@ def main() -> int:
             m = pat.search(text)
             if m:
                 is_fixture = (name.startswith("tests/")
-                              or name == "scripts/make_review_zip.py"
+                              or name in ("scripts/make_review_zip.py",
+                                          "scripts/preflight_gates.py")
                               or name.startswith("agent/")) \
                     and all(not (val and val == m.group(0).encode("utf-8")) for val in values)
                 (fixture_hits if is_fixture else real_hits).append(f"{name}: pattern {tag}")
