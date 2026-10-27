@@ -16,6 +16,7 @@ import argparse
 import os
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 APP_VERSION = "1.0.0"
@@ -182,8 +183,47 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     privacy.grab().save(str(out_dir / "dialog_first_run.png"))
     privacy.close()
 
+    _write_screenshots_index(out_dir, scale)
     print(f"screenshots written to {out_dir}")
     return 0
+
+
+def _write_screenshots_index(out_dir: Path, scale: float) -> None:
+    """INDEX.txt next to the images (AGU7 task 5): build id and timestamp
+    straight from BUILD_INFO.txt so the screenshots test can cross-check
+    them against the exe that produced the set."""
+    lines: list[str] = []
+    if getattr(sys, "frozen", False):
+        base = Path(sys.executable).parent
+    else:
+        base = Path(__file__).resolve().parents[2]
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        raw = (base / "BUILD_INFO.txt").read_text(encoding="utf-8").replace("\ufeff", "")
+    except OSError:
+        raw = ""
+    for key in ("git:", "built (UTC):", "build id:"):
+        for line in raw.splitlines():
+            if line.startswith(key):
+                lines.append(line.strip())
+                break
+        else:
+            if key == "git:":
+                lines.append("git: (info not available — not built here)")
+            elif key == "built (UTC):":
+                lines.append(f"built (UTC):  {now} (from BUILD_INFO.txt is absent)")
+            else:
+                lines.append("build id: (source run, no BUILD_INFO.txt)")
+    lines.insert(0, f"DubTool screenshots - {app_version()}")
+    lines += [
+        "images:       from the packaged exe (DubTool.exe --screenshots), offscreen",
+        f"scale:        {scale} (QT_SCALE_FACTOR unset when 1.0)",
+        "window sizes: 760x600, 900x700, 1100x800",
+        "states:       idle, video, running, finished (with 'Mo ban dich'), error",
+        "dialogs:      error, first-run privacy, Settings (whole dialog + each tab)",
+        "notes:        key rows are masked (fake keys); no real key material in any image",
+    ]
+    (out_dir / "INDEX.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def run_gui_smoke() -> int:

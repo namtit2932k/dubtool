@@ -162,6 +162,28 @@ try {
     }
     Write-Host "built: $appDir"
     Write-Host "zip:   $zip"
+
+    # 7. Screenshots from the *fresh* exe (AGU7 task 5): a new folder named
+    # after the build id, older folders deleted, then the screenshots test
+    # asserts the set against this exe's BUILD_INFO.txt. Done after the
+    # tests gate on purpose: the PNGs must prove the exe that was just
+    # promoted, not a previous one.
+    Write-Host "== [7/6] screenshots from the fresh exe"
+    $buildIdFull = "Update 7 ($git)"
+    $slug = ($buildIdFull.ToLower() -replace " ", "_") -replace "[()]", ""
+    $shotsRoot = Join-Path $root "screenshots"
+    $shotDir = Join-Path $shotsRoot $slug
+    if (Test-Path $shotDir) { Remove-Item -Recurse -Force $shotDir }
+    # A GUI-subsystem exe does not block PS `&` — wait explicitly.
+    $ssProc = Start-Process -FilePath (Join-Path $appDir "DubTool.exe") `
+      -ArgumentList "--screenshots", $shotDir -Wait -NoNewWindow -PassThru
+    if ($ssProc.ExitCode -ne 0) { throw "screenshot generation failed ($($ssProc.ExitCode))" }
+    Get-ChildItem $shotsRoot -Directory |
+      Where-Object { $_.FullName -ne $shotDir } |
+      Remove-Item -Recurse -Force
+    Write-Host "shots:  $shotDir"
+    & $py -m pytest tests/test_screenshots.py -q
+    if ($LASTEXITCODE -ne 0) { throw "screenshot set check failed" }
 }
 finally {
     Pop-Location
