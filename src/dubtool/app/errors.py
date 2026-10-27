@@ -15,10 +15,13 @@ CODE_KEYS = {
     "quota": "error.quota",
     "model_not_found": "error.model_not_found",
     "network": "error.network",
+    "timeout": "error.timeout",
+    "internal": "error.internal",
     "disk_full": "error.disk_full",
     "ffmpeg_missing": "error.ffmpeg_missing",
     "invalid": "error.generic",
     "error": "error.generic",
+    "internal": "error.internal",
     "cancelled": "error.cancelled",
     "output_exists": "error.generic",  # the UI asks about the conflict directly
 }

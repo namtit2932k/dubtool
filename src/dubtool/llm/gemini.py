@@ -14,12 +14,17 @@ import logging
 import threading
 
 from dubtool.llm.base import (
+    InternalLLMError,
     InvalidKeyError,
     LLMError,
     LLMResult,
     MissingKeyError,
+    NetworkLLMError,
     RateLimitError,
     RateLimitExhausted,
+    TimeoutLLMError,
+    _is_internal,
+    _transport_kind,
     classify_rate_limit,
     looks_like_placeholder,
     read_env_key,
@@ -32,6 +37,25 @@ from dubtool.llm.keypool import (
 )
 
 log = logging.getLogger("dubtool")
+
+
+def build_gemini_client(api_key: str, timeout_ms: int | None = None):
+    """The ONE factory for google-genai clients (AGENT_UPDATE_7.md 4.1).
+
+    The SDK's HttpOptions.timeout is an `Optional[int]` in MILLISECONDS
+    (google-genai 2.33.0, verified with inspect). Update 6 passed a string
+    like "180000ms", which the pydantic model rejects — every Gemini
+    request then failed before it left the machine. Everything that builds
+    a client (provider, key test, model-list refresh) goes through here.
+    """
+    from google import genai
+
+    if timeout_ms is not None:
+        return genai.Client(
+            api_key=api_key,
+            http_options={"timeout": int(timeout_ms)},
+        )
+    return genai.Client(api_key=api_key)
 
 
 class GeminiProvider:
@@ -113,13 +137,8 @@ class GeminiProvider:
         with self._client_lock:
             client = self._clients.get(key)
             if client is None:
-                if self._timeout_s:
-                    client = self._genai.Client(
-                        api_key=key,
-                        http_options={"timeout": f"{int(self._timeout_s * 1000)}ms"},
-                    )
-                else:
-                    client = self._genai.Client(api_key=key)
+                timeout_ms = int(self._timeout_s * 1000) if self._timeout_s else None
+                client = build_gemini_client(key, timeout_ms)
                 self._clients[key] = client
             return client
 
@@ -261,7 +280,23 @@ class GeminiProvider:
         )
 
     def _map_error(self, exc: Exception, used_key: str) -> Exception:
-        """Tag the failure with the key used so the client can mark the pool."""
+        """Tag the failure with the key used so the client can mark the pool.
+
+        AGENT_UPDATE_7.md 4.3: deterministic internal failures (validation
+        errors, programming errors — the update-6 case was a bad timeout
+        format rejected by the SDK) become InternalLLMError, which the
+        client fails fast on instead of retrying 3 times and misreading as
+        a network problem."""
+        # Transport failures first: connection problems vs read timeouts.
+        # (The caller raises the result `from exc`, which chains the original
+        # so api._classify_error can still walk up to the transport cause.)
+        kind = _transport_kind(exc)
+        if kind == "timeout":
+            return TimeoutLLMError(
+                f"the request timed out before a reply ({self.name})"
+            )
+        if kind == "network":
+            return NetworkLLMError(f"the connection to {self.name} failed")
         code = getattr(exc, "code", None)
         if code == 429:
             return RateLimitError(self.name, str(exc), key_used=used_key)
@@ -280,4 +315,14 @@ class GeminiProvider:
                 "shown here)",
                 key_used=used_key,
             )
-        return LLMError(f"gemini API error: {text}")
+        # Validation or programming errors (e.g. pydantic rejecting SDK
+        # options, TypeError/AttributeError/NameError) are deterministic —
+        # never retried, never a network problem.
+        if _is_internal(exc):
+            mapped = InternalLLMError(
+                "an internal error prevented the request (not a connection "
+                f"problem): {text}"
+            )
+        else:
+            mapped = LLMError(f"gemini API error: {text}")
+        return mapped

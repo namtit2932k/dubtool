@@ -98,7 +98,56 @@ class TestProbeParity:
         assert int(info["width"]) == 128
         assert int(info["height"]) == 72
         assert int(info["r_frame_rate"].split("/")[0]) == 24
-        assert info["duration"] is not None and float(info["duration"]) > 0.9
+        # AGENT_UPDATE_7.md task 3: seconds (float), tightly bounded —
+        # the old assertion (> 0.9) also passed for microseconds.
+        assert isinstance(info["duration"], float)
+        assert info["duration"] == pytest.approx(1.0, abs=0.05)
+
+
+class TestDurationUnitsKnownLength:
+    """AGENT_UPDATE_7.md task 3: generated files of known length; both
+    probe_video_info AND probe_duration must equal ffprobe within 0.05 s
+    (this is what catches the raw-microseconds regression)."""
+
+    @classmethod
+    def _make(cls, tmp_path: Path, seconds: float) -> Path:
+        src = tmp_path / f"known_{int(seconds)}s.mp4"
+        dest = tmp_path / "gen"
+        _clip(dest / src.name, seconds=seconds, fps=1, w=64, h=36)
+        return dest / src.name
+
+    def _ffprobe_duration(self, path: Path) -> float:
+        data = _ffprobe_json(path, "format=duration")
+        return float(data["format"]["duration"])
+
+    def test_2s(self, tmp_path: Path):
+        src = self._make(tmp_path, 2.0)
+        expected = self._ffprobe_duration(src)
+        assert audio_utils.probe_video_info(src)["duration"] == pytest.approx(expected, abs=0.05)
+        assert audio_utils.probe_duration(src) == pytest.approx(expected, abs=0.05)
+
+    def test_120s(self, tmp_path: Path):
+        src = self._make(tmp_path, 120.0)
+        expected = self._ffprobe_duration(src)
+        got_info = audio_utils.probe_video_info(src)["duration"]
+        got_probe = audio_utils.probe_duration(src)
+        assert got_info == pytest.approx(expected, abs=0.05)
+        assert got_probe == pytest.approx(expected, abs=0.05)
+        assert got_info <= 121  # seconds, never raw microseconds
+
+    def test_1861s(self, tmp_path: Path):
+        src = self._make(tmp_path, 1861.0)
+        expected = self._ffprobe_duration(src)
+        got_info = audio_utils.probe_video_info(src)["duration"]
+        assert got_info == pytest.approx(expected, abs=0.05)
+        assert 1860 <= got_info <= 1865  # around 31 minutes, in seconds
+
+    def test_format_mmss(self):
+        # hour format helper (AGENT_UPDATE_7.md task 3)
+        assert audio_utils.format_mmss(2) == "00:02"
+        assert audio_utils.format_mmss(120) == "02:00"
+        assert audio_utils.format_mmss(1861) == "31:01"
+        assert audio_utils.format_mmss(3723) == "1:02:03"
 
 
 # ------------------------------------------------------------------- 3.2 cache

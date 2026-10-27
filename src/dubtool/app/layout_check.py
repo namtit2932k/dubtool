@@ -71,7 +71,12 @@ def apply_state(win, state: str) -> None:
         win.output_edit.setText(str(win.output_dir))
         win._refresh_buttons()
         win.progress_group.show_running()
-        win.progress_group.on_finished(DubResult(ok=True, code="ok", out_video=Path("out/ok.mp4")))
+        # out_readable present: the success row includes the "M\u1edf b\u1ea3n d\u1ecbch"
+        # button (AGENT_UPDATE_7.md task 5 required finished state).
+        win.progress_group.on_finished(
+            DubResult(ok=True, code="ok", out_video=Path("out/ok.mp4"),
+                      out_readable=Path("out/ok_vi_translation.docx"))
+        )
     elif state == "error":
         win.output_dir = Path.cwd()
         win.output_edit.setText(str(win.output_dir))

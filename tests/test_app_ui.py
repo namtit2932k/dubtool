@@ -15,6 +15,7 @@ import pytest
 pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QLabel, QWidget
 
 from dubtool import api
@@ -179,22 +180,129 @@ def test_add_dialog_parses_lines(qtbot, dialog, monkeypatch):
 
 
 def test_add_keys_stores_and_refreshes(qtbot, dialog, monkeypatch):
-    """Add passes the parsed lines to secrets.add_keys and refreshes rows."""
+    """AGENT_UPDATE_7.md 2.4: click the real 'Thêm khóa…' button, fill the
+    real add dialog's field, click its real OK button. After: keys saved,
+    rows masked, field cleared (take_keys hands the keys over first)."""
     from dubtool.app.ui import settings_dialog as sd
 
     stored = []
-    monkeypatch.setattr(sd.secrets, "add_keys", stored.append)
-    keys_seq = iter(["key-only-9999"])
-    monkeypatch.setattr(sd.secrets, "get_gemini_keys", lambda: [next(keys_seq, "key-only-9999")])
+    monkeypatch.setattr(
+        sd.secrets, "add_keys", lambda keys: stored.append(list(keys)) or list(keys)
+    )
+    monkeypatch.setattr(sd.secrets, "get_gemini_keys", lambda: ["key-only-9999"])
+
+    execs = {}
 
     def fake_exec(self):
-        # simulate the user typing before pressing OK
+        execs["dialog"] = self
         self.field.setPlainText("key-only-9999\n")
         return QDialog.DialogCode.Accepted
 
     monkeypatch.setattr(_AddKeysDialog, "exec", fake_exec)
-    dialog._add_keys_manual()
+    dialog.add_btn.click()
+    add_dialog = execs["dialog"]
     assert stored == [["key-only-9999"]]
+    assert add_dialog.field.toPlainText() == ""  # cleared after take_keys
+    row = dialog.key_list.item(0).text()
+    assert row.startswith("Khóa 1")
+    assert "••••9999" in row
+    assert "key-only-9999" not in row
+
+
+def test_store_error_is_visible(qtbot, dialog, monkeypatch):
+    """AGENT_UPDATE_7.md 2.3: a credential-store failure lands in the status
+    line ('keys could not be saved'), never silent."""
+    from dubtool.app.ui import settings_dialog as sd
+
+    def boom(keys):
+        raise RuntimeError("backend locked")
+
+    monkeypatch.setattr(sd.secrets, "add_keys", boom)
+
+    def fill_and_ok(self):
+        self.field.setPlainText("key-x-xxxxxxxx\n")
+        self.ok_button.click()
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_AddKeysDialog, "exec", fill_and_ok)
+    dialog.add_btn.click()
+    assert "backend locked" in dialog.keys_status.text()
+
+
+def test_button_states_follow_selection(qtbot, dialog, monkeypatch):
+    """AGENT_UPDATE_7.md 2.4: selecting a row enables Remove / Test selected;
+    Up/Down reflect position (first, middle, last)."""
+    from dubtool.app import secrets as secrets_mod
+
+    keys_three = ["key-one-aaaa", "key-mid-mmmm", "key-two-bbbb"]
+    monkeypatch.setattr(secrets_mod, "get_gemini_keys", lambda: list(keys_three))
+    dialog._refresh_rows()
+    b = dialog
+
+    def state():
+        return (b.up_btn.isEnabled(), b.down_btn.isEnabled(),
+                b.remove_btn.isEnabled(), b.test_one_btn.isEnabled())
+
+    # No selection yet
+    b.key_list.setCurrentRow(-1)
+    assert state() == (False, False, False, False)
+    # First row: click the item like a user, Up off / Down on
+    rect = b.key_list.visualItemRect(b.key_list.item(0))
+    qtbot.mouseClick(b.key_list.viewport(), Qt.MouseButton.LeftButton, pos=rect.center())
+    assert b.key_list.currentRow() == 0
+    assert state() == (False, True, True, True)
+    # Middle row: both directions available
+    mid = b.key_list.visualItemRect(b.key_list.item(1))
+    qtbot.mouseClick(b.key_list.viewport(), Qt.MouseButton.LeftButton, pos=mid.center())
+    assert b.key_list.currentRow() == 1
+    assert state() == (True, True, True, True)
+    # Last row: Down off
+    b.key_list.setCurrentRow(2)
+    assert state() == (True, False, True, True)
+
+
+def test_move_reorders_store_and_selection_follows(qtbot, dialog, monkeypatch):
+    from dubtool.app import secrets as secrets_mod
+    from dubtool.app.ui import settings_dialog as sd
+
+    order = ["key-one-aaaa", "key-two-bbbb"]
+
+    def move(row, delta):
+        order.insert(row + delta, order.pop(row))
+        return list(order)
+
+    monkeypatch.setattr(sd.secrets, "move_key", move)
+    monkeypatch.setattr(secrets_mod, "get_gemini_keys", lambda: list(order))
+    dialog.key_list.setCurrentRow(1)
+    dialog._move_key(-1)
+    assert order == ["key-two-bbbb", "key-one-aaaa"]
+    assert dialog.key_list.currentRow() == 0
+    assert "key-two-bbbb"[-4:] in dialog.key_list.item(0).text()
+
+
+def test_remove_confirms_and_selects_next_row(qtbot, dialog, monkeypatch):
+    """AGENT_UPDATE_7.md 2.4: answering the real confirmation removes the
+    key and the next nearest row is selected."""
+    from dubtool.app import secrets as secrets_mod
+    from dubtool.app.ui import settings_dialog as sd
+
+    kept = ["key-one-aaaa", "key-two-bbbb"]
+
+    def remove(row):
+        removed.append(row)
+        kept.pop(row)
+        return list(kept)
+
+    removed = []
+    monkeypatch.setattr(sd.secrets, "remove_key", remove)
+    monkeypatch.setattr(sd.QMessageBox, "question",
+                        lambda *a, **k: sd.QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(secrets_mod, "get_gemini_keys", lambda: list(kept))
+    dialog.key_list.setCurrentRow(0)
+    dialog._remove_key()
+    assert removed == [0]
+    assert dialog.key_list.count() == 1
+    assert dialog.key_list.currentRow() == 0  # nearest remaining row
 
 
 def test_reorder_and_remove_calls_secret_store(qtbot, dialog, monkeypatch):
@@ -218,34 +326,72 @@ def test_reorder_and_remove_calls_secret_store(qtbot, dialog, monkeypatch):
     assert not any("key-first" in t or "key-of-second" in t for t in saved)
 
 
-def test_test_all_updates_badges(qtbot, dialog, monkeypatch):
-    """'Test all' runs the fake tester per row and maps outcomes to badges;
-    no key value ever reaches the status or rows."""
+def test_test_selected_and_all(qtbot, dialog, monkeypatch):
+    """AGENT_UPDATE_7.md 2.2/2.4: 'Test selected' tests ONLY the selected key;
+    'Test all' tests every key; badges update; no key value in any row."""
     from dubtool.app.ui import settings_dialog as sd
 
     results = {"key-one-aaaa": "ok", "key-two-bbbb": "invalid_model"}
-    seen_models = []
     tested = []
 
     def fake_test(key, model=None):
         tested.append(key)
-        seen_models.append(model)
         return results[key]
 
     monkeypatch.setattr(sd, "run_key_test", fake_test)
-    dialog._run_test_all()
-    assert dialog._testing_rows == {0, 1}  # launched off the UI thread
+
+    dialog.key_list.setCurrentRow(1)
+    dialog._test_selected()
+    qtbot.waitUntil(lambda: dialog._badges.get(1) == "invalid_model", timeout=5000)
+    assert tested == ["key-two-bbbb"]
+
+    dialog._test_all()
     qtbot.waitUntil(
         lambda: dialog._badges.get(0) == "ok" and dialog._badges.get(1) == "invalid_model",
         timeout=5000,
     )
-    assert tested == ["key-one-aaaa", "key-two-bbbb"]
-    assert seen_models == [dialog._fast_model(), dialog._fast_model()]
+    assert tested == ["key-two-bbbb", "key-one-aaaa", "key-two-bbbb"]
     rows = [dialog.key_list.item(r).text() for r in range(dialog.key_list.count())]
     assert any("✔" in r for r in rows)
     assert any("✘" in r for r in rows)
-    assert all("key-one-aaaa" not in r for r in rows)
-    assert dialog.keys_status.text() and "key-one-aaaa" not in dialog.keys_status.text()
+    assert all("key-one-aaaa" not in r and "key-two-bbbb" not in r for r in rows)
+
+
+def test_slot_exception_is_logged_and_dialog_shown_once(qtbot, dialog, monkeypatch, tmp_path):
+    """AGENT_UPDATE_7.md 2.3/2.4: a slot that raises is reported — a log file
+    without any key value, one dialog per distinct error."""
+    from dubtool.app import failguard
+    from dubtool.app import paths
+
+    logs = tmp_path / "logs"
+    monkeypatch.setattr(paths, "logs_dir", lambda: logs)
+    shown = []
+    monkeypatch.setattr(failguard, "_show_dialog", lambda exc: shown.append(exc))
+
+    failguard.install()  # hook sys.excepthook + Qt message handler
+    # keep the original Test-selected slot offline while ours raises
+    from dubtool.app.ui import settings_dialog as sd
+
+    monkeypatch.setattr(sd, "run_key_test", lambda key, model=None: "ok")
+    key_like = "AIzaONESUPERSECRETFREEKEYVALUE00"  # fixture: not a real key
+
+    def raising_slot(*_a):
+        raise RuntimeError(f"boom with {key_like}")
+
+    # A real raising slot on a real button click (the stored _test_selected
+    # still runs harmlessly first; our slot then raises through Qt).
+    dialog.test_one_btn.clicked.connect(raising_slot)
+    dialog.key_list.setCurrentRow(0)
+    dialog.test_one_btn.click()
+
+    files = sorted(logs.glob("slot-error-*.log"))
+    assert files, "no slot-error log written"
+    text = files[0].read_text(encoding="utf-8")
+    assert "boom" in text
+    assert key_like not in text  # key-shaped token redacted
+
+    failguard.handle_slot_exception(shown[0])
+    assert len(shown) == 1  # the same distinct error is not re-shown
 
 
 def test_status_line_counts_without_keys(dialog):
@@ -307,6 +453,37 @@ def test_no_hardcoded_widget_text(qtbot):
     """Heuristic: the tr() fallback returns the key itself when missing."""
     assert i18n.tr("s1") not in ("s1",)
     assert i18n.language() in ("vi", "en")
+
+
+def test_long_video_warning_seconds_unit(qtbot, window, tmp_path, monkeypatch):
+    """AGENT_UPDATE_7.md task 3, UI: a 120 s video shows 02:00 and NO
+    'longer than 30 minutes' dialog (the unit bug fired this on every
+    file); a 1861 s video warns exactly once and shows 31:01."""
+    from dubtool import audio_utils
+
+    def clip(dest: Path, seconds: float) -> Path:
+        audio_utils.run_ffmpeg([
+            "-f", "lavfi", "-i", f"testsrc=size=64x36:rate=1:duration={seconds}",
+            str(dest),
+        ])
+        return dest
+
+    warned = []
+    monkeypatch.setattr(
+        __import__("dubtool.app.ui.main_window", fromlist=["QMessageBox"]).QMessageBox,
+        "information",
+        lambda *a, **k: warned.append(a),
+    )
+
+    two_min = clip(tmp_path / "120s.mp4", 120.0)
+    window.set_video(two_min)
+    assert "02:00" in window.video_info.text()
+    assert not warned  # 2 minutes is NOT 30 minutes
+
+    half_hour_plus = clip(tmp_path / "1861s.mp4", 1861.0)
+    window.set_video(half_hour_plus)
+    assert "31:01" in window.video_info.text()
+    assert len(warned) == 1  # one dialog, not one per microsecond
 
 
 def test_layout_min_size_no_overlap(qtbot, window):

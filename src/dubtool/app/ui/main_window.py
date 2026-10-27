@@ -137,6 +137,16 @@ class OptionsWidget(QGroupBox):
         self.srt_check.setChecked(s["save_srt"])
         self.keep_check = QCheckBox(i18n.tr("options.keep"))
         self.keep_check.setChecked(s["keep_intermediate"])
+        # AGENT_UPDATE_7.md task 4: the customer-readable translation that
+        # ships next to every exported video (default on, docx or txt).
+        self.readable_check = QCheckBox(i18n.tr("options.readable"))
+        self.readable_check.setChecked(bool(s.get("export_readable", True)))
+        self.readable_format_combo = QComboBox()
+        self.readable_format_combo.addItem(i18n.tr("readable.format_docx"), "docx")
+        self.readable_format_combo.addItem(i18n.tr("readable.format_txt"), "txt")
+        self.readable_format_combo.setCurrentIndex(
+            max(0, self.readable_format_combo.findData(s.get("readable_format", "docx")))
+        )
         self.gain_slider = QSlider(Qt.Orientation.Horizontal)
         self.gain_slider.setRange(-24, -6)
         self.gain_slider.setValue(int(s["original_gain_db"]))
@@ -148,11 +158,13 @@ class OptionsWidget(QGroupBox):
         grid.addWidget(self.burn_check, 0, 0, 1, 3)
         grid.addWidget(self.srt_check, 1, 0, 1, 3)
         grid.addWidget(self.keep_check, 2, 0, 1, 3)
-        grid.addWidget(QLabel(i18n.tr("options.gain")), 3, 0)
-        grid.addWidget(self.gain_slider, 3, 1)
-        grid.addWidget(self.gain_value, 3, 2)
-        grid.addWidget(QLabel(i18n.tr("options.voice")), 4, 0)
-        grid.addWidget(self.voice_combo, 4, 1, 1, 2)
+        grid.addWidget(self.readable_check, 3, 0)
+        grid.addWidget(self.readable_format_combo, 3, 1, 1, 2)
+        grid.addWidget(QLabel(i18n.tr("options.gain")), 4, 0)
+        grid.addWidget(self.gain_slider, 4, 1)
+        grid.addWidget(self.gain_value, 4, 2)
+        grid.addWidget(QLabel(i18n.tr("options.voice")), 5, 0)
+        grid.addWidget(self.voice_combo, 5, 1, 1, 2)
 
     def to_options(self, mode: str, brief: str) -> api.DubOptions:
         from dubtool.brief import normalize_brief
@@ -164,6 +176,8 @@ class OptionsWidget(QGroupBox):
             original_gain_db=float(self.gain_slider.value()),
             voice=self.voice_combo.currentText(),
             keep_intermediate=self.keep_check.isChecked(),
+            export_readable=self.readable_check.isChecked(),
+            readable_format=str(self.readable_format_combo.currentData() or "docx"),
             description=(normalize_brief(brief) or None),
         )
 
@@ -204,7 +218,13 @@ class ProgressWidget(QGroupBox):
         self.open_btn.clicked.connect(self._open_folder)
         self.play_btn = QPushButton(i18n.tr("progress.play"))
         self.play_btn.clicked.connect(self._play)
-        for b in (self.cancel_btn, self.resume_btn, self.over_btn, self.open_btn, self.play_btn):
+        # AGENT_UPDATE_7.md task 4: opens the readable translation file.
+        self.readable_btn = QPushButton(i18n.tr("progress.open_readable"))
+        self.readable_btn.clicked.connect(self._open_readable)
+        for b in (
+            self.cancel_btn, self.resume_btn, self.over_btn,
+            self.open_btn, self.play_btn, self.readable_btn,
+        ):
             self.action_row.addWidget(b)
         layout.addLayout(self.action_row)
 
@@ -224,12 +244,13 @@ class ProgressWidget(QGroupBox):
         self.over_btn.hide()
         self.open_btn.hide()
         self.play_btn.hide()
+        self.readable_btn.hide()
         self._last_result = None
 
     def show_running(self) -> None:
         self.show()
         self.cancel_btn.show()
-        for b in (self.resume_btn, self.over_btn, self.open_btn, self.play_btn):
+        for b in (self.resume_btn, self.over_btn, self.open_btn, self.play_btn, self.readable_btn):
             b.hide()
         self.stages.setAllPending()
 
@@ -253,6 +274,21 @@ class ProgressWidget(QGroupBox):
             self.bar.setValue(1)
             self.open_btn.show()
             self.play_btn.show()
+            if result.out_readable:
+                self.readable_btn.show()
+            if result.readable_warning:
+                # AGENT_UPDATE_7.md 5.5: the video is fine; say so plainly.
+                self.log.append(i18n.tr("progress.readable_warning"))
+            # The success summary lists what was delivered (section 5.5).
+            if result.out_video:
+                if result.out_readable:
+                    self.log.append(
+                        i18n.tr("progress.summary", video=result.out_video.name, readable=result.out_readable.name)
+                    )
+                else:
+                    self.log.append(i18n.tr("progress.summary_no_readable", video=result.out_video.name))
+            if result.readable_warning:
+                self._show_readable_warning()
         else:
             self.resume_btn.show()
             self.over_btn.show()
@@ -267,6 +303,21 @@ class ProgressWidget(QGroupBox):
     def _play(self) -> None:
         if self._last_result and self._last_result.out_video:
             _open_file(self._last_result.out_video)
+
+    def _open_readable(self) -> None:
+        if self._last_result and self._last_result.out_readable:
+            _open_file(self._last_result.out_readable)
+
+    def _show_readable_warning(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        window = self.window_ref
+        QMessageBox.warning(
+            window,
+            i18n.tr("progress.header"),
+            i18n.tr("progress.readable_warning")
+            + (f"\n{self._last_result.readable_warning}" if self._last_result and self._last_result.readable_warning else ""),
+        )
 
 
 # ------------------------------------------------------------------ window
@@ -495,14 +546,20 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, i18n.tr("video.header"), i18n.tr("video.no_stream"))
             return
         self.video_path = path
-        duration = float(info.get("duration") or 0.0)
+        duration = float(info.get("duration") or 0.0)  # seconds (one helper unit)
         if duration > 30 * 60:
             QMessageBox.information(self, i18n.tr("video.header"), i18n.tr("video.warn_long"))
+        rate_text = str(info.get("r_frame_rate") or "0/1")
+        num, _, den = rate_text.partition("/")
+        try:
+            fps = float(num) / max(1.0, float(den or "1"))
+        except ValueError:
+            fps = 0.0
         parts = [
             path.name,
-            f"{duration / 60:.1f} min" if duration else "",
+            audio_utils.format_mmss(duration) if duration else "",
             f"{info.get('width')}x{info.get('height')}" if info.get("width") else "",
-            f"{info.get('fps', 0):.2f} fps" if info.get("fps") else "",
+            f"{fps:.2f} fps" if fps else "",
             f"{path.stat().st_size / (1024 * 1024):.1f} MB",
         ]
         self.video_info.setText(" · ".join(p for p in parts if p))
@@ -638,10 +695,28 @@ class MainWindow(QMainWindow):
         dialog.setIcon(QMessageBox.Icon.Critical)
         dialog.setWindowTitle("DubTool")
         dialog.setText(errors.message_for_code(result.code))
+        if result.code == "internal":
+            # AGENT_UPDATE_7.md 4.3: an internal failure says plainly it is
+            # not a connection problem, with details and diagnostics at hand.
+            dialog.setInformativeText(i18n.tr("error.internal"))
         copy_btn = dialog.addButton(i18n.tr("copy_details"), QMessageBox.ButtonRole.ActionRole)
         copy_btn.clicked.connect(
             lambda: QApplication.clipboard().setText(errors.detail_text(result.error, result.detail))
         )
+        export_btn = dialog.addButton(
+            i18n.tr("app.export_diagnostics"), QMessageBox.ButtonRole.ActionRole
+        )
+
+        def _export_diag() -> None:
+            try:
+                diagnostics.export_diagnostics(
+                    Path.home() / "Desktop" / "dubtool-diagnostics.zip",
+                    jobs_dir=self._jobs_dir(),
+                )
+            except Exception:
+                pass
+
+        export_btn.clicked.connect(_export_diag)
         dialog.addButton(QMessageBox.StandardButton.Ok)
         dialog.exec()
 
@@ -661,13 +736,15 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, i18n.tr("app.export_diagnostics"), str(out))
 
     def show_about(self) -> None:
-        from dubtool.app.main import app_version
+        from dubtool.app.main import _build_info_line, app_version
 
+        build_line = _build_info_line()  # the BUILD_INFO.txt next to the exe
         QMessageBox.information(
             self,
             i18n.tr("app.about"),
             f"{i18n.tr('about.version')}: {app_version()}\n"
-            f"{i18n.tr('about.ffmpeg')}: {_ffmpeg_version()}\n"
+            + (build_line + "\n" if build_line else "")
+            + f"{i18n.tr('about.ffmpeg')}: {_ffmpeg_version()}\n"
             + i18n.tr("about.license"),
         )
 

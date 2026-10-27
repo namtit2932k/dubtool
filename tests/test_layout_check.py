@@ -10,7 +10,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from pathlib import Path
+
 
 import pytest
 
@@ -56,8 +56,9 @@ def _flush():
         app.processEvents()
 
 
-def test_layout_invariants_every_size_and_state(qtbot, window):
+def test_layout_invariants_every_size_and_state(qtbot, window, tmp_path):
     """AGU5 task 4 checks 1-4 at all five required sizes and states."""
+    report_path = tmp_path / "layout_report.txt"  # never into tests/
     report: list[str] = []
     for width, height in SIZES:
         window.resize(QSize(width, height))
@@ -67,7 +68,7 @@ def test_layout_invariants_every_size_and_state(qtbot, window):
             _flush()
             problems = violations(window)
             report.append(f"{width}x{height}/{state}: " + ("PASS" if not problems else "; ".join(problems)))
-    Path(__file__).with_name("lc_violations.txt").write_text("\n".join(report), encoding="utf-8")
+    report_path.write_text("\n".join(report), encoding="utf-8")
     assert all(line.endswith("PASS") for line in report)
 
 

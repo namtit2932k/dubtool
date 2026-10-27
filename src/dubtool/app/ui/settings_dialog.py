@@ -14,6 +14,7 @@ off the UI thread, and Reset to the shipped defaults. The key hint
 
 from __future__ import annotations
 
+import logging
 import re
 import threading
 
@@ -38,6 +39,8 @@ from PySide6.QtWidgets import (
 
 from dubtool.app import i18n, modes, secrets, settings
 from dubtool.app.key_test import run_key_test
+
+log = logging.getLogger("dubtool")
 
 VOICE_KEYS = ("vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural")
 
@@ -78,9 +81,9 @@ _SHIPPED = {
 
 def _fetch_models(key: str) -> list[str]:
     """Text-generation model ids the API offers to this key (no secrets)."""
-    from google import genai
+    from dubtool.llm.gemini import build_gemini_client
 
-    client = genai.Client(api_key=key, http_options={"timeout": 15000})
+    client = build_gemini_client(key, timeout_ms=15_000)
     ids: list[str] = []
     for model in client.models.list():
         actions = list(getattr(model, "supported_actions", None) or [])
@@ -123,23 +126,31 @@ class _AddKeysDialog(QDialog):
         layout.addWidget(self.field)
         row = QHBoxLayout()
         row.addStretch(1)
-        ok = QPushButton(i18n.tr("settings.add"))
-        ok.setDefault(True)
-        cancel = QPushButton("Cancel")
-        cancel.clicked.connect(self.reject)
-        ok.clicked.connect(self.accept)
-        row.addWidget(ok)
-        row.addWidget(cancel)
+        self.ok_button = QPushButton(i18n.tr("settings.add"))
+        self.ok_button.setDefault(True)
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.reject)
+        self.ok_button.clicked.connect(self.accept)
+        row.addWidget(self.ok_button)
+        row.addWidget(self.cancel_button)
         layout.addLayout(row)
 
     def keys(self) -> list[str]:
+        """One key per line, blanks dropped, trimmed (duplicates and quote
+        stripping live in secrets.add_keys)."""
         text = self.field.toPlainText()
         return [line.strip() for line in text.splitlines() if line.strip()]
 
-    def done(self, result) -> None:  # clear the field on close, always
-        if self.field is not None:
-            self.field.clear()
-        super().done(result)
+    def take_keys(self) -> list[str]:
+        """AGENT_UPDATE_7.md 2.1: hand the keys to the caller BEFORE anything
+        is cleared — the old done() override wiped the field when exec()
+        finished, so the caller read an empty list and 'Add' did nothing.
+
+        Always clears afterwards (the field never holds key text longer
+        than needed); the caller discards the result on reject."""
+        keys = self.keys()
+        self.field.clear()
+        return keys
 
 
 class SettingsDialog(QDialog):
@@ -188,6 +199,11 @@ class SettingsDialog(QDialog):
         self.key_list = QListWidget()
         self.key_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         layout.addWidget(self.key_list, 1)
+        # AGENT_UPDATE_7.md 2.2: the button states follow the selection live
+        # (the old code recomputed them only after a rebuild, when no row
+        # was selected — Remove/Up/Down/Test never became clickable).
+        self.key_list.currentRowChanged.connect(lambda _row: self._update_buttons())
+        self.key_list.itemSelectionChanged.connect(lambda: self._update_buttons())
         btns = QHBoxLayout()
         self.test_all_btn = QPushButton(i18n.tr("settings.test_all"))
         self.test_one_btn = QPushButton(i18n.tr("settings.test_selected"))
@@ -203,8 +219,10 @@ class SettingsDialog(QDialog):
         self.remove_btn.clicked.connect(self._remove_key)
         self.up_btn.clicked.connect(lambda: self._move_key(-1))
         self.down_btn.clicked.connect(lambda: self._move_key(+1))
-        self.test_one_btn.clicked.connect(self._run_test_all)
-        self.test_all_btn.clicked.connect(self._run_test_all)
+        # AGENT_UPDATE_7.md 2.2: explicit slots instead of the self.sender()
+        # trick — "Test selected" tests only the selected key.
+        self.test_one_btn.clicked.connect(self._test_selected)
+        self.test_all_btn.clicked.connect(self._test_all)
         self._work = _WorkResult(self)
         self._work.finished.connect(self._on_test_finished)
 
@@ -231,10 +249,17 @@ class SettingsDialog(QDialog):
         except Exception:
             return _SHIPPED["accurate"][0]
 
-    def _refresh_rows(self) -> None:
-        """Rebuild the masked rows (never shows key values; position + ••••)."""
+    def _refresh_rows(self, select: int | None = None) -> None:
+        """Rebuild the masked rows (never shows key values; position + ••••).
+
+        `select` is the row to restore after the rebuild (AGENT_UPDATE_7.md
+        2.2): after a move, the moved row; after a remove, the nearest
+        remaining row; after an add, the new last key. None keeps row 0
+        selected when keys exist and nothing was selected."""
         import time as _time
 
+        count_before = self.key_list.count()
+        had_selection = self.key_list.currentRow()
         self.key_list.clear()
         for i, key in enumerate(self._keys()):
             badge = self._badges.get(i)
@@ -260,30 +285,59 @@ class SettingsDialog(QDialog):
         self.keys_status.setText(
             i18n.tr("settings.keys_count", count=count) if count else i18n.tr("mode.no_key")
         )
-        for b in (self.remove_btn, self.up_btn, self.down_btn, self.test_one_btn):
-            b.setEnabled(count > 0 and self.key_list.currentRow() >= 0)
-        self.test_all_btn.setEnabled(count > 0 and not self._testing_rows)
+        # Restore the selection: explicit row, or the previously selected
+        # row across badge rebuilds, or row 1 (the first) on first show.
+        n_rows = self.key_list.count()
+        if n_rows:
+            target = min(max(0, select if select is not None else (had_selection or 0)), n_rows - 1)
+            self.key_list.setCurrentRow(target)
+        self._update_buttons()
+
+    def _update_buttons(self) -> None:
+        """AGENT_UPDATE_7.md 2.2 button states, from the live selection."""
+        rows = self.key_list.count()
+        selected = self.key_list.currentRow()
+        self.add_btn.setEnabled(True)  # always enabled
+        has_sel = 0 <= selected < rows
+        self.remove_btn.setEnabled(has_sel)
+        self.test_one_btn.setEnabled(has_sel and not self._testing_rows)
+        self.up_btn.setEnabled(has_sel and selected > 0)
+        self.down_btn.setEnabled(has_sel and selected < rows - 1)
+        self.test_all_btn.setEnabled(rows > 0 and not self._testing_rows)
+
+    def _show_store_error(self, exc: Exception) -> None:
+        """AGENT_UPDATE_7.md 2.3: a credential-store failure (backend missing
+        or locked, cap reached) is never silent — status line + log."""
+        log.error("keys tab: secret store failed: %s", exc, exc_info=True)
+        self.keys_status.setText(
+            i18n.tr("settings.store_error", detail=str(exc) or type(exc).__name__)
+        )
 
     def _keys(self) -> list[str]:
         try:
             return secrets.get_gemini_keys()
-        except Exception:
+        except Exception as exc:
+            self._show_store_error(exc)
             return []
 
     def _add_keys_manual(self) -> None:
         dialog = _AddKeysDialog(self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        new_keys = dialog.keys()
-        if not new_keys:
+        code = dialog.exec()
+        # AGENT_UPDATE_7.md 2.1: take the keys first (and clear the field)
+        # whatever the outcome, so key text never lingers in the widget.
+        new_keys = dialog.take_keys()
+        if code != QDialog.DialogCode.Accepted or not new_keys:
             return
         try:
-            secrets.add_keys(new_keys)
+            final = secrets.add_keys(new_keys)
         except Exception as exc:
-            self.keys_status.setText(str(exc))
+            self._show_store_error(exc)
             return
         self._badges.clear()
-        self._refresh_rows()
+        # Select the new last key (AGENT_UPDATE_7.md 2.2).
+        count = len(final) if isinstance(final, (list, tuple)) else len(self._keys())
+        self._refresh_rows(select=max(0, count - 1))
+        self.keys_status.setText(i18n.tr("settings.key_saved"))
         if self._on_key_saved:
             self._on_key_saved()
 
@@ -298,33 +352,46 @@ class SettingsDialog(QDialog):
         if answer != QMessageBox.StandardButton.Yes:
             return
         try:
-            secrets.remove_key(row)
+            remaining = secrets.remove_key(row)
         except Exception as exc:
-            self.keys_status.setText(str(exc))
+            self._show_store_error(exc)
             return
         self._badges.pop(row, None)
-        self._refresh_rows()
+        # Select the nearest remaining row (AGENT_UPDATE_7.md 2.2).
+        n_after = len(remaining) if isinstance(remaining, (list, tuple)) else len(self._keys())
+        self._refresh_rows(select=min(row, max(0, n_after - 1)))
 
     def _move_key(self, delta: int) -> None:
         row = self.key_list.currentRow()
         if row < 0:
             return
+        target = row + delta
         try:
             secrets.move_key(row, delta)
         except Exception as exc:
-            self.keys_status.setText(str(exc))
+            self._show_store_error(exc)
         self._badges.clear()
-        self._refresh_rows()
+        self._refresh_rows(select=target)  # the moved row keeps the selection
 
     def _run_test_all(self) -> None:
         """Test one key or all of them, one after another, off the UI thread."""
+    def _test_all(self) -> None:
+        """Test every key (AGENT_UPDATE_7.md 2.2: explicit slot)."""
         keys = self._keys()
         if not keys or self._testing_rows:
             return
-        if self.key_list.currentRow() < 0 or self.sender() is self.test_all_btn:
-            rows = list(range(len(keys)))
-        else:
-            rows = [self.key_list.currentRow()]
+        self._start_test(list(range(len(keys))))
+
+    def _test_selected(self) -> None:
+        """Test only the selected key (AGENT_UPDATE_7.md 2.2: explicit slot)."""
+        keys = self._keys()
+        row = self.key_list.currentRow()
+        if not keys or self._testing_rows or not (0 <= row < len(keys)):
+            return
+        self._start_test([row])
+
+    def _start_test(self, rows: list[int]) -> None:
+        keys = self._keys()
         self._testing_rows = set(rows)
         for row in rows:
             self._badges[row] = "__testing__"

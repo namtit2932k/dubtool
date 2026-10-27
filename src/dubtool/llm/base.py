@@ -60,6 +60,111 @@ class KeyExhaustedError(LLMError):
     daily limit), or the list was empty."""
 
 
+class InternalLLMError(LLMError):
+    """Deterministic failure inside the app (bad SDK options, programming
+    error) — AGENT_UPDATE_7.md 4.3: NEVER retried, never reported as a
+    network problem. Wraps the original as its cause."""
+
+
+class NetworkLLMError(LLMError):
+    """Connection could not be established (DNS, TCP, SSL) — retryable."""
+
+
+class TimeoutLLMError(LLMError):
+    """The server accepted the connection but the answer took too long —
+    retryable (AGENT_UPDATE_7.md 4.3: distinct from no-connection)."""
+
+
+# --- error classification by TYPE + cause chain (AGENT_UPDATE_7.md 4.3) ----
+# Update 6 searched the message text, which misfiled SDK validation errors
+# mentioning "timeout" as network failures. _walk() follows __cause__ and
+# __context__ so a wrapped transport error still classifies correctly.
+
+_TIMEOUT_TYPES = frozenset()
+_NETWORK_TYPES = frozenset()
+
+
+def _walk(exc: BaseException):
+    seen = set()
+    stack = [exc]
+    while stack:
+        current = stack.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        yield current
+        for link in (current.__cause__, current.__context__):
+            if isinstance(link, BaseException):
+                stack.append(link)
+
+
+def _exc_id(exc: BaseException) -> str:
+    return f"{type(exc).__module__}.{type(exc).__name__}"
+
+
+def _load_markers() -> tuple[frozenset, frozenset, frozenset]:
+    """Exception identities by module+name, without importing httpx at
+    module import time (it is a google-genai dependency, but tests may fake
+    their own exceptions with the real names)."""
+    timeout = {
+        "httpx.ConnectTimeout", "httpx.ReadTimeout", "httpx.WriteTimeout",
+        "httpx.PoolTimeout", "httpx.ConnectingError", "httpx.TimeoutException",
+        "socket.timeout", "builtins.TimeoutError", "builtins.ConnectionError",
+    }
+    network = {
+        "httpx.ConnectError", "httpx.NetworkError", "httpx.ReadError",
+        "httpx.WriteError", "httpx.RemoteProtocolError", "httpx.ProxyError", 
+        "socket.gaierror", "socket.herror", "socket.ConnectionError",
+        "builtins.ConnectionError", "builtins.ConnectionResetError",
+        "builtins.ConnectionRefusedError", "builtins.BrokenPipeError",
+        "ssl.SSLError", "ssl.SSLCertVerificationError", "ssl.SSLEOFError",
+        "urllib.error.URLError", "dns.resolver.LifetimeTimeout",
+        "dns.resolver.NoNameservers", "dns.resolver.NXDOMAIN",
+        "http.client.RemoteDisconnected", "aiohttp.ClientConnectorError",
+    }
+    internal = {
+        "pydantic_core.ValidationError", "pydantic_core._pydantic_core.ValidationError",
+        "pydantic.ValidationError",
+        "builtins.TypeError", "builtins.AttributeError",
+        "builtins.KeyError", "builtins.NameError", "builtins.UnboundLocalError",
+        "builtins.RecursionError", "builtins.ZeroDivisionError",
+    }
+    return frozenset(timeout), frozenset(network), frozenset(internal)
+
+
+def _transport_kind(exc: BaseException) -> str | None:
+    """'timeout' | 'network' | None, decided from exception types along the
+    cause chain — never from text (AGENT_UPDATE_7.md 4.3)."""
+    timeout, network, _internal = _load_markers()
+    kinds: set[str] = set()
+    for e in _walk(exc):
+        name = _exc_id(e)
+        # SSL failures look like any OSError; treat ssl modules explicitly.
+        if name.startswith("ssl.") or "ssl" in name.lower():
+            kinds.add("network")
+        elif name in timeout:
+            kinds.add("timeout")
+        elif name in network:
+            kinds.add("network")
+    if "network" in kinds:
+        return "network"  # a connect failure is the more informative verdict
+    if "timeout" in kinds:
+        return "timeout"
+    return None
+
+
+def _is_internal(exc: BaseException) -> bool:
+    _timeout, _network, internal = _load_markers()
+    for e in _walk(exc):
+        if _exc_id(e) in internal:
+            return True
+        # pydantic's ValidationError lives in pydantic_core._pydantic_core
+        # (module ids vary across pydantic versions); match by class name.
+        if type(e).__name__ == "ValidationError" and "pydantic" in type(e).__module__:
+            return True
+    return False
+
+
 # --- 429 payload classification (AGENT_UPDATE_5.md 2.4) ---------------------
 
 # The official google-genai SDK raises APIError subclasses carrying the full

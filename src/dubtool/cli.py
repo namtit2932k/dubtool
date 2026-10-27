@@ -128,6 +128,89 @@ def _resolve_out_target(args) -> Path | None:
     return out
 
 
+def _doc_lang() -> str:
+    """Language of the readable file's labels: the app's language setting
+    (vi by default), read defensively so the CLI works everywhere."""
+    try:
+        from dubtool.app import settings as app_settings
+
+        return str(app_settings.load().get("language") or "vi")
+    except Exception:
+        return "vi"
+
+
+def _export_readable_cli(job: Job, video_out: Path, fmt: str = "docx") -> Path | None:
+    """The readable file next to the CLI's final video, failure-isolated
+    exactly like the app path (AGENT_UPDATE_7.md 5.5)."""
+    from dubtool.stages import s8_export_readable as s8
+
+    lang = _doc_lang()
+    fmt = "docx" if str(fmt or "docx").lower() == "docx" else "txt"
+    duration_s = None
+    try:
+        duration_s = audio_utils.probe_duration(video_out)
+    except Exception:
+        duration_s = None
+    try:
+        path = s8.deliver(job.dir, video_out, fmt=fmt, lang=lang, duration_s=duration_s)
+    except Exception as exc:
+        log.warning("s8: %s export failed (%s) — trying the .txt fallback", fmt, exc)
+        try:
+            path = s8.deliver(job.dir, video_out, fmt="txt", lang=lang, duration_s=duration_s)
+        except Exception as exc2:
+            print(
+                "WARNING: the video is ready; the readable translation file "
+                f"could not be created ({exc2})",
+                file=sys.stderr,
+            )
+            return None
+    print(f"Readable translation: {path}")
+    return path
+
+
+def cmd_export_readable(args) -> int:
+    """`dubtool export-readable <job_id>` — regenerate the customer-readable
+    translation file from an existing job folder."""
+    _setup_logging(args.verbose)
+    from dubtool.stages import s8_export_readable as s8
+
+    job = load_job(args.job_id, Path("jobs"))
+    if not job.translated_path.exists():
+        print(
+            f"ERROR: {job.translated_path} not found — this job's intermediate "
+            "files were deleted; run the video again to regenerate it",
+            file=sys.stderr,
+        )
+        return 2
+    if args.out:
+        target = Path(args.out)
+        if target.suffix.lower() not in (".docx", ".txt"):
+            target = target.with_suffix(".docx" if args.fmt == "docx" else ".txt")
+    else:
+        if not (job.dir / "output.mp4").exists():
+            print(
+                "ERROR: no output video in the job — pass --out to name the file",
+                file=sys.stderr,
+            )
+            return 2
+        target = s8.readable_target(job.output_path, args.fmt)
+    lang = _doc_lang()
+    fmt = "docx" if args.fmt == "docx" else "txt"
+    duration_s = None
+    try:
+        duration_s = audio_utils.probe_duration(job.output_path)
+    except Exception:
+        duration_s = None
+    meta = s8.make_meta(job.output_path if job.output_path.exists() else target, lang=lang, duration_s=duration_s)
+    rows = s8.build_rows(job.dir)
+    if fmt == "docx":
+        s8.render_docx(target, meta, rows)
+    else:
+        s8.render_txt(target, meta, rows)
+    print(f"Readable translation written to {target} ({len(rows)} rows)")
+    return 0
+
+
 def _copy_to_out(job: Job, out: Path | None) -> None:
     if out is None:
         return
@@ -197,6 +280,9 @@ def cmd_run(args) -> int:
         _run_stage(job, conf, stage, force=args.force, api_keys=_env_keys())
 
     _copy_to_out(job, out)
+    # AGENT_UPDATE_7.md task 4: the CLI produces the readable file too.
+    if not args.no_readable:
+        _export_readable_cli(job, out if out is not None else job.output_path, fmt=args.readable_format or "docx")
     print(f"Done. Output: {job.output_path} and {job.vi_audio_path}")
     return 0
 
@@ -403,7 +489,28 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--brief-file", default=None, help="path to a video brief text file")
     run_p.add_argument("--model", default=None, help="override the provider's configured model id")
     run_p.add_argument("--translate-concurrency", type=int, default=None, help="parallel translation chunk calls (1-5)")
+    run_p.add_argument(
+        "--no-readable",
+        action="store_true",
+        help="do not write the customer-readable translation file next to the video",
+    )
+    run_p.add_argument(
+        "--readable-format",
+        choices=("docx", "txt"),
+        default=None,
+        help="format of the readable translation file (default docx)",
+    )
     run_p.set_defaults(func=cmd_run)
+
+    exp_p = sub.add_parser(
+        "export-readable",
+        help="(re)create the customer-readable translation file of an existing job",
+    )
+    exp_p.add_argument("job_id")
+    exp_p.add_argument("--format", dest="fmt", choices=("docx", "txt"), default="docx")
+    exp_p.add_argument("--out", default=None, help="write to this exact path instead of next to the job's video")
+    exp_p.add_argument("--verbose", action="store_true")
+    exp_p.set_defaults(func=cmd_export_readable, fmt="docx")
 
     stage_p = sub.add_parser("stage", help="run one stage on an existing job")
     stage_p.add_argument("job_id")

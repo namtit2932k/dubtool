@@ -23,12 +23,17 @@ datas += collect_dynamic_libs("onnxruntime", destdir=".")
 datas += collect_dynamic_libs("av", destdir=".")
 datas += collect_data_files("edge_tts")
 datas += collect_data_files("certifi")
+# AGENT_UPDATE_7.md 5.6: python-docx ships its default template as data
+# files — a frozen app without them fails at runtime when saving a docx.
+datas += collect_data_files("docx")
 
 hiddenimports = []
 hiddenimports += collect_submodules("keyring.backends")
 hiddenimports += ["keyring.backends.Windows"]
 hiddenimports += collect_submodules("faster_whisper")
 hiddenimports += collect_submodules("edge_tts")
+# python-docx + its lxml dependency (readable translation export, AGU7 5.6)
+hiddenimports += ["docx", "docx.oxml", "docx.oxml.ns", "lxml", "lxml.etree"]
 
 binaries = []
 
@@ -57,7 +62,9 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
-    icon=str(ROOT / "packaging" / "icon.png"),
+    # .ico: PyInstaller on Windows needs the container format directly (the
+    # build venv has no Pillow to convert the PNG at build time).
+    icon=str(ROOT / "packaging" / "icon.ico"),
     version=str(ROOT / "packaging" / "version.txt"),
 )
 coll = COLLECT(

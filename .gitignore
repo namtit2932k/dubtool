@@ -71,3 +71,5 @@ translated*.json
 
 # Editor settings
 .vscode/
+build_log.txt
+build_layout_smoke.log

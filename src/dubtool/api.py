@@ -43,6 +43,9 @@ class DubOptions:
     output_name_base: str | None = None
     whisper_model: str | None = None
     whisper_device: str | None = None
+    # AGENT_UPDATE_7.md task 4: the customer-readable translation file.
+    export_readable: bool = True
+    readable_format: str = "docx"      # docx | txt
 
 
 @dataclass
@@ -62,7 +65,9 @@ class DubResult:
     cancelled: bool = False
     out_video: Path | None = None
     out_srt: Path | None = None
+    out_readable: Path | None = None   # <name>_vi_translation.docx|.txt (AGU7 task 4)
     job_id: str | None = None
+    readable_warning: str | None = None  # set when the video is ok but the export failed
     error: str | None = None
     detail: str | None = None
     llm_requests: int | None = None                     # AGU6 5.2
@@ -135,30 +140,73 @@ def _stable_job_id(video: Path, options: DubOptions) -> str:
 
 
 def _classify_error(exc: Exception) -> tuple[str, str | None]:
-    text = str(exc)
+    """Classify by exception TYPE along the cause chain (AGENT_UPDATE_7.md
+    4.3) — the old substring matching put the SDK's "timeout" validation
+    error under `network`, telling a user with working internet that the
+    network was down. LLM-level wrappers carry the transport verdict inside
+    their type when the provider mapped it (TimeoutLLMError etc.)."""
     detail = repr(exc)
     if isinstance(exc, StageCancelled):
         return "cancelled", detail
-    lowered = text.lower()
-    # Rate limits first: the give-up message mentions "API keys" too.
-    if (
-        "rate limit" in lowered
-        or "resource_exhausted" in lowered
-        or "429" in lowered
-        or "quota" in lowered
-    ):
-        return "quota", detail
-    if "api key" in lowered or "placeholder" in lowered or "missingkey" in detail.lower():
-        return "invalid_key", detail
-    if "not found" in lowered or "404" in lowered or "model" in lowered and "not" in lowered and "found" in lowered:
-        return "model_not_found", detail
-    if "network" in lowered or "timed out" in lowered or "timeout" in lowered or "connection" in lowered:
+    from dubtool.llm.base import (
+        InternalLLMError,
+        InvalidKeyError,
+        MissingKeyError,
+        NetworkLLMError,
+        RateLimitError,
+        RateLimitExhausted,
+        TimeoutLLMError,
+        _is_internal,
+        _transport_kind,
+        _walk,
+    )
+    for e in _walk(exc):
+        if isinstance(e, (RateLimitError, RateLimitExhausted)):
+            return "quota", detail
+    kind = _transport_kind(exc)
+    has_timeout = any(isinstance(e, TimeoutLLMError) for e in _walk(exc))
+    has_network = any(isinstance(e, NetworkLLMError) for e in _walk(exc))
+    if kind == "timeout" and not has_network:
+        return "timeout", detail
+    if kind == "network" or has_network:
         return "network", detail
-    if "no space" in lowered or "disk" in lowered and "full" in lowered:
+    if has_timeout:
+        return "timeout", detail
+    for e in _walk(exc):
+        if isinstance(e, (InvalidKeyError, MissingKeyError)):
+            return "invalid_key", detail
+    if _is_internal(exc) or isinstance(exc, InternalLLMError):
+        return "internal", detail
+    # Legacy provider-level codes carried on the exception object (a
+    # status/reason check, not a message-text check).
+    if _is_model_not_found(exc):
+        return "model_not_found", detail
+    lowered = str(exc).lower()
+    if "resource_exhausted" in lowered:
+        return "quota", detail
+    if "no space" in lowered or "disk full" in lowered:
         return "disk_full", detail
     if "ffmpeg" in lowered:
         return "ffmpeg_missing", detail
+    if "api key" in lowered or "placeholder" in lowered or "missingkey" in detail.lower():
+        return "invalid_key", detail
     return "error", detail
+
+
+def _is_model_not_found(exc: BaseException) -> bool:
+    """404 / NOT_FOUND from the provider's error object (never from the
+    message text)."""
+    from dubtool.llm.base import _walk
+
+    code = getattr(exc, "code", None)
+    status = str(getattr(exc, "status", "") or "").upper()
+    if code == 404 or status == "NOT_FOUND":
+        return True
+    return any(
+        (getattr(e, "code", None) == 404
+         or str(getattr(e, "status", "") or "").upper() == "NOT_FOUND")
+        for e in _walk(exc)
+    )
 
 
 def _open_or_create_job(job_id: str, jobs_root: Path, video: Path) -> "Job":
@@ -361,6 +409,40 @@ def run_dub(
         shutil.copyfile(job.output_path, tmp)
         os.replace(tmp, target)
 
+        # AGENT_UPDATE_7.md task 4: the readable translation file. It runs
+        # after stage 7 and BEFORE the job folder is cleaned up below (the
+        # stage reads only translated.json / units.json / schedule.json),
+        # and it is failure-isolated: an export problem never un-dones the
+        # video result. If the Word export fails the .txt fallback runs
+        # automatically; only failing twice leaves the run readable-less.
+        out_readable: Path | None = None
+        readable_warning: str | None = None
+        if options.export_readable:
+            from dubtool.stages import s8_export_readable as s8
+
+            lang = str(_user_settings().get("language") or "vi")
+            fmt = "docx" if str(options.readable_format or "docx").lower() == "docx" else "txt"
+            duration_s: float | None = None
+            try:
+                from dubtool import audio_utils
+
+                duration_s = audio_utils.probe_duration(target)
+            except Exception:
+                duration_s = None  # header row is simply left out
+            try:
+                out_readable = s8.deliver(job.dir, target, fmt=fmt, lang=lang, duration_s=duration_s)
+            except Exception as exc:
+                logging.getLogger("dubtool").warning(
+                    "s8: %s export failed (%s) — trying the .txt fallback", fmt, exc
+                )
+                try:
+                    out_readable = s8.deliver(job.dir, target, fmt="txt", lang=lang, duration_s=duration_s)
+                except Exception as exc2:
+                    logging.getLogger("dubtool").warning(
+                        "s8: readable translation could not be created: %s", exc2
+                    )
+                    readable_warning = str(exc2)
+
         out_srt = None
         if options.save_srt and job.srt_path.exists():
             srt_target = output_dir / (video.stem + "_vi.srt")
@@ -385,11 +467,15 @@ def run_dub(
                 pass
 
         job.save()
-        return DubResult(
+        result = DubResult(
             ok=True, code="ok", out_video=target, out_srt=out_srt, job_id=job_id,
             llm_requests=budget.used,
             llm_requests_per_stage=requests_per_stage,
         )
+        result.out_readable = out_readable
+        if readable_warning:
+            result.readable_warning = readable_warning
+        return result
     except StageCancelled:
         return DubResult(code="cancelled", cancelled=True,
                          llm_requests=getattr(budget, "used", 0))

@@ -203,12 +203,24 @@ def plan(root: Path, *, jobs_days: int = 14, now: float | None = None) \
                 continue  # keep the newest set
             add(p, "shots", "delete", "older shots set")
     if (root / "screenshots").is_dir():
-        # Keep the newest screenshot files as the current set; older ones go.
-        files = [p for p in (root / "screenshots").rglob("*")
+        # A screenshot *set* must stay whole. AGENT_UPDATE_7 requires every
+        # PNG of the current build-id folder; the old "newest 8 files" rule
+        # amputated exactly those (test_screenshots caught it). So: whichever
+        # set owns the single newest file is kept entirely (a build-id
+        # subfolder or, for the legacy layout, the loose files themselves);
+        # only files *outside* that set are deleted.
+        shot_root = root / "screenshots"
+        files = [p for p in shot_root.rglob("*")
                  if p.is_file() and not p.is_symlink()]
-        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        for p in files[8:]:
-            add(p, "shots", "delete")
+        if files:
+            newest_dir = None if _by_mtime(files)[0].parent == shot_root \
+                else _by_mtime(files)[0].parent
+            for p in files:
+                if newest_dir is not None and newest_dir not in p.parents:
+                    add(p, "shots", "delete", "file outside the newest screenshot set")
+        for p in [d for d in shot_root.iterdir() if d.is_dir() and not d.is_symlink()]:
+            if newest_dir is None or p != newest_dir:
+                add(p, "shots", "delete", "older screenshot set")
 
     add(root / "check", "check_frames", "delete", "frame dump folders")
 

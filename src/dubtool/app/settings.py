@@ -25,6 +25,8 @@ DEFAULTS: dict = {
     "jobs_dir": "",              # empty = app default
     "mode_models": {},           # {"fast": "<model id>", "accurate": "<model id>"}
     "privacy_acknowledged": False,
+    "export_readable": True,     # AGU7 task 4: write <name>_vi_translation next to the video
+    "readable_format": "docx",   # docx | txt
     "cpu_usage": "balanced",     # low | balanced | maximum (AGU6 4.2)
     "video_encode_preset": "veryfast",  # veryfast | faster | medium (AGU6 4.2)
     "jobs_max_days": 14,         # prune old job folders after N days (AGU6 6.7)
@@ -82,6 +84,8 @@ def validate(settings: dict) -> list[str]:
         problems.append("voice must be a known edge-tts Vietnamese voice")
     if str(settings.get("cpu_usage", "")).lower() not in ("low", "balanced", "maximum"):
         problems.append("cpu_usage must be low|balanced|maximum")
+    if str(settings.get("readable_format", "docx")).lower() not in ("docx", "txt"):
+        problems.append("readable_format must be docx|txt")
     if str(settings.get("video_encode_preset", "")).lower() not in ("veryfast", "faster", "medium"):
         problems.append("video_encode_preset must be veryfast|faster|medium")
     days = settings.get("jobs_max_days", 14)

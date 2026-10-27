@@ -80,11 +80,10 @@ def classify_request_error(exc: Exception) -> str:
 
 def _request_ok(key: str, model: str) -> None:
     """Raise on any failure; return quietly when the tiny request succeeds."""
-    genai, types = _imports()
-    client = genai.Client(
-        api_key=key,
-        http_options={"timeout": REQUEST_TIMEOUT_MS},
-    )
+    from dubtool.llm.gemini import build_gemini_client
+
+    _genai, types = _imports()  # noqa: F841 - documented import contract
+    client = build_gemini_client(key, timeout_ms=REQUEST_TIMEOUT_MS)
     cfg = types.GenerateContentConfig(max_output_tokens=16, temperature=0.0)
     client.models.generate_content(
         model=model,

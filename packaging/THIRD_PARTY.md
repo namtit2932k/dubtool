@@ -45,6 +45,7 @@ The one-dir bundle embeds these libraries; each keeps its own license:
 | google-genai | Apache-2.0 | Gemini SDK |
 | anthropic | MIT | |
 | keyring | MIT | Windows Credential Manager backend |
+| python-docx (+ lxml) | MIT / BSD-3 | AGU7 task 4: the customer-readable translation document; its default template ships as bundled data |
 | pydub / pydantic / pyyaml / python-dotenv | MIT / MIT / MIT / BSD-3 | |
 | tqdm / colorama | MIT / BSD-3 | |
 | PyInstaller (build only) | GPL with boot-loader exception | not redistributed |

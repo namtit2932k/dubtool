@@ -145,13 +145,17 @@ def _measure_text_block() -> dict:
                     return {"ok": False, "detail": f"render {name} failed: {r.stderr[-200:]}"}
 
             def load(p):
+                # rawvideo is binary: text=False keeps stdout bytes so
+                # np.frombuffer gets a bytes-like object.
                 return proc.run(
                     [audio_utils.ffmpeg_bin(), "-i", str(p), "-f", "rawvideo", "-pix_fmt", "gray", "-"],
-                    timeout=60, cwd=base,
+                    timeout=60, cwd=base, text=False,
                 ).stdout
 
-            a = np.frombuffer(load(clean), dtype=np.uint8).reshape(-1, 640)
-            b = np.frombuffer(load(burned), dtype=np.uint8).reshape(-1, 640)
+            # 640x360 gray → 640 bytes per row (PROC-TEXT note: text=False above
+            # is what makes the reshape valid).
+            a = np.frombuffer((load(clean) or b""), dtype=np.uint8).reshape(-1, 640)
+            b = np.frombuffer((load(burned) or b""), dtype=np.uint8).reshape(-1, 640)
             if a.shape != b.shape:
                 return {"ok": False, "detail": f"frame size mismatch: {a.shape} vs {b.shape}"}
             diff = (np.abs(a.astype(int) - b.astype(int)) > 40).any(axis=1)
@@ -237,6 +241,90 @@ def check_keys_and_tabs() -> dict:
         return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
 
 
+def check_gemini_client() -> dict:
+    """AGENT_UPDATE_7.md 4.2: the REAL google-genai client must construct
+    with the production timeout options (HttpOptions.timeout as an integer
+    number of milliseconds) — the Update-6 string format '180000ms' failed
+    validation and killed every Gemini request. No network is used."""
+    try:
+        import google.genai as gemini_mod
+
+        version = str(getattr(gemini_mod, "__version__", "") or "?")
+        from dubtool.llm.gemini import build_gemini_client
+
+        client = build_gemini_client("test-key-not-a-real-key", timeout_ms=10_000)
+        return {"ok": client is not None,
+                "detail": f"google-genai {version}; client constructs, timeout=int ms"}
+    except ImportError as exc:
+        return {"ok": False, "detail": f"google-genai missing: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
+
+
+def check_docx_roundtrip() -> dict:
+    """AGENT_UPDATE_7.md 5.6: create a small .docx with Vietnamese text,
+    read it back, and check the diacritics survive the round trip."""
+    try:
+        from pathlib import Path as _Path
+        import tempfile as _tempfile
+
+        from docx import Document
+        from dubtool.stages import s8_export_readable as s8
+
+        sample_vi = "Chào mừng bạn, ắ ữ ề ộ ỵ."
+        meta = {
+            "title": "Bản dịch video",
+            "video": "selftest.mp4", "date": "01/01/2026", "duration": "01:23",
+            "lang_pair": "Tiếng Anh → Tiếng Việt",
+            "labels": {
+                "video": "Video", "duration": "Thời lượng",
+                "lang": "Ngôn ngữ", "date": "Ngày tạo",
+                "col_time": "Thời gian", "col_en": "EN", "col_vi": "VI",
+            },
+            "disclaimer": "Bản dịch được tạo tự động bằng AI.",
+            "page_word": "Trang {PAGE} / {NUMPAGES}",
+        }
+        rows = [{"time": 83.0, "en": "Hello there.", "vi": sample_vi}]
+        with _tempfile.TemporaryDirectory() as td:
+            path = _Path(td) / "roundtrip.docx"
+            s8.render_docx(path, meta, rows)
+            doc = Document(str(path))
+            text = "\n".join(c.text for t in doc.tables for r in t.rows for c in r.cells)
+            ok = sample_vi in text
+            return {"ok": ok, "detail": "docx Vietnamese text round-trips" if ok else "Vietnamese text lost"}
+    except Exception as exc:
+        return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
+
+
+def check_av_decode_compat() -> dict:
+    """Found by AGU7's real-Gemini headless run: PyAV 19 removed the
+    metadata_errors argument that faster-whisper 1.2.1's decode_audio passes
+    to av.open, so an av>=19 bundle kills every transcription run with
+    "open() got an unexpected keyword argument". The bundled av must accept
+    the kwarg (pin: av<19 in the build requirements)."""
+    try:
+        import io
+        import wave
+
+        import av
+
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(8000)
+            w.writeframes(b"\x00\x00" * 8000)  # 1 s of silence, no ffmpeg
+        buf.seek(0)
+        av.open(buf, mode="r", metadata_errors="ignore")
+        return {"ok": True,
+                "detail": f"av {av.__version__}: metadata_errors accepted (faster-whisper decode)"}
+    except TypeError as exc:
+        return {"ok": False,
+                "detail": f"av too new for faster-whisper decode ({exc}) — pin av<19"}
+    except Exception as exc:
+        return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
+
+
 CHECKS: dict[str, callable] = {
     "ffmpeg": check_ffmpeg,
     "filters_encoders": check_filters_and_encoder,
@@ -245,9 +333,12 @@ CHECKS: dict[str, callable] = {
     "keys_and_tabs": check_keys_and_tabs,
     "dirs_writable": check_dirs_writable,
     "imports": lambda: check_imports(
-        ("faster_whisper", "ctranslate2", "av", "tokenizers", "huggingface_hub", "edge_tts")
+        ("faster_whisper", "ctranslate2", "av", "tokenizers", "huggingface_hub", "edge_tts", "docx")
     ),
+    "av_decode_compat": check_av_decode_compat,   # AGU7: faster-whisper/PyAV 19 breakage
     "qt_offscreen": check_qt_offscreen,
+    "gemini_client": check_gemini_client,      # AGU7 4.2 (real SDK, no network)
+    "docx_roundtrip": check_docx_roundtrip,    # AGU7 5.6
 }
 
 
@@ -265,3 +356,7 @@ def run_selftest(json_path: Path | None = None) -> int:
         Path(json_path).write_text(json.dumps(results, indent=2), encoding="utf-8")
         print(f"json written to {json_path}")
     return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(run_selftest())

@@ -28,15 +28,19 @@ $Pinned = @(@"
 faster-whisper>=1.0
 ctranslate2>=4.0
 onnxruntime>=1.16
-av>=11
+# PyAV 19 removed metadata_errors, which faster-whisper 1.2.1's decode passes;
+# the exe selftest guards this (av_decode_compat).
+av>=11,<19
 tokenizers>=0.15
 huggingface_hub>=0.20
 certifi
 edge-tts>=6.1
-google-genai>=1.0
+google-genai>=2.33.0,<3
 anthropic>=0.40
 pydub>=0.25
+audioop-lts
 python-dotenv>=1.0
+python-docx>=1.1
 pydantic
 pyyaml
 PySide6>=6.6
@@ -77,12 +81,17 @@ try {
         $py = Join-Path $root ".venv-build\Scripts\python.exe"
         & $py -m pip install --upgrade pip -q
         Write-Host "installing pinned runtime + build dependencies"
-        $reqs = $Pinned -split "`r?`n" | Where-Object { $_ }
+        $reqs = $Pinned -split "`r?`n" | Where-Object { $_ -and $_ -notmatch '^#' }   # comments are not pip requirements
         & $py -m pip install -q @reqs
         if ($LASTEXITCODE -ne 0) { throw "dependency install failed" }
         Set-Content -Path $hashFile -Value $reqHash -NoNewline -Encoding UTF8
     }
     $py = Join-Path $root ".venv-build\Scripts\python.exe"
+    # The tests import dubtool itself; the editable install is idempotent and
+    # cheap when already present, so it runs on every build (a fresh or
+    # reused venv) instead of only at venv creation.
+    & $py -m pip install -q -e . --no-deps
+    if ($LASTEXITCODE -ne 0) { throw "editable project install failed" }
 
     # 2. Tests (offline)
     if (-not $SkipTests) {
@@ -106,6 +115,22 @@ try {
     Copy-Item "packaging/THIRD_PARTY.md" -Destination $tmpAppDir -Force
     Copy-Item "README_BUILD.md" -Destination $tmpAppDir -Force
     Copy-Item "packaging/README_APP.md" -Destination $tmpAppDir -Force -ErrorAction SilentlyContinue
+    # AGU7 task 5: the build identity next to the exe; --version and the
+    # About dialog print the same build id line.
+    $exePath = Join-Path $tmpAppDir "DubTool.exe"
+    $sha = (Get-FileHash $exePath -Algorithm SHA256).Hash.ToLower()
+    $stamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss")
+    $git = "no-repo"
+    $gitOut = & git -C $root rev-parse --short HEAD 2>$null
+    if ($LASTEXITCODE -eq 0 -and $gitOut) { $git = ([string]$gitOut).Trim() }
+    $buildLines = @(
+        "update: 7",
+        "git: $git",
+        "built (UTC): $stamp",
+        "sha256: $sha",
+        "build id: Update 7 ($git)"
+    )
+    Set-Content -Path (Join-Path $tmpAppDir "BUILD_INFO.txt") -Value $buildLines -Encoding UTF8
 
     # 5. Verify the bundled ffmpeg/font landed
     Write-Host "== [5/6] structure check"

@@ -15,12 +15,15 @@ import time
 from typing import Callable
 
 from dubtool.llm.base import (
+    InternalLLMError,
     InvalidKeyError,
     KeyExhaustedError,
     LLMError,
     LLMProvider,
+    NetworkLLMError,
     RateLimitError,
     RateLimitExhausted,
+    TimeoutLLMError,
 )
 from dubtool.llm import budget as budget_mod
 from dubtool.llm import parsing
@@ -88,6 +91,8 @@ class LLMClient:
         """
         if self._pool_capable():
             return self._call_with_pool(system, user, json_mode=json_mode, max_tokens=max_tokens)
+        # (the non-pool loop below re-raises InternalLLMError directly in the
+        # same way — see the except clauses)
         last_error: Exception | None = None
         for attempt in range(1, MAX_RETRIES + 1):
             try:
@@ -127,6 +132,10 @@ class LLMClient:
                         log.exception("on_rate_limit callback failed")
                 if attempt < MAX_RETRIES:
                     time.sleep(wait)
+            except InternalLLMError:
+                # AGENT_UPDATE_7.md 4.3: deterministic — fails immediately,
+                # never retried, never reported as a connection problem.
+                raise
             except (LLMError, ConnectionError, OSError) as exc:
                 last_error = exc
                 log.warning(
@@ -193,6 +202,10 @@ class LLMClient:
                 if self.provider.wait_for_key():
                     continue
                 self.provider.raise_exhausted()
+            except InternalLLMError:
+                # AGENT_UPDATE_7.md 4.3: deterministic — fails immediately,
+                # never retried, never reported as a connection problem.
+                raise
             except InvalidKeyError as exc:
                 attempts += 1
                 last_error = exc

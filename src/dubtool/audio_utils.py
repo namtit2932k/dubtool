@@ -67,19 +67,37 @@ def _av_open(path: Path):
     return av.open(str(path))
 
 
+def media_duration_seconds(container, stream=None) -> float | None:
+    """Container/stream duration in seconds — the ONE conversion point
+    (AGENT_UPDATE_7.md task 3).
+
+    PyAV reports `container.duration` in microseconds (av.time_base ==
+    1000000 = AV_TIME_BASE). The old `probe_video_info` returned that raw
+    number, so a 2-minute video looked like 120,000,000 seconds and always
+    tripped the 30-minute warning. Stream fallback: `duration * time_base`.
+    Returns None when neither level stores a duration."""
+    import av
+
+    dur = getattr(container, "duration", None)
+    if dur is not None and dur > 0:
+        return float(dur) / float(av.time_base)
+    if stream is not None:
+        d = getattr(stream, "duration", None)
+        tb = getattr(stream, "time_base", None)
+        if d is not None and tb:
+            seconds = float(d * tb)
+            if seconds > 0:
+                return seconds
+    return None
+
+
 def probe_duration(path: Path) -> float:
     """Media duration in seconds — in-process (PyAV), ffprobe fallback."""
     try:
         with _av_open(path) as container:
-            duration = container.duration  # microseconds (AV_TIME_BASE)
-            if duration is not None and duration > 0:
-                return float(duration) / 1e6
-            for stream in container.streams:
-                d = getattr(stream, "duration", None)
-                if d is not None and getattr(stream, "time_base", None):
-                    seconds = float(d * stream.time_base)
-                    if seconds > 0:
-                        return seconds
+            seconds = media_duration_seconds(container)
+            if seconds is not None:
+                return seconds
     except Exception as exc:
         log.debug("av.open failed on %s (%s) — falling back to ffprobe", path, exc)
     return _ffprobe_duration(path)
@@ -125,13 +143,17 @@ def probe_video_info(path: Path) -> dict:
             rate = vstream.average_rate or getattr(vstream, "guessed_rate", None)
             num = getattr(rate, "numerator", rate) if rate is not None else 0
             den = getattr(rate, "denominator", 1) if rate is not None else 1
-            duration = container.duration
+            # AGENT_UPDATE_7.md task 3: seconds, from the one helper
+            # (container microseconds -> av.time_base; stream fallback).
+            seconds = media_duration_seconds(container, vstream)
+            if seconds is None:
+                raise RuntimeError(f"no duration in {path.name}")
             return {
                 "codec_name": vstream.codec_context.name if vstream.codec_context else "",
                 "width": int(vstream.width or 0),
                 "height": int(vstream.height or 0),
                 "r_frame_rate": f"{num}/{den or 1}",
-                "duration": f"{float(duration):.6f}" if duration else None,
+                "duration": float(seconds),
             }
     except Exception:
         args = [
@@ -145,7 +167,12 @@ def probe_video_info(path: Path) -> dict:
         data = json.loads(result.stdout or "{}")
         streams = data.get("streams") or [{}]
         info = dict(streams[0])
-        info["duration"] = (data.get("format") or {}).get("duration")
+        # ffprobe format duration is already seconds; float() so every code
+        # path of probe_video_info returns a number (AGENT_UPDATE_7.md task 3).
+        raw = (data.get("format") or {}).get("duration")
+        if raw is None:
+            raise RuntimeError(f"no duration in {path.name}")
+        info["duration"] = float(raw)
         return info
 
 
@@ -224,6 +251,17 @@ class MediaCache:
             )
         except OSError:
             pass
+
+
+def format_mmss(seconds: float) -> str:
+    """mm:ss, or h:mm:ss from one hour (1:02:03) — shared by the video info
+    line (AGENT_UPDATE_7.md task 3) and the readable translation doc."""
+    total = max(0, int(round(float(seconds))))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
 
 
 def is_valid_media(path: Path) -> bool:
