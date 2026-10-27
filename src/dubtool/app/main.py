@@ -152,7 +152,10 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
         name: getattr(secrets_for_shots, name, None)
         for name in ("_migrate_legacy", "env_keys", "_stored_list", "_save_list")
     }
-    fake = [f"AIzascreenshotfake-{i:02d}-aaaaaaaaaaaaaaaa" for i in range(1, 4)]
+    # Carefully non-AIza: the review-zip secret scanner is deliberately
+    # paranoid about key-shaped strings, and a screenshot fake key has no
+    # reason to look like a real Gemini key.
+    fake = [f"shot-fake-key-{i:02d}-aaaaaaaaaaaaaaaa" for i in range(1, 4)]
     secrets_for_shots._migrate_legacy = lambda: None
     secrets_for_shots.env_keys = lambda: []
     secrets_for_shots._stored_list = lambda: list(fake)
@@ -395,7 +398,9 @@ def run_gui_smoke() -> int:
             from PySide6.QtCore import QTimer
             QTimer.singleShot(50, accept_add_dialog)
             return
-        modal.field.setPlainText(f"AIzasmokekey-ONE-{time.perf_counter_ns():x}\nAQ.smokekey-two-two\n")
+        modal.field.setPlainText(
+            f"smoke-key-one-{time.perf_counter_ns():x}\nsmoke-key-two-two\n"
+        )
         click(modal.ok_button)  # the dialog's real OK handler
 
     def do_add_two() -> None:

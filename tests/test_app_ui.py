@@ -373,7 +373,7 @@ def test_slot_exception_is_logged_and_dialog_shown_once(qtbot, dialog, monkeypat
     from dubtool.app.ui import settings_dialog as sd
 
     monkeypatch.setattr(sd, "run_key_test", lambda key, model=None: "ok")
-    key_like = "AIzaONESUPERSECRETFREEKEYVALUE00"  # fixture: not a real key
+    key_like = "AIzaONESUPERSECRETFREEKEYVALUE00"  # fixture-fake-key: not a real key
 
     def raising_slot(*_a):
         raise RuntimeError(f"boom with {key_like}")

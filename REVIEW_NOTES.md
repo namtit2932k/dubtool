@@ -124,11 +124,12 @@ Chính xác labels, or JSON-looking text; docx unzips, parses, header
 repeats, `cantSplit` present; txt BOM; naming/collisions; failure
 isolation; export after intermediates deleted).
 - Real sample from the packaged exe run (fast mode, real Gemini):
-  `C:\Windows\Temp\DubTool-headless\out2\sample_vi_translation.docx` —
-  4 table rows (header + 3 sentences), first data rows
-  `00:00 | Welcome to the product tour. | Chào mừng đến buổi ra mắt sản phẩm.`,
-  `00:02 | The weather today is sunny with a light breeze. | Thời tiết hôm nay có nắng và gió nhẹ.`,
-  `00:06 | This test uses a short sample so the quota stays low. | Bài kiểm tra này sử dụng mẫu ngắn để hạn chế chi phí.`
+  `C:\Users\Admin\AppData\Local\Temp\ag7\run\out_fast\sample_clip_vi_translation.docx`
+  — header + 6 data rows from a 33-second synthesized-speech sample, first
+  data rows
+  `00:00 | The global positioning system uses satellites that orbit far above the clouds. | Hệ thống định vị toàn cầu sử dụng các vệ tinh bay quỹ đạo cao trên mây.`,
+  `00:05 | A smartphone can read the signal and place us on a map within a few meters. | Điện thoại thông minh có thể đọc tín hiệu và định vị chúng ta trong vài mét.`,
+  `00:10 | Modern cities also plan their bus lines with the help of location data. | Các thành phố hiện đại cũng lập tuyến xe buýt bằng dữ liệu vị trí.`
   — schedule times, diacritics intact, no technical content.
 - Appearance: LibreOffice is **not installed** in this environment, so
   the PDF/PNG appearance check from AGU7 5.7 is **not done** — the user
@@ -139,37 +140,39 @@ isolation; export after intermediates deleted).
 - `packaging/build_exe.ps1` builds the exe and writes
   `dist/DubTool/BUILD_INFO.txt` (update number, git short hash, UTC
   timestamp, SHA-256 of `DubTool.exe`, build id also shown by
-  `--version` and the About dialog).
-- Screenshots are regenerated **from the packaged exe** (`--screenshots`)
-  into `screenshots/<build id>/` with `INDEX.txt` (state, window sizes,
-  scale, build id); every older screenshot set is removed and
-  `tests/test_screenshots.py` asserts every required PNG exists, is newer
-  than the build stamp, and INDEX lists the current build id. Fake data
-  only; key rows masked (`••••` + last 4 of *fake* keys), one quota badge
-  row; no key material in any image.
-- Gates on the packaged exe from a sanitized environment: `--selftest`,
-  `--layout-check`, `--gui-smoke`, `--screenshots`, then a real
-  `--headless-run … --mode fast` with the user's keys. The run produced
-  the video (H.264 320×240 @10 fps + AAC, 9.7 s — the tiny deliberately
-  10-second sample used instead of a 2-minute one to conserve the free
-  tier) and the readable docx above; a quiet search over `dist/`,
-  `screenshots/`, the temp headless profile, and the readable file found
-  **no** key material (`AIza` pattern search returned nothing).
-- PyAV verification of the output stream layout was done with ffprobe
-  (1 video + 1 audio stream as above).
+  `--version` and the About dialog). A post-build step added this
+  session (step 7) regenerates the screenshots **from the freshly
+  promoted exe** and runs the screenshots test against that exe's
+  BUILD_INFO — packaging itself never refreshed the set before, which
+  made shipped PNGs belonging to an older build possible.
+- Screenshots now get their `INDEX.txt` from `run_screenshots` itself
+  (build id/timestamp read from BUILD_INFO.txt), not from a manual step
+- Gates on the packaged exe from a sanitized environment (PATH limited
+  to the Windows system directories, temp `APPDATA`/`LOCALAPPDATA`, the
+  cached Whisper model reused via `HF_HUB_CACHE`): `--selftest`
+  (all PASS), `--layout-check` (0 violations), `--gui-smoke` (9 steps
+  PASS), screenshots regenerated from the new exe, then two real
+  `--headless-run` runs on a 33-second offscreen-synthesized sample
+  (SAPI speech + testsrc video): **fast** completed all 7 stages
+  (whisper-small 49.7 s on CPU; real Gemini `gemini-3.5-flash-lite`,
+  2 requests / 6 units; edge-tts; ffprobe: 1 H.264 + 1 AAC stream,
+  same resolution/fps, 33.00 s = input) with the docx above;
+  **accurate** completed too (real Gemini `gemini-3.8-flash`, one
+  request, s3 stretched to 439 s under free-tier rate limiting without
+  giving up). A quiet `AIza` search over `dist/`, `screenshots/`, the
+  outputs, both temp profiles and the log: **clean**.
 
 ### Error handling / quota during the accuracy attempt
 
-The `--mode accurate` headless run reached all stages past transcription
-(job dir `…\DubTool\jobs\5425694c657c`: `audio.wav`, `transcript.json`,
-`units.json`, `tts/`, `fitted/` written) but translation gave up after
-three all-air attempts per request: the chosen accurate model returned
-**503 UNAVAILABLE — "model under high demand"** repeatedly (observed
-2026-10-27 ~15:00). This is a service condition, not the app's quota
-free-tier limit, and not a code defect: the same run succeeded minutes
-later on the fast model, and error codes/behaviour matched the new
-classification (server error → retried ×3 → honest failure). Accuracy
-verification is therefore honestly **not done**, with the reason above.
+History, in order: an earlier session's accurate attempt reached all
+stages past translation but gave up after three all-air attempts per
+request — **503 UNAVAILABLE, "model under high demand"** (observed
+2026-10-27 ~15:00), a service condition rather than the free-tier quota
+or a code defect (the same run succeeded minutes later on the fast
+model, and the error path matched the new classification: server error →
+retried ×3 → honest failure). This session's accurate attempt **succeeded**
+through the same route (details above), which closes the last open
+accuracy question of AGU7 §8.
 
 ### Cleanup report (task 7.4)
 
@@ -191,8 +194,12 @@ owns the newest screenshot *whole* and deletes only files outside it
 
 ### Test totals on the day
 
-Separate aggregate runs are listed in `REPORT_UPDATE_7.md`. Deviation
-from the instruction not to commit machine edits: none.
+Final aggregate: **323 passed, 2 skipped, 0 failed**
+(`py -m pytest tests -q`; both skips environmental — LibreOffice
+appearance and the gold-speech SRT check). Previous runs that day:
+320/5 before the rebuild, 317/8 inside the build gate; the history and
+reasons are in `REPORT_UPDATE_7.md` §2. Deviation from the instruction
+not to commit machine edits: none.
 
 ### Not verified (cannot be judged automatically)
 
