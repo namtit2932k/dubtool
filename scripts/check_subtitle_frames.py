@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
+from dubtool import audio_utils, proc
 import sys
 import unicodedata
 from pathlib import Path
@@ -146,7 +146,7 @@ def main() -> int:
     burned_tmp = job / "tmp_check_burned.mp4"
     if burned_tmp.exists():
         burned_tmp.unlink()
-    subprocess.run(
+    proc.run(
         [
             audio_utils.ffmpeg_bin(), "-y",
             "-i", (job / "output.nosubs.mp4").name,
@@ -155,9 +155,8 @@ def main() -> int:
             "-pix_fmt", "yuv420p", "-an", "-sn", "-movflags", "+faststart",
             burned_tmp.name,
         ],
-        cwd=str(job),
+        cwd=job,
         check=True,
-        capture_output=True,
     )
 
     cues = parse_srt(srt_text)
@@ -173,15 +172,15 @@ def main() -> int:
         for out_png in (burn_png, ref_png):
             if out_png.exists():
                 out_png.unlink()
-        subprocess.run(
+        proc.run(
             [audio_utils.ffmpeg_bin(), "-y", "-ss", f"{t:.3f}", "-i", burned_tmp.name,
              "-frames:v", "1", str(burn_png.relative_to(job))],
-            cwd=str(job), capture_output=True, check=True,
+            cwd=job, check=True,
         )
-        subprocess.run(
+        proc.run(
             [audio_utils.ffmpeg_bin(), "-y", "-ss", f"{t:.3f}", "-i", "output.nosubs.mp4",
              "-frames:v", "1", str(ref_png.relative_to(job))],
-            cwd=str(job), capture_output=True, check=True,
+            cwd=job, check=True,
         )
         m = measure(burn_png, ref_png)
         note = "diacritics cue" if any(k for k in ("ắ", "ữ", "ề", "ộ", "ỵ") if k in cue["text"]) else ""

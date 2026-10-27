@@ -1,18 +1,73 @@
-# Environment / secrets
-.env
+# DubTool .gitignore (AGENT_UPDATE_6.md section 8.1)
+# Media, models, environments and build output are never pushed.
 
-# Runtime output
-jobs/
-sample/
-review/
-vendor/
+# Environment / secrets (keep .env.example)
+.env*
+!.env.example
+
+# Virtual environments and the build environment
+.venv/
+venv/
+.venv-build/
+.venv-build-tmpdist/
 
 # Python
 __pycache__/
 *.py[cod]
 *.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Build output
 build/
 dist/
-.pytest_cache/
-.venv/
-venv/
+
+# Tooling / vendored binaries / model caches
+vendor/
+models/
+
+# Jobs (contain user media and transcripts) and samples
+jobs/
+sample/
+
+# Assistant review packages and generated screenshots
+review/
+excerpts/
+screenshots/
+shots*/
+check/
+old_before_*/
+
+# Logs and reports
+*.log
+cleanup.log
+
+# Signed material
+*.pfx
+*.p12
+*.pem
+*.key
+*.cer
+
+# Media files
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.avi
+*.m4v
+*.wav
+*.mp3
+*.m4a
+
+# Archives
+*.zip
+
+# User-media transcripts outside the test fixtures
+transcript*.json
+translated*.json
+!tests/fixtures/transcript*.json
+!tests/fixtures/translated*.json
+
+# Editor settings
+.vscode/

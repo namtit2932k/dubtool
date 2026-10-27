@@ -43,6 +43,12 @@ Get a free key at [Google AI Studio](https://aistudio.google.com/apikey) — no
 card needed. Optional extra keys `GEMINI_API_KEY_2`, `GEMINI_API_KEY_3` spread
 one key's free-tier daily quota; the pipeline rotates automatically on 429.
 
+> **Gemini free-tier quotas are per project and per model**, not per key.
+> Several API keys created inside the same Google project share one quota, so
+> rotating between them does **not** add capacity — only keys from different
+> projects do. Check Google's terms of service before creating extra projects
+> or accounts for quota purposes.
+
 Check your environment (FFmpeg, key, deps):
 
 ```bash

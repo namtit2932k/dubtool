@@ -4,19 +4,21 @@ Flags usable from source and from the packaged exe:
   DubTool.exe                 -> the GUI
   --version                   -> app + bundled FFmpeg version
   --selftest [--json out.json]
-  --screenshots <dir>         -> offscreen PNGs of the UI states
+  --layout-check [--scale S]  -> geometry invariant sweep, table to stdout
+  --screenshots <dir> [--scale S] -> offscreen PNGs of the UI states
   --headless-run <video> <outdir> --mode fast|accurate
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 from pathlib import Path
 
 APP_VERSION = "1.0.0"
+
+SHOT_SIZES = [(760, 600), (900, 700), (1100, 800)]
 
 
 def app_version() -> str:
@@ -49,143 +51,112 @@ def run_gui() -> int:
     return app.exec()
 
 
-def run_screenshots(out_dir: Path) -> int:
-    """Render the UI states offscreen (AGU4 11.1). No key ever appears: the
-    key field is blank and the key status text cannot contain key material."""
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtWidgets import QApplication, QMainWindow
+def run_layout_check(scale: float = 1.0) -> int:
+    """The AGU5 task 4 sweep, from source or the packaged exe. Uses the
+    normal window platform (real fonts); pass a scale for the 125/150/175%
+    passes (separate processes)."""
+    from dubtool.app.layout_check import run_layout_check as _run
 
-    from dubtool.app import i18n, secrets, settings
+    return _run(scale=scale)
+
+
+def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
+    """Render the UI states offscreen (AGU4 11.1, extended by AGU5 task 4):
+    every window state at three sizes, then dialogs and each Settings tab.
+    Any scale other than 1.0 must be passed in a fresh process (it has to
+    be set before the Qt platform exists). No key ever appears: the key
+    field is blank and the key status text cannot contain key material.
+    """
+    if scale != 1.0:
+        os.environ["QT_SCALE_FACTOR"] = str(scale)
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import QSize
+    from PySide6.QtWidgets import QApplication
+
+    from dubtool.app import i18n, settings
+    from dubtool.app.layout_check import apply_state
     from dubtool.app.paths import ensure_user_dirs
     from dubtool.app.service import PipelineService
+    from dubtool.app.ui.first_run import PrivacyDialog
     from dubtool.app.ui.main_window import MainWindow
     from dubtool.app.ui.settings_dialog import SettingsDialog
-    from dubtool.app.ui.first_run import PrivacyDialog
 
     ensure_user_dirs()
-    if not secrets.has_key():
-        settings.load()  # untouched; key state stays honest
+    settings.load()  # key state stays honest
     i18n.set_language("vi")
     app = QApplication.instance() or QApplication([])
-    had_key = secrets.has_key()
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    def snap(widget, name: str) -> None:
-        widget.resize(widget.sizeHint())
-        widget.show()
-        widget.adjustSize()  # content added after the first show (progress area)
-        if isinstance(widget, QMainWindow):
-            widget.resize(780, 780)  # room for the stage list + log view
-        app.processEvents()
-        widget.grab().save(str(out_dir / name))
-        widget.hide()
-
-    def grab_window(name: str) -> None:
-        window.adjustSize()  # content added after the first show (progress area)
-        window.resize(780, 1180)  # room for the stage list + log view
-        window.show()
-        app.processEvents()
-        window.grab().save(str(out_dir / name))
-
-    def grab_dialog(widget, name: str) -> None:
-        widget.show()
-        widget.adjustSize()
-        app.processEvents()
-        widget.grab().save(str(out_dir / name))
-        widget.hide()
-
-    window = MainWindow()
+    window = MainWindow(PipelineService())
     window.service.running = False
     window.service._thread = None
 
-    # 1. empty
-    snap(window, "01_empty.png")
+    # Window states at three sizes: <size>_<state>.png
+    for size in SHOT_SIZES:
+        window.resize(QSize(size[0], size[1]))
+        app.processEvents()
+        for state in ("idle", "video", "running", "finished", "error"):
+            apply_state(window, state)
+            app.processEvents()
+            window.grab().save(str(out_dir / f"{size[0]}x{size[1]}_{state}.png"))
+    window.hide()
 
-    # 2. video selected (probe skipped when no sample video is available)
-    sample = Path("sample/input/test1.mp4")
-    if sample.exists() and secrets.has_key() is not None:
-        try:
-            window.set_video(sample)
-        except Exception:
-            pass
-    window.show()
-    grab_window("02_video_selected.png")
-
-    # 3. ready (video + folder + key set) — emulate, without a real key read
-    window.output_edit.setText(str(Path.home() / "Desktop"))
-    window.output_dir = Path.home() / "Desktop"
-    window._validate_output()
-    window._refresh_buttons()
-    grab_window("03_ready.png")
-
-    # 4. running (fake service -> stage list with progress)
-    window.service.running = True
-    window.progress_group.show_running()
-    window._refresh_buttons()
-    events = [
-        ("s1", "start", -1, -1, ""),
-        ("s1", "done", -1, -1, ""),
-        ("s2", "start", -1, -1, ""),
-        ("s2", "progress", 40, 92, ""),
-        ("s3", "start", -1, -1, ""),
-        ("s3", "progress", 2, 5, ""),
-    ]
-    for stage, state, done, total, msg in events:
-        window._on_progress(stage, state, done, total, msg, 12.0)
-    grab_window("04_running.png")
-    window.service.running = False
-
-    # 5. finished
-    from dubtool.api import DubResult
-
-    window.progress_group.on_finished(DubResult(ok=True, code="ok", out_video=Path("out/sample_vi.mp4")))
-    grab_window("05_finished.png")
-
-    # 6. error dialog
+    # Error dialog
     from dubtool.app import errors as _errors
 
     import PySide6.QtWidgets as QW
 
-    dialog = QW.QMessageBox(window)
+    dialog = QW.QMessageBox()
     dialog.setIcon(QW.QMessageBox.Icon.Critical)
     dialog.setWindowTitle("DubTool")
     dialog.setText(_errors.message_for_code("quota"))
     dialog.show()
     app.processEvents()
     dialog.adjustSize()
-    dialog.grab().save(str(out_dir / "06_error.png"))
+    dialog.grab().save(str(out_dir / "dialog_error.png"))
     dialog.hide()
 
-    # 7. settings
-    settings_dialog = SettingsDialog(window)
+    # Tabbed Settings dialog: whole dialog + each tab
+    settings_dialog = SettingsDialog()
     settings_dialog.show()
-    settings_dialog.adjustSize()
     app.processEvents()
-    settings_dialog.grab().save(str(out_dir / "07_settings.png"))
+    settings_dialog.adjustSize()
+    settings_dialog.grab().save(str(out_dir / "dialog_settings.png"))
+    for index in range(settings_dialog.tabs.count()):
+        settings_dialog.tabs.setCurrentIndex(index)
+        app.processEvents()
+        tab_name = settings_dialog.tabs.tabText(index).replace("/", "-").replace(" ", "_")
+        settings_dialog.grab().save(str(out_dir / f"dialog_settings_tab{index}_{tab_name}.png"))
+    settings_dialog.close()
 
-    # 8. privacy notice
-    privacy = PrivacyDialog(window)
+    # Privacy notice
+    privacy = PrivacyDialog()
     privacy.show()
     privacy.adjustSize()
     app.processEvents()
-    privacy.grab().save(str(out_dir / "08_first_run.png"))
+    privacy.grab().save(str(out_dir / "dialog_first_run.png"))
+    privacy.close()
 
     print(f"screenshots written to {out_dir}")
     return 0
 
 
-def run_headless(video: Path, outdir: Path, mode: str) -> int:
-    """Automated end-to-end verification without a window (AGU4 11.1)."""
+def run_headless(video: Path, outdir: Path, mode: str, profile: bool = False) -> int:
+    """Automated end-to-end verification without a window (AGU4 11.1).
+    With `profile` (AGU6 4.1), a 1 Hz sampler writes profile.csv in the job
+    directory: elapsed, stage, app/children/system CPU%%, live children."""
     import threading
 
-    from dubtool import api, secrets
+    from dubtool import api
+    from dubtool.app import secrets
     from dubtool.api import DubOptions
-    from dubtool.app import i18n
 
     options = DubOptions(mode=mode)
+    current_stage = {"name": ""}
 
-    def show(event: api.ProgressEvent) -> None:
+    def show(event) -> None:
+        current_stage["name"] = event.stage
         line = f"{event.stage} {event.state}"
         if event.done is not None and event.total:
             line += f" {event.done}/{event.total}"
@@ -193,14 +164,33 @@ def run_headless(video: Path, outdir: Path, mode: str) -> int:
             line += f" ({event.elapsed_s:.1f}s)"
         print(line, flush=True)
 
-    result = api.run_dub(
-        Path(video),
-        Path(outdir),
-        options=options,
-        secrets=secrets,
-        progress=show,
-        cancel=threading.Event(),
-    )
+    sampler = None
+    rows = None
+    if profile:
+        from dubtool.app.profile import ProfileSampler
+
+        job_dir = api._open_or_create_job(
+            api._stable_job_id(Path(video), options),
+            api._default_jobs_dir(),
+            Path(video),
+        ).dir
+        csv_path = job_dir / "profile.csv"
+        sampler = ProfileSampler(csv_path, stage_getter=lambda: current_stage["name"])
+        sampler.start()
+    try:
+        result = api.run_dub(
+            Path(video),
+            Path(outdir),
+            options=options,
+            secrets=secrets,
+            progress=show,
+            cancel=threading.Event(),
+        )
+    finally:
+        if sampler is not None:
+            rows = sampler.stop()
+    if rows is not None:
+        print(f"profile: {len(rows)} samples -> {csv_path}")
     print(
         f"result: code={result.code} ok={result.ok} out={result.out_video}"
         + (f" error={result.error}" if result.error else "")
@@ -214,7 +204,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--selftest", action="store_true")
     parser.add_argument("--json", default=None, help="--selftest output file")
     parser.add_argument("--screenshots", default=None, metavar="DIR")
+    parser.add_argument("--layout-check", action="store_true")
+    parser.add_argument("--scale", type=float, default=1.0, metavar="S")
     parser.add_argument("--headless-run", nargs=2, metavar=("VIDEO", "OUTDIR"))
+    parser.add_argument("--profile", action="store_true",
+                        help="with --headless-run: sample CPU once per second into profile.csv")
     parser.add_argument("--mode", choices=("fast", "accurate"), default="fast")
     args = parser.parse_args(argv)
 
@@ -225,10 +219,13 @@ def main(argv: list[str] | None = None) -> int:
         from dubtool.app.selftest import run_selftest
 
         return run_selftest(Path(args.json) if args.json else None)
+    if args.layout_check:
+        return 0 if run_layout_check(args.scale) == 0 else 1
     if args.screenshots:
-        return run_screenshots(Path(args.screenshots))
+        return run_screenshots(Path(args.screenshots), args.scale)
     if args.headless_run:
-        return run_headless(Path(args.headless_run[0]), Path(args.headless_run[1]), args.mode)
+        return run_headless(Path(args.headless_run[0]), Path(args.headless_run[1]), args.mode,
+                            profile=args.profile)
     return run_gui()
 
 

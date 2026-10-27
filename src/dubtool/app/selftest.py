@@ -7,13 +7,15 @@ a machine-readable copy.
 
 from __future__ import annotations
 
+import functools
 import importlib
 import json
-import subprocess
+import shutil
 import sys
 import tempfile
 from pathlib import Path
 
+from dubtool import proc
 from dubtool.app import paths
 
 SAMPLE_TEXT = "Chào mừng bạn, ắ ữ ề ộ ỵ"
@@ -35,9 +37,9 @@ def check_ffmpeg() -> dict:
         from dubtool import audio_utils
 
         audio_utils.require_ffmpeg()
-        out = subprocess.run(
+        out = proc.run(
             [audio_utils.ffmpeg_bin(), "-version"],
-            capture_output=True, text=True, timeout=30,
+            timeout=30,
         )
         first = (out.stdout or out.stderr).splitlines()[0] if (out.stdout or out.stderr) else "unknown"
         return {"ok": out.returncode == 0, "detail": first}
@@ -45,18 +47,22 @@ def check_ffmpeg() -> dict:
         return {"ok": False, "detail": str(exc)}
 
 
-def check_filters_and_encoder() -> dict:
-    """libass (`subtitles`), amix, alimiter, sidechaincompress + libx264."""
+@functools.lru_cache(maxsize=None)
+def _check_filters_and_encoder_cached() -> tuple[bool, str]:
+    """Run the -filters/-encoders probes once for the process (AGU6 3.3).
+
+    Checks libass (`subtitles`), amix, alimiter, sidechaincompress + libx264.
+    """
     try:
         from dubtool import audio_utils
 
-        f = subprocess.run(
+        f = proc.run(
             [audio_utils.ffmpeg_bin(), "-hide_banner", "-filters"],
-            capture_output=True, text=True, timeout=60,
+            timeout=60,
         )
-        e = subprocess.run(
+        e = proc.run(
             [audio_utils.ffmpeg_bin(), "-hide_banner", "-encoders"],
-            capture_output=True, text=True, timeout=60,
+            timeout=60,
         )
         filters = f.stdout
         encoders = e.stdout
@@ -66,9 +72,17 @@ def check_filters_and_encoder() -> dict:
         ]
         if "libx264" not in encoders:
             missing.append("libx264")
-        return {"ok": not missing, "detail": "all present" if not missing else f"missing: {missing}"}
+        if not missing:
+            return True, "all present"
+        return False, f"missing: {missing}"
     except Exception as exc:
-        return {"ok": False, "detail": str(exc)}
+        return False, str(exc)
+
+
+def check_filters_and_encoder() -> dict:
+    """Public wrapper over the process-lifetime cached probe."""
+    ok, detail = _check_filters_and_encoder_cached()
+    return {"ok": ok, "detail": detail}
 
 
 def check_font_renders() -> dict:
@@ -91,21 +105,29 @@ def _write_sample_ass(path: Path) -> None:
 def _measure_text_block() -> dict:
     """Exact-frame comparison of a plain frame vs the same frame with the
     sample string burned in; the bright-pixel bounding box height / 360."""
-    import subprocess
     import tempfile
     from pathlib import Path
 
     import numpy as np
 
-    from dubtool import audio_utils
+    from dubtool import audio_utils, proc
 
     try:
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)
             _write_sample_ass(base / "t.ass")
             clean, burned = base / "clean.png", base / "burned.png"
-            fontsdir = str(paths.font_file().parent).replace("\\", "/") if paths.font_file() else ""
-            sub_filter = "subtitles=t.ass" + (f":fontsdir={fontsdir}" if fontsdir else "")
+            # ffmpeg filter args can't carry a Windows drive colon (even
+            # escaped: the parser splits before unescaping), so run with
+            # cwd=base and point libass at a *relative* dir holding a copy
+            # of the bundled font — same trick as s7_subtitles.py.
+            sub_filter = "subtitles=t.ass"
+            if paths.font_file():
+                try:
+                    shutil.copy(paths.font_file(), base / paths.font_file().name)
+                    sub_filter += ":fontsdir=."
+                except OSError:
+                    pass  # unzip-less fallback: let libass use system fonts
             for name, vf in (("clean.png", None), ("burned.png", sub_filter)):
                 cmd = [
                     audio_utils.ffmpeg_bin(), "-y", "-f", "lavfi",
@@ -118,14 +140,14 @@ def _measure_text_block() -> dict:
                         "-i", "color=c=black:s=640x360:d=1",
                         "-vf", vf, "-frames:v", "1", str(base / name),
                     ]
-                r = subprocess.run(cmd, capture_output=True, text=True, timeout=60, cwd=base)
+                r = proc.run(cmd, timeout=60, cwd=base)
                 if r.returncode != 0:
                     return {"ok": False, "detail": f"render {name} failed: {r.stderr[-200:]}"}
 
             def load(p):
-                return subprocess.run(
+                return proc.run(
                     [audio_utils.ffmpeg_bin(), "-i", str(p), "-f", "rawvideo", "-pix_fmt", "gray", "-"],
-                    capture_output=True, timeout=60, cwd=base,
+                    timeout=60, cwd=base,
                 ).stdout
 
             a = np.frombuffer(load(clean), dtype=np.uint8).reshape(-1, 640)
@@ -189,11 +211,38 @@ def check_qt_offscreen() -> dict:
         return {"ok": False, "detail": str(exc)}
 
 
+def check_keys_and_tabs() -> dict:
+    """AGU5 8: key count as a bare number (never values), key-pool import,
+    and the Settings dialog's tab titles — all without touching the UI."""
+    try:
+        from dubtool.app import secrets as secrets_mod
+        from dubtool.llm import keypool
+
+        keys = secrets_mod.get_gemini_keys()
+        keypool.KeyPool(keys)  # must construct; count reported, never values
+
+        import os
+
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        QApplication.instance() or QApplication([])
+        from dubtool.app.ui.settings_dialog import SettingsDialog
+
+        dlg = SettingsDialog()
+        tabs = [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
+        return {"ok": True,
+                "detail": f"keys: {len(keys)}; pool imports; tabs: {', '.join(tabs) or 'none'}"}
+    except Exception as exc:
+        return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
+
+
 CHECKS: dict[str, callable] = {
     "ffmpeg": check_ffmpeg,
     "filters_encoders": check_filters_and_encoder,
     "font_vietnamese": _measure_text_block,
     "keyring": check_keyring,
+    "keys_and_tabs": check_keys_and_tabs,
     "dirs_writable": check_dirs_writable,
     "imports": lambda: check_imports(
         ("faster_whisper", "ctranslate2", "av", "tokenizers", "huggingface_hub", "edge_tts")

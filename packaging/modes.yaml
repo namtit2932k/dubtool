@@ -1,12 +1,21 @@
 # DubTool mode definitions, shipped in the exe and user-overridable via
-# Settings -> Advanced (AGENT_UPDATE_4.md 6.4). Keep the fast/accurate keys.
+# Settings -> Models (AGENT_UPDATE_4.md 6.4). Keep the fast/accurate keys.
+# `models` lists are Settings dropdown choices; ids verified against the
+# official Google docs (ai.google.dev/gemini-api/docs/models, 2026-10-26).
 fast:
   label_key: mode.fast
   provider: gemini
   model: gemini-3.5-flash-lite
   translate_concurrency: 1
+  models:
+    - gemini-3.5-flash-lite
+    - gemini-3.6-flash
 accurate:
   label_key: mode.accurate
   provider: gemini
   model: gemini-3.8-flash
   translate_concurrency: 3
+  models:
+    - gemini-3.8-flash
+    - gemini-3.6-flash
+    - gemini-4-argon

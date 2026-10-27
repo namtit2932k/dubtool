@@ -82,3 +82,34 @@ def test_validation_failure_appends_error_and_recovers():
     out = client.translate_batch([{"id": 0, "text": "Hi", "max_chars": 5}], [], None)
     assert out == [{"id": 0, "vi": "Tốt"}]
     assert provider.calls == 2
+
+
+def test_giving_up_logs_raw_reply_with_cause(caplog):
+    """When every validation attempt fails, the last raw reply (capped at
+    500 chars) and its likely cause land in the log (AGENT_UPDATE_5.md 5.3)."""
+    import logging
+
+    provider = FakeProvider(["쪽 partial answer without closing"] )
+    client = LLMClient(provider)
+    with caplog.at_level(logging.WARNING, logger="dubtool"):
+        with pytest.raises(LLMError, match="giving up"):
+            client.translate_batch([{"id": 0, "text": "Hi", "max_chars": 5}], [], None)
+    joined = "\n".join(r.getMessage() for r in caplog.records)
+    assert "cut off" in joined
+    assert "partial answer without closing" in joined
+
+
+def test_markdown_fence_is_diagnosed(caplog):
+    import logging
+
+    provider = FakeProvider([
+        "```json\n{\"vi\": \"x\"}\n``` trailing noise",
+        "still bad",
+        "also bad",
+    ])
+    client = LLMClient(provider)
+    with caplog.at_level(logging.WARNING, logger="dubtool"):
+        with pytest.raises(LLMError, match="giving up"):
+            client.translate_batch([{"id": 0, "text": "Hi", "max_chars": 5}], [], None)
+    joined = "\n".join(r.getMessage() for r in caplog.records)
+    assert "markdown code fence" in joined

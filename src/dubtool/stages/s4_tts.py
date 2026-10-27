@@ -35,7 +35,7 @@ def tts_options(config) -> dict:
     return options
 
 
-def build_tts(config, cache_dir: Path) -> "SegmentTTS":
+def build_tts(config, cache_dir: Path, media_cache=None) -> "SegmentTTS":
     from dubtool.tts.edge import EdgeTTSProvider
 
     opts = tts_options(config)
@@ -44,6 +44,7 @@ def build_tts(config, cache_dir: Path) -> "SegmentTTS":
         cache_dir,
         config.tts_voice,
         options=opts,
+        media_cache=media_cache,
     )
 
 
@@ -54,12 +55,21 @@ class SegmentTTS:
         cache_dir: Path,
         default_voice: str = "vi-VN-HoaiMyNeural",
         options: dict | None = None,
+        media_cache=None,
     ):
         self.provider = provider
         self.cache_dir = cache_dir
         self.default_voice = default_voice
         self.options = options or {"rate": "+0%"}
         self.durations: dict[str, float] = {}
+        self.media_cache = media_cache
+        self.cancel = None
+
+    def _duration(self, path: Path) -> float:
+        """Probe through the shared MediaCache unless overridden."""
+        if self.media_cache is not None:
+            return self.media_cache.duration(path)
+        return audio_utils.probe_duration(path)
 
     def key_for(self, seg: dict) -> str:
         voice = seg.get("tts_voice") or self.default_voice
@@ -79,7 +89,17 @@ class SegmentTTS:
             path.unlink(missing_ok=True)  # drop poisoned cache entries
             return False
 
-    def synthesize(self, seg: dict) -> tuple[float, Path]:
+    def _clip_readable(self, path: Path) -> bool:
+        """_cache_valid, probing through the MediaCache when available."""
+        if self.media_cache is None:
+            return self._cache_valid(path)
+        try:
+            return self.media_cache.duration(path) > 0
+        except Exception:
+            path.unlink(missing_ok=True)
+            return False
+
+    def synthesize(self, seg: dict, cancel=None) -> tuple[float, Path]:
         """Return (duration s after trim, cache path) for this segment's text."""
         text = (seg.get("vi") or "").strip()
         if not text:
@@ -96,9 +116,10 @@ class SegmentTTS:
                     tmp = self.cache_dir / f"~trim-{uuid.uuid4().hex}.mp3"
                     try:
                         audio_utils.trim_silence(
-                            raw, tmp, threshold_db=trim["threshold_db"], margin_s=trim["margin_s"]
+                            raw, tmp, threshold_db=trim["threshold_db"], margin_s=trim["margin_s"],
+                            cancel=cancel or self.cancel,
                         )
-                        if audio_utils.probe_duration(tmp) > 0.05:
+                        if self._duration(tmp) > 0.05:
                             os_replace_strong(tmp, cache_file)
                         else:
                             # Trim emptied the clip (paranoia): keep raw audio.
@@ -110,7 +131,7 @@ class SegmentTTS:
             finally:
                 raw.unlink(missing_ok=True)
         if key not in self.durations:
-            self.durations[key] = audio_utils.probe_duration(cache_file)
+            self.durations[key] = self._duration(cache_file)
         return self.durations[key], cache_file
 
 
@@ -122,6 +143,9 @@ def os_replace_strong(src: Path, dst: Path) -> None:
 def run(job, config, force: bool = False, cancel=None) -> None:
     audio_utils.require_ffmpeg()
     from dubtool.job import StageCancelled
+    from dubtool.audio_utils import MediaCache
+
+    media_cache = MediaCache(job.dir)
 
     manifest = {
         "cache_dir": "tts/cache",
@@ -131,7 +155,8 @@ def run(job, config, force: bool = False, cancel=None) -> None:
     cache_dir = job.tts_dir / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     failures = TTSFailureLog(job.dir)
-    tts = build_tts(config, cache_dir)
+    tts = build_tts(config, cache_dir, media_cache=media_cache)
+    tts.cancel = cancel
     regenerated = 0
     for position, entry in enumerate(entries, start=1):
         if cancel is not None and cancel.is_set():
@@ -142,12 +167,12 @@ def run(job, config, force: bool = False, cancel=None) -> None:
             continue
         if (not force) and entry.get("tts_duration") is not None:
             existing_clip = job.tts_dir / f"{entry['id']}.mp3"
-            if existing_clip.exists() and tts._cache_valid(existing_clip):
+            if existing_clip.exists() and (tts._clip_readable(existing_clip) or tts._cache_valid(existing_clip)):
                 log.info("s4: progress %d/%d", position, len(entries))
                 continue  # already synthesized and not stale
         timer = Timer()
         try:
-            duration, cache_path = tts.synthesize(entry)
+            duration, cache_path = tts.synthesize(entry, cancel=cancel)
         except TTSFailure as exc:
             failures.record(entry["id"], 1, entry["vi"], exc, timer.elapsed())
             print(failures.summary([e.get("vi") or "" for e in entries]))

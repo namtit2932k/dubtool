@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -24,6 +25,9 @@ DEFAULTS: dict = {
     "jobs_dir": "",              # empty = app default
     "mode_models": {},           # {"fast": "<model id>", "accurate": "<model id>"}
     "privacy_acknowledged": False,
+    "cpu_usage": "balanced",     # low | balanced | maximum (AGU6 4.2)
+    "video_encode_preset": "veryfast",  # veryfast | faster | medium (AGU6 4.2)
+    "jobs_max_days": 14,         # prune old job folders after N days (AGU6 6.7)
 }
 
 
@@ -76,9 +80,22 @@ def validate(settings: dict) -> list[str]:
     voice = str(settings.get("voice", ""))
     if voice not in ("vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural"):
         problems.append("voice must be a known edge-tts Vietnamese voice")
+    if str(settings.get("cpu_usage", "")).lower() not in ("low", "balanced", "maximum"):
+        problems.append("cpu_usage must be low|balanced|maximum")
+    if str(settings.get("video_encode_preset", "")).lower() not in ("veryfast", "faster", "medium"):
+        problems.append("video_encode_preset must be veryfast|faster|medium")
+    days = settings.get("jobs_max_days", 14)
+    if not isinstance(days, int) or not (1 <= days <= 365):
+        problems.append("jobs_max_days must be an integer between 1 and 365")
     for mode, model in (settings.get("mode_models") or {}).items():
         if mode not in ("fast", "accurate"):
             problems.append(f"unknown mode override: {mode}")
-        elif not str(model).strip():
+            continue
+        model_id = str(model).strip()
+        if not model_id:
             problems.append(f"model override for {mode} is empty")
+        elif not re.fullmatch(r"[A-Za-z0-9._/\-]{1,128}", model_id):
+            problems.append(
+                f"model id for {mode} has characters outside A-Z a-z 0-9 . _ - /: {model_id[:40]}"
+            )
     return problems

@@ -19,6 +19,13 @@ tts_silence_margin_s: 0.05     # keep ~0.05 s of margin so word on/endings are n
 # Per-provider LLM settings. chunk_size is smaller for free/local models
 # because they follow segment counts and length limits less reliably.
 llm:
+  # Key pool (AGENT_UPDATE_5.md 2.4, shared by app and CLI).
+  key_cooldown_s: 60           # 429 cooldown per key unless the API gives a hint
+  max_all_keys_wait_s: 600     # give up after this total wait when ALL keys are limited
+  # AGENT_UPDATE_6.md task 5 (quota/budget).
+  max_requests_per_run: 40     # one run stops calling the LLM after this many requests
+  request_timeout_s: 180       # per-request cap before the call is abandoned
+  shorten_fallback_mode: fast  # stage-5 shortening retries with the Fast model on daily quota
   gemini:
     model: gemini-3.5-flash-lite   # default: stable, free-of-charge tier (checked official docs 2026-10-25)
     chunk_size: 25

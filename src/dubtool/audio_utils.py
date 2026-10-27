@@ -1,14 +1,23 @@
 """Audio helpers: ffmpeg/ffprobe wrappers, time-stretch, mixing.
 
 Nothing calls ffmpeg at import time, so unit tests work without it.
+
+AGENT_UPDATE_6.md: every process launch goes through dubtool/proc.py
+(hidden windows, DEVNULL stdin, optional below-normal priority and
+cancellation). Media *reading* is in-process via PyAV (already bundled with
+faster-whisper) with ffprobe as a fallback, so stages 4–7 no longer launch a
+process per probe. A MediaCache collapses repeated probes of the same
+unnoticed file into one read per content version.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
-import subprocess
 from pathlib import Path
+
+from dubtool import proc
 
 log = logging.getLogger("dubtool")
 
@@ -19,35 +28,69 @@ class FFmpegMissing(RuntimeError):
     pass
 
 
+def _bundled_bin(name: str) -> str | None:
+    """The copy shipped in the bundle (vendor/, AGU4 6.2) — checked first so
+    the packaged exe works with the user's PATH stripped to system folders."""
+    try:
+        from dubtool.app.paths import vendor_dir
+
+        cand = vendor_dir() / f"{name}.exe"
+        if cand.is_file():
+            return str(cand)
+    except Exception:
+        pass
+    return None
+
+
 def ffmpeg_bin() -> str:
-    path = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
+    path = _bundled_bin("ffmpeg") or shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
     if not path:
-        raise FFmpegMissing("ffmpeg not found on PATH — install FFmpeg and retry")
+        raise FFmpegMissing("ffmpeg not found — expected in the bundle's vendor/ or on PATH")
     return path
 
 
-def ffprobe_bin() -> str:
-    path = shutil.which("ffprobe") or shutil.which("ffprobe.exe")
-    if not path:
-        raise FFmpegMissing("ffprobe not found on PATH — install FFmpeg and retry")
+def ffprobe_bin() -> str | None:
+    """None when unavailable: probes are in-process now, so a missing
+    ffprobe only disables the fallback (AGENT_UPDATE_6.md 3.1)."""
+    path = _bundled_bin("ffprobe") or shutil.which("ffprobe") or shutil.which("ffprobe.exe")
     return path
 
 
 def require_ffmpeg() -> None:
     ffmpeg_bin()
-    ffprobe_bin()
+
+
+# ------------------------------------------------------------------ PyAV
+def _av_open(path: Path):
+    import av
+
+    return av.open(str(path))
 
 
 def probe_duration(path: Path) -> float:
-    """Media duration in seconds via ffprobe."""
-    result = subprocess.run(
-        [
-            ffprobe_bin(), "-v", "error", "-select_streams", "a",
-            "-show_entries", "format=duration", "-of", "default=nk=1:nw=1",
-            str(path),
-        ],
-        capture_output=True, text=True,
-    )
+    """Media duration in seconds — in-process (PyAV), ffprobe fallback."""
+    try:
+        with _av_open(path) as container:
+            duration = container.duration  # microseconds (AV_TIME_BASE)
+            if duration is not None and duration > 0:
+                return float(duration) / 1e6
+            for stream in container.streams:
+                d = getattr(stream, "duration", None)
+                if d is not None and getattr(stream, "time_base", None):
+                    seconds = float(d * stream.time_base)
+                    if seconds > 0:
+                        return seconds
+    except Exception as exc:
+        log.debug("av.open failed on %s (%s) — falling back to ffprobe", path, exc)
+    return _ffprobe_duration(path)
+
+
+def _ffprobe_duration(path: Path) -> float:
+    args = [
+        ffprobe_bin() or "ffprobe", "-v", "error", "-select_streams", "a",
+        "-show_entries", "format=duration", "-of", "default=nk=1:nw=1", str(path),
+    ]
+    result = proc.run(args)
     if result.returncode != 0:
         raise RuntimeError(
             f"ffprobe could not read {path.name}: "
@@ -60,51 +103,67 @@ def probe_duration(path: Path) -> float:
 
 
 def probe_audio_streams(path: Path) -> int:
-    result = subprocess.run(
-        [
-            ffprobe_bin(), "-v", "error", "-select_streams", "a",
-            "-show_entries", "stream=index", "-of", "default=nw=1",
-            str(path),
-        ],
-        capture_output=True, text=True, check=True,
-    )
-    return len([line for line in result.stdout.strip().splitlines() if line.strip()])
+    try:
+        with _av_open(path) as container:
+            return sum(1 for s in container.streams if s.type == "audio")
+    except Exception:
+        args = [
+            ffprobe_bin() or "ffprobe", "-v", "error", "-select_streams", "a",
+            "-show_entries", "stream=index", "-of", "default=nw=1", str(path),
+        ]
+        result = proc.run(args, check=True)
+        return len([line for line in result.stdout.strip().splitlines() if line.strip()])
 
 
 def probe_video_info(path: Path) -> dict:
     """First video stream: codec, resolution, frame rate, duration."""
-    result = subprocess.run(
-        [
-            ffprobe_bin(), "-v", "error", "-select_streams", "v:0",
-            "-show_entries",
-            "stream=codec_name,width,height,r_frame_rate:format=duration",
+    try:
+        with _av_open(path) as container:
+            vstream = next((s for s in container.streams if s.type == "video"), None)
+            if vstream is None:
+                raise RuntimeError(f"no video stream in {path.name}")
+            rate = vstream.average_rate or getattr(vstream, "guessed_rate", None)
+            num = getattr(rate, "numerator", rate) if rate is not None else 0
+            den = getattr(rate, "denominator", 1) if rate is not None else 1
+            duration = container.duration
+            return {
+                "codec_name": vstream.codec_context.name if vstream.codec_context else "",
+                "width": int(vstream.width or 0),
+                "height": int(vstream.height or 0),
+                "r_frame_rate": f"{num}/{den or 1}",
+                "duration": f"{float(duration):.6f}" if duration else None,
+            }
+    except Exception:
+        args = [
+            ffprobe_bin() or "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name,width,height,r_frame_rate:format=duration",
             "-of", "json", str(path),
-        ],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"ffprobe failed on {path.name}")
-    import json as _json
-
-    data = _json.loads(result.stdout or "{}")
-    streams = data.get("streams") or [{}]
-    fmt = data.get("format", {})
-    info = dict(streams[0])
-    info["duration"] = fmt.get("duration")
-    return info
+        ]
+        result = proc.run(args)
+        if result.returncode != 0:
+            raise RuntimeError(f"probe failed on {path.name}") from None
+        data = json.loads(result.stdout or "{}")
+        streams = data.get("streams") or [{}]
+        info = dict(streams[0])
+        info["duration"] = (data.get("format") or {}).get("duration")
+        return info
 
 
 def probe_audio_format(path: Path) -> tuple[int, int]:
     """(sample_rate, channels) of the first audio stream."""
-    result = subprocess.run(
-        [
-            ffprobe_bin(), "-v", "error", "-select_streams", "a:0",
-            "-show_entries", "stream=sample_rate,channels",
-            "-of", "default=nw=1:nk=1",
-            str(path),
-        ],
-        capture_output=True, text=True,
-    )
+    try:
+        with _av_open(path) as container:
+            astream = next((s for s in container.streams if s.type == "audio"), None)
+            if astream is not None:
+                return int(astream.rate), int(astream.channels or 1)
+    except Exception:
+        pass
+    args = [
+        ffprobe_bin() or "ffprobe", "-v", "error", "-select_streams", "a:0",
+        "-show_entries", "stream=sample_rate,channels", "-of", "default=nw=1:nk=1",
+        str(path),
+    ]
+    result = proc.run(args)
     values = [line for line in result.stdout.strip().splitlines() if line]
     try:
         rate = int(values[0])
@@ -112,6 +171,59 @@ def probe_audio_format(path: Path) -> tuple[int, int]:
     except (IndexError, ValueError):
         rate, channels = OUT_SAMPLE_RATE, 2
     return rate, channels
+
+
+class MediaCache:
+    """One read per content version across stages (AGU6 3.2).
+
+    Keyed by relative path, size and mtime (ns) — never an absolute path, so
+    the durations.json stays stable when the job dir moves. Memory cache
+    mirrors `durations.json` in the job directory. A cached value is never
+    trusted when size or mtime changed.
+    """
+
+    def __init__(self, job_dir: Path | None = None):
+        self.path = (job_dir / "durations.json") if job_dir else None
+        self._mem: dict[str, float] = {}
+        if self.path and self.path.exists():
+            try:
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    self._mem = {
+                        str(k): float(v) for k, v in data.items()
+                        if isinstance(v, (int, float))
+                    }
+            except Exception:
+                self._mem = {}
+
+    @staticmethod
+    def _key(path: Path, root: Path | None) -> str:
+        st = path.stat()
+        rel = path.name if root is None else (
+            str(path.relative_to(root)) if str(path).startswith(str(root)) else path.name
+        )
+        return f"{rel}|{st.st_size}|{st.st_mtime_ns}"
+
+    def duration(self, path: Path, root: Path | None = None) -> float:
+        """Duration of `path`, cached. Raises on failure (as probe_duration)."""
+        path = Path(path)
+        key = self._key(path, root)
+        if key in self._mem:
+            return self._mem[key]
+        duration = probe_duration(path)
+        self._mem[key] = duration
+        self.save()
+        return duration
+
+    def save(self) -> None:
+        if self.path is None:
+            return
+        try:
+            self.path.write_text(
+                json.dumps(self._mem, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except OSError:
+            pass
 
 
 def is_valid_media(path: Path) -> bool:
@@ -122,24 +234,33 @@ def is_valid_media(path: Path) -> bool:
         return False
 
 
-def run_ffmpeg(args: list[str]) -> None:
+# -------------------------------------------------------- ffmpeg process wrappers
+def run_ffmpeg(args: list[str], *, cancel=None, low_priority: bool = False) -> None:
     cmd = [ffmpeg_bin(), "-y", *args]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        tail = (proc.stderr or "").strip().splitlines()[-5:]
+    result = proc.run(cmd, cancel=cancel, low_priority=low_priority)
+    if result.returncode != 0:
+        tail = (result.stderr or "").strip().splitlines()[-5:]
         raise RuntimeError("ffmpeg failed: " + " | ".join(tail))
 
 
-def extract_audio(src: Path, dst: Path) -> None:
+def extract_audio(src: Path, dst: Path, *, cancel=None) -> None:
     """Extract mono 16 kHz WAV (AGENT.md stage 1 command)."""
-    run_ffmpeg(["-y", "-i", str(src), "-vn", "-ac", "1", "-ar", "16000", str(dst)])
+    run_ffmpeg(
+        ["-y", "-i", str(src), "-vn", "-ac", "1", "-ar", "16000", str(dst)],
+        cancel=cancel,
+    )
 
 
-def convert_to_wav(src: Path, dst: Path, sample_rate: int = OUT_SAMPLE_RATE) -> None:
-    run_ffmpeg(["-i", str(src), "-vn", "-ac", "1", "-ar", str(sample_rate), str(dst)])
+def convert_to_wav(src: Path, dst: Path, sample_rate: int = OUT_SAMPLE_RATE,
+                   *, cancel=None) -> None:
+    run_ffmpeg(
+        ["-i", str(src), "-vn", "-ac", "1", "-ar", str(sample_rate), str(dst)],
+        cancel=cancel,
+    )
 
 
-def atempo_stretch(src: Path, dst: Path, ratio: float, sample_rate: int = OUT_SAMPLE_RATE) -> None:
+def atempo_stretch(src: Path, dst: Path, ratio: float,
+                   sample_rate: int = OUT_SAMPLE_RATE, *, cancel=None) -> None:
     """Speed up audio by `ratio` (duration shrinks), pitch preserved.
 
     ffmpeg atempo supports 0.5..100 via chaining; for ratio > 2 chain filters.
@@ -152,16 +273,16 @@ def atempo_stretch(src: Path, dst: Path, ratio: float, sample_rate: int = OUT_SA
         filters.append("atempo=2.0")
         remaining /= 2.0
     filters.append(f"atempo={min(remaining, 2.0):.6f}")
-    run_ffmpeg([
-        "-i", str(src),
-        "-filter:a", ",".join(filters),
-        "-vn", "-ac", "1", "-ar", str(sample_rate),
-        str(dst),
-    ])
+    run_ffmpeg(
+        ["-i", str(src), "-filter:a", ",".join(filters), "-vn", "-ac", "1",
+         "-ar", str(sample_rate), str(dst)],
+        cancel=cancel, low_priority=True,
+    )
 
 
 def trim_silence(
-    src: Path, dst: Path, threshold_db: int = -35, margin_s: float = 0.05
+    src: Path, dst: Path, threshold_db: int = -35, margin_s: float = 0.05,
+    *, cancel=None,
 ) -> None:
     """Trim leading/trailing silence, keeping up to `margin_s` at each end.
 
@@ -173,11 +294,10 @@ def trim_silence(
         f"silenceremove=start_periods=1:start_threshold={int(threshold_db)}dB"
         f":start_silence={keep}"
     )
-    run_ffmpeg([
-        "-i", str(src),
-        "-af", ",".join([lead, "areverse", lead, "areverse"]),
-        str(dst),
-    ])
+    run_ffmpeg(
+        ["-i", str(src), "-af", ",".join([lead, "areverse", lead, "areverse"]), str(dst)],
+        cancel=cancel, low_priority=True,
+    )
 
 
 def make_silence(
@@ -208,14 +328,14 @@ def mix_overlays(base_wav: Path, clips: list[tuple[Path, float]], out_wav: Path)
     base.export(str(out_wav), format="wav")
 
 
-def mux(video_in: Path, audio_in: Path, out: Path) -> None:
+def mux(video_in: Path, audio_in: Path, out: Path, *, cancel=None) -> None:
     """Replace video audio, never re-encoding video (AGENT.md stage 6)."""
     run_ffmpeg([
         "-i", str(video_in), "-i", str(audio_in),
         "-map", "0:v", "-map", "1:a",
         "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
         "-shortest", str(out),
-    ])
+    ], cancel=cancel, low_priority=True)
 
 
 # ------------------------------------------------------------------ mixing
@@ -280,6 +400,7 @@ def mix_original_with_dub(
     dub: Path,
     out: Path,
     graph: str,
+    *, cancel=None, threads: int = 0,
 ) -> None:
     """Run the final mix: video copied, original audio lowered, dub on top.
 
@@ -300,8 +421,12 @@ def mix_original_with_dub(
         "-shortest",
         out.name,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(working_dir))
-    if proc.returncode != 0:
-        tail = (proc.stderr or "").strip().splitlines()[-8:]
+    if threads > 0:
+        cmd[-1:-1] = ["-threads", str(threads)]
+    result = proc.run(
+        cmd, cwd=working_dir, cancel=cancel, low_priority=True
+    )
+    if result.returncode != 0:
+        tail = (result.stderr or "").strip().splitlines()[-8:]
         raise RuntimeError("mix failed: " + " | ".join(tail))
     script_path.unlink(missing_ok=True)

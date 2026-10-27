@@ -24,6 +24,7 @@ from typing import Any, Callable
 
 from dubtool.job import StageCancelled, read_json, write_json
 from dubtool.llm import LLMClient, get_provider
+from dubtool.llm.budget import BudgetExhausted
 from dubtool.units import build_units, split_translation
 from dubtool.llm.base import RateLimitError
 
@@ -317,6 +318,7 @@ def _run_segment_mode(
 def run(
     job, config, force: bool = False, provider_id: str | None = None,
     cancel: threading.Event | None = None,
+    api_keys: list[str] | None = None,
 ) -> None:
     from dubtool.brief import resolve_brief
 
@@ -342,7 +344,7 @@ def run(
         entries.sort(key=lambda e: e["id"])
 
     pid = (provider_id or config.llm_provider).lower()
-    provider = get_provider(config, pid)
+    provider = get_provider(config, pid, api_keys=api_keys, cancel=cancel)
     translate_cfg = config.translate or {}
     concurrency = max(1, int(translate_cfg.get("concurrency", 1)))
     pronouns = {k: v for k, v in (translate_cfg.get("pronouns") or {}).items() if v}
@@ -416,13 +418,19 @@ def run(
             write_json(job.translated_path, entries)
             write_units_file(job, units)
 
-        run_chunks_parallel(unit_chunks, unit_chunk_fn, concurrency, apply=apply_units, cancel=cancel)
+        try:
+            run_chunks_parallel(unit_chunks, unit_chunk_fn, concurrency, apply=apply_units, cancel=cancel)
+        except BudgetExhausted as exc:  # 5.2: finish with what exists
+            log.warning("s3: %s — the rerun fills the remaining units", exc)
         translated_count = translated_units
     else:
-        translated_count = _run_segment_mode(
-            job, entries, client, chunk_size, glossary, brief, force,
-            pronouns=pronouns, concurrency=concurrency, cancel=cancel,
-        )
+        try:
+            translated_count = _run_segment_mode(
+                job, entries, client, chunk_size, glossary, brief, force,
+                pronouns=pronouns, concurrency=concurrency, cancel=cancel,
+            )
+        except BudgetExhausted as exc:  # 5.2: finish with what exists
+            log.warning("s3: %s — the rerun fills the remaining segments", exc)
 
     # One-shot enforcement pass (soft-budget tolerance, AGU3 task 7).
     over_before, over_after = enforce_budget(entries, client, tolerance)
@@ -435,5 +443,6 @@ def run(
     )
     if client.total_input_tokens or client.total_output_tokens:
         summary += f" tokens(in={client.total_input_tokens}, out={client.total_output_tokens})"
+    summary += f" llm_requests={client.total_calls}"  # AGU6 5.2 per-stage count
     log.info(summary)
     print(summary)

@@ -18,15 +18,18 @@ from dubtool.job import read_json
 log = logging.getLogger("dubtool")
 
 
-def run(job, config, force: bool = False) -> None:
+def run(job, config, force: bool = False, cancel=None) -> None:
     audio_utils.require_ffmpeg()
+    from dubtool.audio_utils import MediaCache
+
+    media_cache = MediaCache(job.dir)
     out = job.output_nosubs_path
     if out.exists() and not force:
         log.info("s6: output.nosubs.mp4 already exists, skipping")
         return
 
     if not audio_utils.has_audio_stream(job.input_video):
-        return run_dub_only(job, config)
+        return run_dub_only(job, config, cancel=cancel)
 
     entries = [e for e in read_json(job.translated_path) if e.get("vi")]
     # Only segments with a fitted clip take part in the schedule; empty-text
@@ -40,9 +43,9 @@ def run(job, config, force: bool = False) -> None:
     if not clip_items:
         raise RuntimeError("no fitted clips found — run stage s5 first")
 
-    video_duration = audio_utils.probe_duration(job.input_video)
+    video_duration = media_cache.duration(job.input_video)
     durations = {
-        seg_id: audio_utils.probe_duration(job.fitted_dir / f"{seg_id}.wav")
+        seg_id: media_cache.duration(job.fitted_dir / f"{seg_id}.wav")
         for seg_id, _start in clip_items
     }
     sched_cfg = getattr(config, "schedule", None) or {}
@@ -81,6 +84,7 @@ def run(job, config, force: bool = False) -> None:
         dub=job.vi_audio_path,
         out=out,
         graph=graph,
+        cancel=cancel,
     )
     log.info(
         "s6: wrote %s (%d clips over %.1fs, mode=%s, orig=%sdB, dub=%sdB)",
@@ -90,9 +94,9 @@ def run(job, config, force: bool = False) -> None:
     )
 
 
-def run_dub_only(job, config) -> None:
+def run_dub_only(job, config, cancel=None) -> None:
     """Fallback for input.mp4 with no audio stream (AGENT_UPDATE_2.md 2.3)."""
     log.info("s6: input has no audio stream — dub-only mix written")
     video_duration = audio_utils.probe_duration(job.input_video)
     audio_utils.make_silence(video_duration, job.vi_audio_path, sample_rate=44100)
-    audio_utils.mux(job.input_video, job.vi_audio_path, job.output_nosubs_path)
+    audio_utils.mux(job.input_video, job.vi_audio_path, job.output_nosubs_path, cancel=cancel)

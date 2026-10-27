@@ -9,7 +9,7 @@ from dubtool import audio_utils
 log = logging.getLogger("dubtool")
 
 
-def run(job, config, force: bool = False) -> None:
+def run(job, config, force: bool = False, cancel=None) -> None:
     out = job.audio_path
     if out.exists() and not force:
         log.info("s1: audio.wav already exists, skipping")
@@ -24,7 +24,7 @@ def run(job, config, force: bool = False) -> None:
         raise RuntimeError(
             "input video has no audio stream — cannot dub a video without audio"
         )
-    audio_utils.extract_audio(src, out)
+    audio_utils.extract_audio(src, out, cancel=cancel)
     if not out.exists() or out.stat().st_size == 0:
         raise RuntimeError("ffmpeg produced no audio output")
     log.info("s1: extracted %s", out.name)

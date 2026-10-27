@@ -59,7 +59,7 @@ def test_over_budget_single_batch_shorten(job_with_transcript, monkeypatch, caps
         name = "fake"
         model = "fake-model"
 
-    monkeypatch.setattr(s3, "get_provider", lambda config, pid=None: FakeProvider())
+    monkeypatch.setattr(s3, "get_provider", lambda config, pid=None, **k: FakeProvider())
 
     job = job_with_transcript
     config = Config(chars_per_sec=14)

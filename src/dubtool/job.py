@@ -78,6 +78,10 @@ def compute_hash_with_meta(path: Path) -> str:
     return sha.hexdigest()[:10]
 
 
+# Upstream artifacts per stage (AGENT_UPDATE_5.md task 5.1); globs allowed.
+# The caller hashes the file list's (name, size, mtime) plus the config
+# values that can change that stage's output (model, voice, mix, subtitles).
+
 def next_job_id(video: Path) -> str:
     return f"{video.stem}-{compute_hash_with_meta(video)}"
 
@@ -158,7 +162,6 @@ class Job:
         job_dir = jobs_root / next_job_id(video)
         job_dir.mkdir(parents=True, exist_ok=True)
         return cls(job_dir, source_name)
-
     def _load_state(self) -> dict:
 
         default = {
@@ -167,6 +170,7 @@ class Job:
             "stages": {s: "pending" for s in STAGE_ORDER},
             "created_at": datetime.now(timezone.utc).isoformat(),
             "last_error": None,
+            "inputs": {},
         }
         if self.state_path.exists():
             try:
@@ -176,6 +180,8 @@ class Job:
             merged = {**default, **state}
             # Only known stage keys, so a stale key never leaks into new runs.
             merged["stages"] = {s: merged["stages"].get(s, "pending") for s in STAGE_ORDER}
+            recorded = state.get("inputs") or {}
+            merged["inputs"] = {s: recorded[s] for s in STAGE_ORDER if isinstance(recorded.get(s), str)}
             return merged
         return default
 
@@ -186,18 +192,32 @@ class Job:
     def stage_status(self, stage: str) -> str:
         return self.state["stages"].get(stage, "pending")
 
-    def is_done(self, stage: str) -> bool:
-        return self.stage_status(stage) == "done"
+    def is_done(self, stage: str, inputs_hash: str | None = None) -> bool:
+        """Dependency-aware done (AGENT_UPDATE_5.md task 5.1): with the
+        current hash passed, the stage counts as done only when the hash
+        recorded at its finish matches; otherwise it must rerun."""
+        if self.stage_status(stage) != "done":
+            return False
+        if inputs_hash is None:
+            return True
+        recorded = (self.state.get("inputs") or {}).get(stage)
+        return recorded == inputs_hash
 
     def start_stage(self, stage: str) -> None:
         self.state["stages"][stage] = "running"
         self.state["last_error"] = None
         self.save()
 
-    def finish_stage(self, stage: str, status: str = "done", error: str | None = None) -> None:
+    def finish_stage(self, stage: str, status: str = "done", error: str | None = None,
+                     inputs_hash: str | None = None) -> None:
         self.state["stages"][stage] = status
         if error:
             self.state["last_error"] = f"{stage}: {error}"
+        if status == "done" and inputs_hash:
+            self.state.setdefault("inputs", {})[stage] = inputs_hash
+        elif status != "done":
+            # A failed/rerun stage loses its stamp, so resume recomputes it.
+            self.state.get("inputs", {}).pop(stage, None)
         self.save()
 
     # ---------------------------------------------------------- outputs
@@ -211,6 +231,67 @@ class Job:
         tmp = self.dir / (self.source + ".part")
         shutil.copy2(str(video_file), str(tmp))
         os.replace(tmp, self.input_video)
+
+
+_STAGE_UPSTREAM = {
+    "s1": ["input.*"],
+    "s2": ["audio.wav"],
+    "s3": ["transcript.json", "brief.txt"],
+    "s4": ["translated.json"],
+    "s5": ["tts/*", "translated.json", "brief.txt"],
+    "s6": ["fitted/*", "audio.wav"],
+    "s7": ["output.nosubs.mp4", "output.vi.srt"],
+}
+
+
+def _cfg_part(cfg, stage: str):
+    """The config slice that can change this stage's output (no keys)."""
+    if stage == "s1":
+        return {}
+    if stage == "s2":
+        return [cfg.whisper_model, cfg.device, cfg.compute_type]
+    if stage in ("s3", "s5"):
+        pid = cfg.llm_provider
+        return {
+            "model": [pid, cfg.provider_config(pid).get("model")],
+            "translate": cfg.translate,
+            "units": cfg.units,
+        }
+    if stage == "s4":
+        return [cfg.tts_voice, cfg.tts_rate, cfg.tts_trim_silence,
+                cfg.chars_per_sec, cfg.max_stretch]
+    if stage == "s6":
+        return {"mix": cfg.mix, "schedule": cfg.schedule}
+    if stage == "s7":
+        return {"subtitles": cfg.subtitles}
+    return {}
+
+
+def stage_inputs_hash(job: "Job", cfg, stage: str) -> str:
+    """Fingerprint of everything that can change this stage's output:
+    upstream artifact (name, size, mtime), the relevant config values, and
+    the recorded stamps of ALL earlier stages — so rerunning any stage
+    automatically invalidates every later stage (task 5.1). Recorded in
+    state.json at finish; resume compares it."""
+    sha = hashlib.sha1()
+
+    def feed(part) -> None:
+        sha.update(json.dumps(part, sort_keys=True, default=str,
+                              ensure_ascii=False).encode("utf-8"))
+
+    for pattern in _STAGE_UPSTREAM[stage]:
+        for p in sorted(job.dir.glob(pattern)):
+            if p.is_file():
+                try:
+                    st = p.stat()
+                except OSError:
+                    continue
+                feed([p.name, st.st_size, int(st.st_mtime)])
+    feed(_cfg_part(cfg, stage))
+    recorded = job.state.get("inputs") or {}
+    idx = STAGE_ORDER.index(stage)
+    feed({"stamps": {s: recorded.get(s) for s in STAGE_ORDER[:idx]}})
+    return sha.hexdigest()[:10]
 
 
 def load_job(job_id: str, jobs_root: Path | None = None) -> Job:

@@ -8,6 +8,8 @@ at 1,000 characters.
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 MAX_BRIEF_CHARS = 1000
@@ -45,6 +47,83 @@ def save_brief(job_dir: Path, brief: str) -> None:
     brief = normalize_brief(brief)
     if brief:
         job_brief_path(job_dir).write_text(brief, encoding="utf-8")
+
+
+def _briefs_path() -> Path:
+    from dubtool.app.paths import settings_dir
+
+    return settings_dir() / "briefs.json"
+
+
+def brief_key(video: Path) -> str:
+    """Stable key: a hash of the resolved video path (16 hex chars)."""
+    import hashlib
+
+    try:
+        resolved = str(Path(video).resolve())
+    except OSError:
+        resolved = str(video)
+    if hasattr(hashlib, "sha256"):  # defensive: hashlib always has it
+        return hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha1(resolved.encode("utf-8")).hexdigest()[:16]
+
+
+def _read_briefs() -> dict:
+    try:
+        import json
+
+        data = json.loads(_briefs_path().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_briefs(data: dict) -> bool:
+    try:
+        import json
+
+        path = _briefs_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def load_video_brief(video: Path) -> str:
+    """The stored description for this video ('' when none)."""
+    text = _read_briefs().get(brief_key(video))
+    if isinstance(text, str):
+        return normalize_brief(text)
+    return ""
+
+
+def save_video_brief(video: Path, text: str) -> None:
+    """Store (or remove, when empty) this video's description. Write errors
+    are handled silently (AGENT_UPDATE_5.md task 5.2)."""
+    brief = normalize_brief(text)
+    data = _read_briefs()
+    key = brief_key(video)
+    changed = False
+    if brief:
+        if data.get(key) != brief:
+            data[key] = brief
+            changed = True
+    elif key in data:
+        data.pop(key, None)
+        changed = True
+    if not changed:
+        return
+    if data:
+        _write_briefs(data)
+    else:
+        try:
+            _briefs_path().unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def resolve_brief(

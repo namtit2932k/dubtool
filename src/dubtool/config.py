@@ -108,26 +108,51 @@ def _parse_indent(line: str) -> tuple[int, str]:
 
 
 def parse_simple_yaml(path: Path) -> dict:
-    """Parse scalar keys and nested scalar maps (any depth, e.g. mix.duck.*)."""
+    """Parse scalar keys, nested scalar maps (any depth, e.g. mix.duck.*)
+    and simple list blocks (`key:` followed by `- item` lines, used by
+    packaging/modes.yaml `models:`)."""
     root: dict = {}
     stack: list[tuple[int, dict]] = [(-1, root)]
+    # When a key creates an empty sub-dict, remember it so a following
+    # `- item` line at the same indent can turn it into a list.
+    list_candidate: tuple[int, dict, str] | None = None
     for raw in path.read_text(encoding="utf-8").splitlines():
         indent, _ = _parse_indent(raw)
         line = raw.split("#", 1)[0].strip()
-        if not line or ":" not in line:
+        if not line:
+            continue
+        if line.startswith("- "):
+            item = _parse_scalar(line[2:].strip())
+            if list_candidate is not None and indent >= list_candidate[0]:
+                _indent, parent, lkey = list_candidate
+                existing = parent.get(lkey)
+                if isinstance(existing, list):
+                    existing.append(item)
+                elif isinstance(existing, dict) and not existing:
+                    # Turn the empty placeholder child created for `key:`
+                    # into a list (AGENT_UPDATE_5.md task 1).
+                    parent[lkey] = [item]
+                    if stack and stack[-1][1] is existing:
+                        stack.pop()
+                    list_candidate = (indent, parent, lkey)
+            continue
+        if ":" not in line:
             continue
         key, _, value = line.partition(":")
         key = key.strip()
         value = value.strip()
         while indent <= stack[-1][0]:
             stack.pop()
+            list_candidate = None
         parent = stack[-1][1]
         if value == "":
             child: dict = {}
             parent[key] = child
+            list_candidate = (indent, parent, key)
             stack.append((indent, child))
         else:
             parent[key] = _parse_scalar(value)
+            list_candidate = None
     return root
 
 

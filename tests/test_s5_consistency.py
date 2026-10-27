@@ -39,7 +39,7 @@ class FakeConfig:
 def run_with_probes(job, config, monkeypatch, fake_tts, fake_llm):
     """Drive s5.run with a fake TTS + LLM and no-op audio materialization."""
     monkeypatch.setattr(s5.audio_utils, "probe_duration", lambda p: 3.0)
-    monkeypatch.setattr("dubtool.stages.s4_tts.build_tts", lambda config, cache_dir: fake_tts)
+    monkeypatch.setattr("dubtool.stages.s4_tts.build_tts", lambda config, cache_dir, **kw: fake_tts)
     monkeypatch.setattr(
         s5, "materialize_clip", lambda *a, **k: (job.fitted_dir / "0.wav").touch()
     )
@@ -49,7 +49,7 @@ def run_with_probes(job, config, monkeypatch, fake_tts, fake_llm):
 
 
 class _AlwaysFailTTS:
-    def synthesize(self, seg: dict):
+    def synthesize(self, seg: dict, cancel=None):
         raise TTSFailure("edge-tts failed after 5 attempts: throttle")
 
 
@@ -57,7 +57,7 @@ class _OkTTS:
     def __init__(self):
         self.calls = 0
 
-    def synthesize(self, seg: dict):
+    def synthesize(self, seg: dict, cancel=None):
         self.calls += 1
         return 3.0, Path(f"cache-{seg['id']}")
 
@@ -72,6 +72,9 @@ class FakeLLMOK:
     def shorten(self, english, current_vi, max_chars):
         return "ngắn gọn"
 
+    def shorten_batch(self, items):
+        return [{"id": item["id"], "vi": "ngắn gọn"} for item in items]
+
 
 class FakeLLMBoom:
     total_input_tokens = 0
@@ -81,6 +84,9 @@ class FakeLLMBoom:
         pass
 
     def shorten(self, english, current_vi, max_chars):
+        raise RuntimeError("LLM exploded")
+
+    def shorten_batch(self, items):
         raise RuntimeError("LLM exploded")
 
 
@@ -157,13 +163,13 @@ def test_force_regenerates_fitted_clip(monkeypatch, tmp_path):
 
     writes = {"n": 0}
 
-    def fake_materialize(source, out, status, duration, slot, max_stretch):
+    def fake_materialize(source, out, status, duration, slot, max_stretch, cancel=None):
         writes["n"] += 1
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(f"{status}-{duration}", encoding="utf-8")
 
     monkeypatch.setattr(s5.audio_utils, "probe_duration", lambda p: 3.0)
-    monkeypatch.setattr("dubtool.stages.s4_tts.build_tts", lambda config, cache_dir: _OkTTS())
+    monkeypatch.setattr("dubtool.stages.s4_tts.build_tts", lambda config, cache_dir, **kw: _OkTTS())
     monkeypatch.setattr(s5, "materialize_clip", fake_materialize)
     monkeypatch.setattr("dubtool.llm.LLMClient", FakeLLMOK, raising=False)
     monkeypatch.setattr("dubtool.llm.get_provider", lambda *a, **k: object())

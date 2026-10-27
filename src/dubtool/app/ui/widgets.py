@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPlainTextEdit,
+    QPushButton,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -89,21 +90,45 @@ class StageList(QListWidget):
 
 
 class LogView(QWidget):
-    """Collapsible log tail (AGU4 7.6)."""
+    """Truly collapsible log tail (AGU4 7.6, AGENT_UPDATE_5.md task 4):
+    a toggle button with an arrow, collapsed by default, expanding to a
+    fixed height with auto-scroll while lines arrive."""
+
+    EXPANDED_HEIGHT = 140
 
     def __init__(self):
         super().__init__()
+        self._expanded = False
+        self.toggle = QPushButton("▸")
+        self.toggle.setFlat(True)
+        self.toggle.setFixedWidth(28)
+        self.toggle.clicked.connect(self._toggle)
         self.text = QPlainTextEdit()
         self.text.setReadOnly(True)
-        self.text.setMaximumHeight(160)
-        self.label = QLabel()
+        # AGU6 4.3: a real 82-segment run can emit thousands of log lines;
+        # cap the document so long runs cannot lag the UI (newest kept).
+        self.text.setMaximumBlockCount(2000)
+        self.text.setFixedHeight(self.EXPANDED_HEIGHT)
+        self.text.setVisible(False)
+        self.text.verticalScrollBar().rangeChanged.connect(self._auto_scroll)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.label)
+        layout.addWidget(self.toggle)
         layout.addWidget(self.text)
+
+    def _toggle(self) -> None:
+        self._expanded = not self._expanded
+        self.toggle.setText("▾" if self._expanded else "▸")
+        self.text.setVisible(self._expanded)
+
+    def _auto_scroll(self) -> None:
+        sb = self.text.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
     def append(self, line: str) -> None:
         self.text.appendPlainText(line)
+        if self._expanded:
+            self._auto_scroll()
 
 
 class CounterFormat:

@@ -44,6 +44,25 @@ def _check_prerequisites() -> None:
         sys.exit(2)
 
 
+def _env_keys() -> list[str]:
+    """The CLI's key pool from the environment/.env (GEMINI_API_KEY,
+    GEMINI_API_KEY_2, …). Read-only; passed explicitly to stages
+    (AGENT_UPDATE_5.md 2.4), never written back."""
+    from dubtool.llm.base import looks_like_placeholder, read_env_key
+
+    keys: list[str] = []
+    index = 1
+    while True:
+        name = "GEMINI_API_KEY" if index == 1 else f"GEMINI_API_KEY_{index}"
+        value = read_env_key(name)
+        if not value:
+            break
+        if not looks_like_placeholder(value) and value not in keys:
+            keys.append(value)
+        index += 1
+    return keys
+
+
 def _require_provider(conf, provider_id: str | None = None) -> None:
     from dubtool.llm import require_provider_ready
 
@@ -69,20 +88,30 @@ def _stage_module(name: str):
     return importlib.import_module(f"dubtool.stages.{module_map[name]}")
 
 
-def _run_stage(job: Job, conf, stage: str, force: bool = False) -> None:
-    if job.is_done(stage) and not force:
-        print(f"{stage} ({STAGE_NAMES[stage]}): already done, skipping")
+def _run_stage(job: Job, conf, stage: str, force: bool = False,
+               api_keys: list[str] | None = None) -> None:
+    # Dependency-aware resume (AGENT_UPDATE_5.md task 5.1): the recorded
+    # inputs hash must still match for a done stage to be skipped.
+    from dubtool.job import stage_inputs_hash
+
+    current_hash = stage_inputs_hash(job, conf, stage)
+    if job.is_done(stage, current_hash) and not force:
+        print(f"{stage} ({STAGE_NAMES[stage]}): already done with unchanged inputs, skipping")
         return
     if stage in ("s3", "s5"):
         _require_provider(conf)
     job.start_stage(stage)
     started = time.monotonic()
     try:
-        _stage_module(stage).run(job, conf, force=force)
+        module = _stage_module(stage)
+        if stage in ("s3", "s5"):
+            module.run(job, conf, force=force, api_keys=api_keys or _env_keys())
+        else:
+            module.run(job, conf, force=force)
     except Exception as exc:
         job.finish_stage(stage, status="failed", error=str(exc))
         raise
-    job.finish_stage(stage)
+    job.finish_stage(stage, inputs_hash=current_hash)
     log.info("%s (%s): finished in %.1fs", stage, STAGE_NAMES[stage], time.monotonic() - started)
 
 
@@ -165,7 +194,7 @@ def cmd_run(args) -> int:
 
     for stage in STAGE_ORDER:
         print(f"==> {stage} ({STAGE_NAMES[stage]})")
-        _run_stage(job, conf, stage, force=args.force)
+        _run_stage(job, conf, stage, force=args.force, api_keys=_env_keys())
 
     _copy_to_out(job, out)
     print(f"Done. Output: {job.output_path} and {job.vi_audio_path}")
@@ -226,7 +255,7 @@ def cmd_stage(args) -> int:
 
         _postprocess_only(job, conf)
         return 0
-    _run_stage(job, conf, args.stage, force=args.force)
+    _run_stage(job, conf, args.stage, force=args.force, api_keys=_env_keys())
     return 0
 
 
@@ -253,7 +282,7 @@ def cmd_retts(args) -> int:
     print(f"retts: regenerating segments {ids}")
     regenerate_tts(job, conf, ids)
     print("retts: done; now rebuilding stage s5/s6 as needed")
-    _run_stage(job, conf, "s5")
+    _run_stage(job, conf, "s5", api_keys=_env_keys())
     _run_stage(job, conf, "s6")
     return 0
 
@@ -280,6 +309,23 @@ def cmd_compare_translate(args) -> int:
     print(f"Comparison written to {out_path}")
     print("You judge the translations — the default model in config.yaml was not changed.")
     return 0
+
+
+def cmd_clean(args) -> int:
+    """`dubtool clean` delegates to the cleanup module (AGU6 6.2)."""
+    from dubtool.app import cleanup as _cw
+
+    root = Path(__file__).resolve().parents[2]
+    argv = []
+    if args.apply:
+        argv.append("--apply")
+        if args.all_regenerable:
+            argv.append("--all-regenerable")
+        if args.categories and args.categories != ",":
+            argv += ["--categories", args.categories]
+    if args.jobs_days != 14:
+        argv += ["--jobs-days", str(args.jobs_days)]
+    return _cw.main(argv)
 
 
 def cmd_doctor(args) -> int:
@@ -394,6 +440,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor_p = sub.add_parser("doctor", help="check prerequisites")
     doctor_p.set_defaults(func=cmd_doctor)
+
+    clean_p = sub.add_parser(
+        "clean",
+        help="dry-run/apply the workspace cleanup plan (see also scripts/clean_workspace.py)",
+    )
+    clean_p.add_argument("--apply", action="store_true", help="actually delete (default: dry run)")
+    clean_p.add_argument("--categories", default=",", help="categories to delete with --apply")
+    clean_p.add_argument("--all-regenerable", action="store_true")
+    clean_p.add_argument("--jobs-days", type=int, default=14)
+    clean_p.set_defaults(func=cmd_clean)
 
     cmp_p = sub.add_parser(
         "compare-translate",

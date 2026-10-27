@@ -6,13 +6,14 @@ signals, so the window stays responsive.
 from __future__ import annotations
 
 import shutil
-import subprocess
+import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
+    QBoxLayout,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -25,14 +26,16 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSlider,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from dubtool import api
-from dubtool.app import diagnostics, errors, i18n, paths, secrets, settings
+from dubtool import api, proc
+from dubtool.app import diagnostics, errors, i18n, modes, paths, secrets, settings
+from dubtool.app.coalesce import ProgressGate
 from dubtool.app.service import PipelineService
 from dubtool.app.ui import first_run
 from dubtool.app.ui.settings_dialog import VOICE_KEYS, SettingsDialog
@@ -44,19 +47,26 @@ VIDEO_FILTERS = "Videos (*.mp4 *.mkv *.mov *.webm *.avi *.m4v)"
 def _open_in_explorer(path: Path) -> None:
     try:
         if sys.platform == "win32":
-            subprocess.Popen(["explorer", str(path)])
+            # explorer needs its own process; through the helper it stays
+            # hidden (no console flash, AGU6 task 1).
+            from dubtool import proc
+
+            proc.run(["explorer", str(path)], capture=False)
         else:
-            subprocess.Popen(["xdg-open", str(path)])
+            os.startfile(str(path))  # type: ignore[attr-defined]
     except OSError:
         pass
 
 
 def _open_file(path: Path) -> None:
+    """No console anywhere (AGU6 task 1): os.startfile instead of cmd /c start."""
     try:
         if sys.platform == "win32":
-            subprocess.Popen(["cmd", "/c", "start", "", str(path)])
+            os.startfile(str(path))  # type: ignore[attr-defined]
         else:
-            subprocess.Popen(["xdg-open", str(path)])
+            from dubtool import proc
+
+            proc.run(["xdg-open", str(path)], capture=False)
     except OSError:
         pass
 
@@ -75,8 +85,8 @@ def _ffmpeg_version() -> str:
     try:
         from dubtool import audio_utils
 
-        out = subprocess.run(
-            [audio_utils.ffmpeg_bin(), "-version"], capture_output=True, text=True, timeout=30
+        out = proc.run(
+            [audio_utils.ffmpeg_bin(), "-version"], timeout=30
         )
         return (out.stdout or out.stderr).splitlines()[0]
     except Exception:
@@ -92,16 +102,24 @@ class BriefEdit(QTextEdit):
         self._counter = counter
         self.setPlaceholderText(i18n.tr("brief.placeholder"))
         self.setMaximumHeight(72)
+        self._truncating = False
         self.textChanged.connect(self._on_change)
         self._on_change()
 
     def _on_change(self) -> None:
-        if self.toPlainText().__len__() > 1000:
+        text = self.toPlainText()
+        if len(text) > 1000 and not self._truncating:
+            # Truncate to 1000 chars while preserving the cursor position
+            # (AGENT_UPDATE_5.md 5.4).
+            self._truncating = True
+            pos = min(self.textCursor().position(), 1000)
+            self.setPlainText(text[:1000])
             cursor = self.textCursor()
-            cursor.setPosition(1000)
-            cursor.movePosition(1, 998, False)  # keep a cursor, drop the rest
-            self.setPlainText(self.toPlainText()[:1000])
-        self._counter.setText(i18n.tr("brief.counter", n=len(self.toPlainText())))
+            cursor.setPosition(max(0, pos))
+            self.setTextCursor(cursor)
+            self._truncating = False
+            text = self.toPlainText()
+        self._counter.setText(i18n.tr("brief.counter", n=len(text)))
 
 
 class OptionsWidget(QGroupBox):
@@ -151,10 +169,13 @@ class OptionsWidget(QGroupBox):
 
 
 class ProgressWidget(QGroupBox):
-    """Stage list, bar, counter, cancel, resume/over, open/play, log tail."""
+    """Compact progress panel (AGENT_UPDATE_5.md task 4): the seven stages
+    with no inner scrollbar, bar + counter on one line, ONE horizontal row
+    for the action buttons, and a collapsible log (collapsed by default)."""
 
     def __init__(self, service: PipelineService, window: "MainWindow"):
         super().__init__(i18n.tr("progress.header"))
+        self.setObjectName("progress_group")
         self.service = service
         self.window_ref = window
         self._last_result: api.DubResult | None = None
@@ -162,13 +183,19 @@ class ProgressWidget(QGroupBox):
         layout = QVBoxLayout(self)
         self.stages = StageList()
         layout.addWidget(self.stages)
+        line = QHBoxLayout()
         self.bar = QProgressBar()
-        layout.addWidget(self.bar)
+        line.addWidget(self.bar, 1)
         self.counter = QLabel("")
-        layout.addWidget(self.counter)
+        self.counter.setWordWrap(False)
+        line.addWidget(self.counter)
+        layout.addLayout(line)
+
+        # One horizontal row for the action buttons; only applicable ones
+        # are visible, so the row collapses or extends as needed.
+        self.action_row = QHBoxLayout()
         self.cancel_btn = QPushButton(i18n.tr("progress.cancel"))
         self.cancel_btn.clicked.connect(service.cancel)
-        layout.addWidget(self.cancel_btn)
         self.resume_btn = QPushButton(i18n.tr("progress.resume"))
         self.resume_btn.clicked.connect(lambda: self._retry(force=False))
         self.over_btn = QPushButton(i18n.tr("progress.start_over"))
@@ -177,12 +204,27 @@ class ProgressWidget(QGroupBox):
         self.open_btn.clicked.connect(self._open_folder)
         self.play_btn = QPushButton(i18n.tr("progress.play"))
         self.play_btn.clicked.connect(self._play)
-        for b in (self.resume_btn, self.over_btn, self.open_btn, self.play_btn):
-            b.hide()
-            layout.addWidget(b)
+        for b in (self.cancel_btn, self.resume_btn, self.over_btn, self.open_btn, self.play_btn):
+            self.action_row.addWidget(b)
+        layout.addLayout(self.action_row)
+
         self.log = LogView()
         layout.addWidget(self.log)
         self.hide()
+
+    def reset_for_check(self):
+        """Pristine state between layout-check/screenshot states (AGENT_UPDATE_5.md task 4)."""
+        self.hide()
+        self.stages.setAllPending()
+        self.bar.setRange(0, 0)
+        self.bar.setValue(0)
+        self.counter.setText("")
+        self.cancel_btn.hide()
+        self.resume_btn.hide()
+        self.over_btn.hide()
+        self.open_btn.hide()
+        self.play_btn.hide()
+        self._last_result = None
 
     def show_running(self) -> None:
         self.show()
@@ -229,19 +271,47 @@ class ProgressWidget(QGroupBox):
 
 # ------------------------------------------------------------------ window
 class MainWindow(QMainWindow):
+    """Main window (AGU4 7, reworked per AGENT_UPDATE_5.md task 4).
+
+    The content lives inside a QScrollArea (no hard-coded minimum size),
+    so small screens / high DPI scale it scrolls instead of squeezing
+    widgets below their minimum sizes (the old overlap's root cause).
+    When the window is at least SPLIT_MIN_WIDTH wide the generate controls
+    and the progress panel form two columns; below that they stack.
+    """
+
+    SPLIT_MIN_WIDTH = 1000
+
     def __init__(self, service: PipelineService | None = None):
         super().__init__()
         self.setWindowTitle(i18n.tr("app.title"))
-        self.setMinimumSize(760, 680)
         self.service = service or PipelineService()
         self.service.progressed.connect(self._on_progress)
         self.service.finishedRun.connect(self._on_finished)
         self.video_path: Path | None = None
         saved = settings.load()
         self.output_dir = Path(saved["default_output"]) if saved.get("default_output") else None
+        self._split_state: str = ""
 
-        central = QWidget()
-        layout = QVBoxLayout(central)
+        # AGU6 4.3: progress events coalesce to <=~10 dispatches/s; the
+        # worker thread only fills a dict, the timer does the UI work.
+        self._gate = ProgressGate()
+        self._gate_timer = QTimer(self)
+        self._gate_timer.setInterval(100)
+        self._gate_timer.timeout.connect(self._flush_progress)
+        self._gate_timer.start()
+        self._heavy_note_shown: set[str] = set()
+
+        # AGU6 6.7: prune old job folders at startup (setting jobs_max_days).
+        # Never fatal — a corrupt jobs dir must not block the window.
+        try:
+            from dubtool.app import housekeeping
+
+            housekeeping.prune_jobs(
+                self._jobs_dir(), days=int(saved.get("jobs_max_days", 14) or 14)
+            )
+        except Exception:
+            pass
 
         # Menu / gear (AGU4 7.7)
         menu = self.menuBar().addMenu(i18n.tr("app.settings"))
@@ -249,8 +319,24 @@ class MainWindow(QMainWindow):
         menu.addAction(i18n.tr("app.export_diagnostics"), self.export_diagnostics)
         menu.addAction(i18n.tr("app.about"), self.show_about)
 
+        # Scroll area wrapping everything below the menu bar, no horizontal
+        # scrollbar (AGENT_UPDATE_5.md task 4).
+        central = QWidget()
+        central_layout = QVBoxLayout(central)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        central_layout.addWidget(self.scroll)
+        self.setCentralWidget(central)
+
+        self.left_box = QWidget()
+        self.left_layout = QVBoxLayout(self.left_box)
+        self.left_layout.setContentsMargins(0, 0, 0, 0)
+
         # 1. Video (AGU4 7.1)
         self.video_group = QGroupBox(i18n.tr("video.header"))
+        self.video_group.setObjectName("video_group")
         video_layout = QVBoxLayout(self.video_group)
         self.drop_zone = DropZone()
         self.drop_zone.clicked.connect(self.choose_video)
@@ -258,11 +344,18 @@ class MainWindow(QMainWindow):
         video_layout.addWidget(self.drop_zone)
         self.video_info = QLabel("")
         self.video_info.setWordWrap(True)
+        # A stable minimum: an empty-text word-wrap label has a 0 height hint,
+        # and text arriving later changes hints at a moment Qt's layout cache
+        # may not re-propagate (seen as a 14 px squeeze/label overlap in the
+        # running/finished states). Pinning 14 px makes hint and cache agree
+        # at all times (AGENT_UPDATE_5.md task 4, overlap invariant).
+        self.video_info.setMinimumHeight(14)
         video_layout.addWidget(self.video_info)
-        layout.addWidget(self.video_group)
+        self.left_layout.addWidget(self.video_group)
 
         # 2. Output folder (AGU4 7.2)
         self.output_group = QGroupBox(i18n.tr("output.header"))
+        self.output_group.setObjectName("output_group")
         output_layout = QGridLayout(self.output_group)
         self.output_edit = QLineEdit()
         self.output_edit.setReadOnly(True)
@@ -273,43 +366,113 @@ class MainWindow(QMainWindow):
         output_layout.addWidget(self.output_edit, 0, 0)
         output_layout.addWidget(self.output_btn, 0, 1)
         self.output_warn = QLabel("")
+        self.output_warn.setWordWrap(True)
+        self.output_warn.setMinimumHeight(14)  # stable hint, same reason as video_info
         self.output_warn.setStyleSheet("color: #a40;")
         output_layout.addWidget(self.output_warn, 1, 0, 1, 2)
-        layout.addWidget(self.output_group)
+        self.left_layout.addWidget(self.output_group)
 
         # 3. Brief (AGU4 7.3)
-        layout.addWidget(QLabel(i18n.tr("brief.header")))
-        brief_row = QVBoxLayout()
+        self.brief_group = QGroupBox(i18n.tr("brief.header"))
+        self.brief_group.setObjectName("brief_group")
+        brief_group_layout = QVBoxLayout(self.brief_group)
         self.brief_edit = BriefEdit(QLabel(""))
-        brief_row.addWidget(self.brief_edit)
+        brief_group_layout.addWidget(self.brief_edit)
         self.brief_counter = QLabel(i18n.tr("brief.counter", n=0))
-        self.brief_edit._counter = self.brief_counter  # BriefEdit updates this label
-        brief_row.addWidget(self.brief_counter)
-        layout.addLayout(brief_row)
+        self.brief_edit._counter = self.brief_counter
+        brief_group_layout.addWidget(self.brief_counter)
+        self.left_layout.addWidget(self.brief_group)
 
         # 4. Options (AGU4 7.4)
         self.options = OptionsWidget()
-        layout.addWidget(self.options)
+        self.left_layout.addWidget(self.options)
 
-        # 5. Generate buttons (AGU4 7.5)
-        buttons_row = QHBoxLayout()
+        # 5. Generate buttons (AGU4 7.5) in a horizontal row
+        self.buttons_row = QWidget()
+        self.buttons_row.setObjectName("buttons_row")
+        buttons_row = QHBoxLayout(self.buttons_row)
+        buttons_row.setContentsMargins(0, 0, 0, 0)
         self.fast_btn = QPushButton(i18n.tr("mode.fast"))
         self.accurate_btn = QPushButton(i18n.tr("mode.accurate"))
-        self.fast_btn.setToolTip(i18n.tr("mode.fast.tip"))
-        self.accurate_btn.setToolTip(i18n.tr("mode.accurate.tip"))
+        self._update_mode_tips()
         self.fast_btn.clicked.connect(lambda: self.start_run("fast"))
         self.accurate_btn.clicked.connect(lambda: self.start_run("accurate"))
         buttons_row.addWidget(self.fast_btn)
         buttons_row.addWidget(self.accurate_btn)
-        layout.addLayout(buttons_row)
+        self.left_layout.addWidget(self.buttons_row)
+
+        # 6. Progress (AGU4 7.6, compact per AGENT_UPDATE_5.md task 4)
+        self.progress_group = ProgressWidget(self.service, self)
+
+        self.page = QWidget()
+        self.page.setObjectName("page")
+        self.left_box.setObjectName("left_box")
+        # One box layout flips direction between split (horizontal) and
+        # stacked (vertical) modes — never rebuilt, so it is stable.
+        self.page_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, self.page)
+        self.page_layout.setContentsMargins(10, 10, 10, 10)
+        self.page_layout.addWidget(self.left_box, 1)
+        self.page_layout.addWidget(self.progress_group, 1)
+        self._refresh_section_layout()
+        self.scroll.setWidget(self.page)
+
+        self._set_initial_size(saved)
         self._refresh_buttons()
 
-        # 6. Progress (AGU4 7.6)
-        self.progress_group = ProgressWidget(self.service, self)
-        layout.addWidget(self.progress_group)
-        layout.addStretch(1)
+    def _set_initial_size(self, saved: dict) -> None:
+        """About 90% of the available height with sensible maximums, or the
+        remembered last window size (AGENT_UPDATE_5.md task 4)."""
+        screen = self.screen() or QApplication.primaryScreen()
+        geo = screen.availableGeometry() if screen is not None else None
+        max_w = geo.width() if geo is not None else 1920
+        max_h = geo.height() if geo is not None else 1080
+        w = min(int(max_w * 0.92), 1400)
+        h = min(int(max_h * 0.9), 1000)
+        last = saved.get("window_size") or []
+        if isinstance(last, (list, tuple)) and len(last) == 2:
+            try:
+                w, h = int(last[0]), int(last[1])
+            except (TypeError, ValueError):
+                pass
+        self.resize(QSize(max(520, min(w, max_w)), max(420, min(h, max_h))))
 
-        self.setCentralWidget(central)
+    def _refresh_section_layout(self) -> None:
+        """Split into two columns when wide enough; single (stacked) column
+        below that — the same QBoxLayout just flips its direction, so the
+        layout is never rebuilt (stable reparenting)."""
+        split = self.width() >= self.SPLIT_MIN_WIDTH
+        state = "split" if split else "stack"
+        if state == self._split_state:
+            return
+        self._split_state = state
+        direction = (
+            QBoxLayout.Direction.LeftToRight if split
+            else QBoxLayout.Direction.TopToBottom
+        )
+        self.page_layout.setDirection(direction)
+        # Horizontal mode: share the width; vertical mode: each widget keeps
+        # its sizeHint height and the box grows downward (scroll handles it).
+        stretch = (1, 1) if split else (0, 1)
+        self.page_layout.setStretchFactor(self.left_box, stretch[0])
+        self.page_layout.setStretchFactor(self.progress_group, stretch[1])
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._refresh_section_layout()
+
+    def _update_mode_tips(self) -> None:
+        """Generate-button tooltips must show the currently selected model
+        id (AGENT_UPDATE_5.md task 1)."""
+        try:
+            current = modes.load(settings.load())
+            fast = str(current["fast"]["model"])
+            accurate = str(current["accurate"]["model"])
+        except Exception:
+            fast = accurate = ""
+        self.fast_btn.setToolTip(i18n.tr("mode.fast.tip") + (f"\n{fast}" if fast else ""))
+        self.accurate_btn.setToolTip(
+            i18n.tr("mode.accurate.tip") + (f"\n{accurate}" if accurate else "")
+        )
 
     # ------------------------------------------------------------ video
     def choose_video(self) -> None:
@@ -349,13 +512,18 @@ class MainWindow(QMainWindow):
         self._refresh_buttons()
 
     def _load_saved_brief(self, video: Path) -> None:
-        """Description remembered per video (AGU4 7.3): sidecar <video>.brief.txt,
-        the same file the CLI reads."""
-        from dubtool.brief import default_brief_path
+        """Description remembered per video (AGU4 7.3): the app-data
+        briefs.json entry (hash-keyed) first, then a legacy sidecar written
+        before AGU5 task 5.2 removed sidecar writes."""
+        from dubtool.brief import default_brief_path, load_video_brief
 
-        brief_path = default_brief_path(video)
-        if brief_path and brief_path.exists():
-            self.brief_edit.setPlainText(brief_path.read_text(encoding="utf-8"))
+        text = load_video_brief(video)
+        if not text:
+            brief_path = default_brief_path(video)
+            if brief_path and brief_path.exists():
+                text = brief_path.read_text(encoding="utf-8")
+        if text:
+            self.brief_edit.setPlainText(text)
 
     # ------------------------------------------------------------ output
     def choose_output(self) -> None:
@@ -402,10 +570,12 @@ class MainWindow(QMainWindow):
             return
         options = self.options.to_options(mode, brief=self.brief_edit.toPlainText())
         if options.description:
-            # Remember the description side-by-side with the video so the CLI
-            # path sees the same brief (AGU4 7.3).
-            sidecar = self.video_path.parent / f"{self.video_path.stem}.brief.txt"
-            sidecar.write_text(options.description, encoding="utf-8")
+            # Remember per-video descriptions in app data (briefs.json keyed
+            # by a hash of the video path) — nothing is written into the
+            # user's video folder (AGENT_UPDATE_5.md task 5.2).
+            from dubtool.brief import save_video_brief
+
+            save_video_brief(self.video_path, options.description)
         self.progress_group._last_mode = mode
         self.progress_group.show_running()
         self.fast_btn.setEnabled(False)
@@ -429,7 +599,24 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ progress
     def _on_progress(self, stage: str, state: str, done: int, total: int, message: str, eta: float) -> None:
+        import time as _time
+
+        for event in self._gate.feed(stage, state, done, total, message, eta, _time.monotonic()):
+            self._render_progress(*event)
+
+    def _flush_progress(self) -> None:
+        import time as _time
+
+        for event in self._gate.drain(_time.monotonic()):
+            self._render_progress(*event)
+
+    def _render_progress(self, stage: str, state: str, done: int, total: int, message: str, eta: float) -> None:
         self.progress_group.on_progress(stage, state, done, total, message, eta)
+        # AGU6 4.2: a short localized note while the heavy stages run, so
+        # 100% CPU in the encoder / Whisper reads as expected behavior.
+        if state == "start" and stage in ("s2", "s7") and stage not in self._heavy_note_shown:
+            self._heavy_note_shown.add(stage)
+            self.progress_group.log.append(i18n.tr("progress.heavy_cpu_note", stage=i18n.tr(stage)))
 
     def _on_finished(self, result: api.DubResult) -> None:
         self.progress_group.on_finished(result)
@@ -462,6 +649,7 @@ class MainWindow(QMainWindow):
     def open_settings(self) -> None:
         dialog = SettingsDialog(self)
         dialog.exec()
+        self._update_mode_tips()
 
     def export_diagnostics(self) -> None:
         default = Path.home() / "Desktop" / "dubtool-diagnostics.zip"
@@ -485,6 +673,13 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ close
     def closeEvent(self, event) -> None:  # noqa: N802
+        # Remember the last window size (AGENT_UPDATE_5.md task 4).
+        s = settings.load()
+        s["window_size"] = [self.width(), self.height()]
+        try:
+            settings.save(s)
+        except OSError:
+            pass
         if self.service.running:
             answer = QMessageBox.question(self, "DubTool", i18n.tr("confirm.close_while_running"))
             if answer != QMessageBox.StandardButton.Yes:

@@ -65,6 +65,8 @@ class DubResult:
     job_id: str | None = None
     error: str | None = None
     detail: str | None = None
+    llm_requests: int | None = None                     # AGU6 5.2
+    llm_requests_per_stage: dict[str, int] | None = None  # AGU6 5.2
 
 
 # Log lines the stage modules emit for progress counting:
@@ -82,11 +84,12 @@ class _LogBridge(logging.Handler):
     def __init__(self, job_log_path: Path, emit: Callable[[ProgressEvent], None], stage: str):
         super().__init__(level=logging.INFO)
         self._file = open(job_log_path, "a", encoding="utf-8")
+        self._fmt = logging.Formatter()
         self._emit = emit
         self._stage = stage
 
     def emit(self, record: logging.LogRecord) -> None:  # noqa: A003
-        line = f"{logging.Formatter.formatTime(record, '%Y-%m-%d %H:%M:%S')} {record.levelname} {record.getMessage()}\n"
+        line = f"{self._fmt.formatTime(record, '%Y-%m-%d %H:%M:%S')} {record.levelname} {record.getMessage()}\n"
         try:
             self._file.write(line)
             self._file.flush()
@@ -137,10 +140,16 @@ def _classify_error(exc: Exception) -> tuple[str, str | None]:
     if isinstance(exc, StageCancelled):
         return "cancelled", detail
     lowered = text.lower()
+    # Rate limits first: the give-up message mentions "API keys" too.
+    if (
+        "rate limit" in lowered
+        or "resource_exhausted" in lowered
+        or "429" in lowered
+        or "quota" in lowered
+    ):
+        return "quota", detail
     if "api key" in lowered or "placeholder" in lowered or "missingkey" in detail.lower():
         return "invalid_key", detail
-    if "quota" in lowered or "resource_exhausted" in lowered or "429" in lowered:
-        return "quota", detail
     if "not found" in lowered or "404" in lowered or "model" in lowered and "not" in lowered and "found" in lowered:
         return "model_not_found", detail
     if "network" in lowered or "timed out" in lowered or "timeout" in lowered or "connection" in lowered:
@@ -190,6 +199,7 @@ def run_dub(
     extra_overrides: dict | None = None,
 ) -> DubResult:
     """Run the full pipeline on one video. Never raises; returns a DubResult."""
+    budget: Any = None  # bound below, inside the try (exception paths read it)
     try:
         video, output_dir = Path(video), Path(output_dir)
         if not video.is_file():
@@ -197,17 +207,29 @@ def run_dub(
         if not output_dir.is_dir():
             return DubResult(code="invalid", error=f"output folder not found: {output_dir}")
 
-        # Keys: only from the passed SecretsProvider (never .env in the app;
-        # the CLI path reads .env itself). GeminiProvider reads os.environ.
-        key = secrets.get_gemini_key() if secrets else None
-        if not key:
+        # Keys only from the passed SecretsProvider (never .env in the app;
+        # the CLI path builds its list from the env itself). They are handed
+        # to the pipeline explicitly (AGENT_UPDATE_5.md 2.4): no os.environ,
+        # so a deleted key cannot survive in the process environment and no
+        # child process inherits a key.
+        keys: list[str] = []
+        if secrets is not None:
+            getter = getattr(secrets, "get_gemini_keys", None)
+            if callable(getter):
+                keys = [k for k in (getter() or []) if k]
+            else:
+                single = secrets.get_gemini_key()
+                if single:
+                    keys = [single]
+        if not keys:
             return DubResult(code="invalid_key", error="no Gemini API key (set it in Settings)")
-        os.environ["GEMINI_API_KEY"] = key
 
-        # Mode -> provider/model/concurrency (from packaging/modes.yaml, AGU4 6.4).
+        # Mode -> provider/model (packaging/modes.yaml, AGU4 6.4) resolved
+        # WITH the user's settings so the Models tab takes effect
+        # (AGENT_UPDATE_5.md task 1).
         from dubtool.app import modes as modes_mod
 
-        mode_cfg: dict[str, Any] = modes_mod.get(options.mode)
+        mode_cfg: dict[str, Any] = modes_mod.get(options.mode, _user_settings())
         pid = str(mode_cfg.get("provider", "gemini"))
         overrides: dict[str, Any] = {
             "llm_provider": pid,
@@ -236,6 +258,26 @@ def run_dub(
         root = bundle_root()
         cfg = config_mod.load(root, overrides=overrides)
 
+        # AGU6 4.2: CPU limits are speed settings, not output settings — the
+        # thread budget rides on a dedicated attribute (never inside
+        # cfg.subtitles, which is hashed into the stage-7 resume hash) and
+        # the encode preset DOES ride inside subtitles because the preset
+        # changes the file.
+        from dubtool.app import cpu as cpu_mod
+
+        cfg.encode_threads = cpu_mod.thread_budget()
+        _saved = _user_settings()
+        _preset = str(_saved.get("video_encode_preset", "")) or None
+        if _preset in ("veryfast", "faster", "medium"):
+            cfg.subtitles["preset"] = _preset
+
+        # One request budget for the whole run (AGU6 5.2), bound so every
+        # stage's LLMClient shares the same counter.
+        from dubtool.llm import budget as llm_budget
+
+        budget = llm_budget.from_config(cfg)
+        budget_token = llm_budget.bind(budget)
+        requests_per_stage: dict[str, int] = {}
         jobs_root = Path(jobs_dir) if jobs_dir else _default_jobs_dir()
         jobs_root.mkdir(parents=True, exist_ok=True)
         job_id = _stable_job_id(video, options)
@@ -246,20 +288,33 @@ def run_dub(
         from dubtool.stages import s3_translate, s4_tts, s5_fit_duration, s6_mix, s7_subtitles
 
         stage_map = {
-            "s1": s1_extract_audio.run,
+            "s1": lambda j, c, force: s1_extract_audio.run(j, c, force=force, cancel=cancel),
             "s2": s2_transcribe.run,
-            "s3": lambda j, c, force: s3_translate.run(j, c, force=force, cancel=cancel),
+            "s3": lambda j, c, force: s3_translate.run(j, c, force=force, cancel=cancel, api_keys=keys),
             "s4": lambda j, c, force: s4_tts.run(j, c, force=force, cancel=cancel),
-            "s5": lambda j, c, force: s5_fit_duration.run(j, c, force=force, cancel=cancel),
-            "s6": s6_mix.run,
-            "s7": s7_subtitles.run,
+            "s5": lambda j, c, force: s5_fit_duration.run(j, c, force=force, cancel=cancel, api_keys=keys),
+            "s6": lambda j, c, force: s6_mix.run(j, c, force=force, cancel=cancel),
+            "s7": lambda j, c, force: s7_subtitles.run(j, c, force=force, cancel=cancel),
         }
 
         for stage in STAGE_ORDER:
             if cancel.is_set():
                 return DubResult(code="cancelled", cancelled=True, job_id=job.dir.name)
+            # Dependency-aware resume (AGENT_UPDATE_5.md task 5.1): a stage
+            # whose recorded inputs hash still matches is skipped, so a
+            # rerun after a failed/changed stage only redoes what is stale.
+            from dubtool.job import stage_inputs_hash
+
+            current_hash = stage_inputs_hash(job, cfg, stage)
+            if job.is_done(stage, current_hash) and not force:
+                logging.getLogger("dubtool").info(
+                    "%s: done with unchanged inputs, skipping", stage
+                )
+                progress(ProgressEvent(stage=stage, state="skipped"))
+                continue
             progress(ProgressEvent(stage=stage, state="start"))
             started = time.monotonic()
+            stage_requests_before = budget.used  # AGU6 5.2 per-stage accounting
             bridge = _LogBridge(job.log_path, progress, stage)
             logging.getLogger("dubtool").addHandler(bridge)
             try:
@@ -281,7 +336,14 @@ def run_dub(
             finally:
                 logging.getLogger("dubtool").removeHandler(bridge)
                 bridge.close()
-            job.finish_stage(stage)
+            stage_requests = budget.used - stage_requests_before
+            if stage_requests:
+                requests_per_stage[stage] = stage_requests
+                logging.getLogger("dubtool").info(
+                    "%s: %d LLM request(s) used (run total %d/%d)",
+                    stage, stage_requests, budget.used, budget.limit,
+                )
+            job.finish_stage(stage, inputs_hash=current_hash)
             progress(
                 ProgressEvent(stage=stage, state="done", elapsed_s=round(time.monotonic() - started, 1))
             )
@@ -323,11 +385,30 @@ def run_dub(
                 pass
 
         job.save()
-        return DubResult(ok=True, code="ok", out_video=target, out_srt=out_srt, job_id=job_id)
+        return DubResult(
+            ok=True, code="ok", out_video=target, out_srt=out_srt, job_id=job_id,
+            llm_requests=budget.used,
+            llm_requests_per_stage=requests_per_stage,
+        )
     except StageCancelled:
-        return DubResult(code="cancelled", cancelled=True)
+        return DubResult(code="cancelled", cancelled=True,
+                         llm_requests=getattr(budget, "used", 0))
     except Exception as exc:
-        return DubResult(code="error", error=str(exc), detail=repr(exc))
+        return DubResult(
+            code="error", error=str(exc), detail=repr(exc),
+            llm_requests=getattr(budget, "used", 0),
+        )
+
+
+def _user_settings() -> dict:
+    """settings.json, readable even when running in odd environments (the
+    empty dict then keeps the shipped defaults)."""
+    try:
+        from dubtool.app import settings as settings_mod
+
+        return settings_mod.load()
+    except Exception:
+        return {}
 
 
 def _default_jobs_dir() -> Path:

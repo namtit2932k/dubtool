@@ -45,7 +45,8 @@ def final_status(
 
 
 def materialize_clip(
-    source: Path, out: Path, status: str, duration: float, slot: float, max_stretch: float
+    source: Path, out: Path, status: str, duration: float, slot: float, max_stretch: float,
+    *, cancel=None,
 ) -> None:
     """Write the final fitted/<id>.wav for the decided status (idempotent)."""
     if out.exists():
@@ -53,21 +54,21 @@ def materialize_clip(
     out.parent.mkdir(parents=True, exist_ok=True)
     if status in ("ok", "shortened"):
         if duration <= slot:
-            audio_utils.convert_to_wav(source, out)
+            audio_utils.convert_to_wav(source, out, cancel=cancel)
             return
     if status == "stretched":
-        audio_utils.atempo_stretch(source, out, min(duration / slot, max_stretch))
+        audio_utils.atempo_stretch(source, out, min(duration / slot, max_stretch), cancel=cancel)
     elif status == "overflow":
-        audio_utils.atempo_stretch(source, out, max_stretch)
+        audio_utils.atempo_stretch(source, out, max_stretch, cancel=cancel)
     else:
-        audio_utils.convert_to_wav(source, out)
+        audio_utils.convert_to_wav(source, out, cancel=cancel)
 
 
 def cache_key(entry: dict, voice: str) -> str:
     return hashlib.sha256(f"{voice}\x00{entry['vi']}".encode("utf-8")).hexdigest()[:16]
 
 
-def run(job, config, force: bool = False, cancel=None) -> None:
+def run(job, config, force: bool = False, cancel=None, api_keys: list[str] | None = None) -> None:
     from dubtool.job import StageCancelled
 
     audio_utils.require_ffmpeg()
@@ -76,22 +77,42 @@ def run(job, config, force: bool = False, cancel=None) -> None:
 
     counts: dict[str, int] = {}
     overflow_ids: list[int] = []
+    done_early = 0  # entries kept from an earlier run (progress accounting)
 
-    from dubtool.llm import LLMClient, get_provider
+    from dubtool.llm import LLMClient, RateLimitExhausted, get_provider
+    from dubtool.llm.budget import BudgetExhausted
     from dubtool.stages.s4_tts import build_tts
     from dubtool.tts_failures import TTSFailureLog, Timer
 
     failures = TTSFailureLog(job.dir)
+    from dubtool.audio_utils import MediaCache
 
-    # Lazy LLM provider: a run that needs no shortening works without a API
-    # key (AGENT_UPDATE_3.md task 4).
-    def _llm_factory() -> LLMClient:
-        return LLMClient(get_provider(config))
+    media_cache = MediaCache(job.dir)
 
-    llm: LLMClient | None = None
-    tts = build_tts(config, job.tts_dir / "cache")
+    tts = build_tts(config, job.tts_dir / "cache", media_cache=media_cache)
+    tts.cancel = cancel
     max_attempts = int(getattr(config, "max_fit_attempts", 3))
+    chunk_max = 40  # AGU6 5.1: at most 40 shortening items per request
 
+    # ------------------------------------------------ batched fitting (5.1)
+    # AGENT_UPDATE_6.md task 5.1: the per-segment `llm.shorten` loop is
+    # replaced with ROUND-based batches — all segments still too long are
+    # shortened in chunks of at most 40 in ONE shorten_batch request per
+    # chunk, then TTS is regenerated only for texts that actually changed.
+    # This keeps max_fit_attempts rounds but collapses roughly one request
+    # per segment per attempt into a handful of requests total.
+
+    class _Ctx:
+        __slots__ = ("entry", "source", "fitted", "slot", "attempts")
+
+        def __init__(self, entry: dict, source: Path, fitted: Path, slot: float):
+            self.entry = entry
+            self.source = source
+            self.fitted = fitted
+            self.slot = slot
+            self.attempts = 0
+
+    contexts: dict[int, _Ctx] = {}
     for index, entry in enumerate(entries):
         processed = index + 1
         if cancel is not None and cancel.is_set():
@@ -106,73 +127,197 @@ def run(job, config, force: bool = False, cancel=None) -> None:
         if fitted.exists() and not force and entry.get("fit_status") not in (None, "pending"):
             counts[entry["fit_status"]] = counts.get(entry["fit_status"], 0) + 1
             log.info("s5: progress %d/%d", processed, len(entries))
+            done_early += 1
             continue  # resume-safe: already fitted
-
         next_start = entries[index + 1]["start"] if index + 1 < len(entries) else None
-        slot = compute_slot(entry, next_start)
-        duration = entry.get("tts_duration") or audio_utils.probe_duration(source)
-        attempts_used = 0
-
-        # Track the values that match the clip currently on disk, so a failed
-        # shorten + re-TTS never leaves text describing audio we kept
-        # (AGENT_UPDATE_3.md task 4).
-        prev_vi = entry.get("vi")
-        prev_duration = entry.get("tts_duration")
-
-        # Task 5: whenever a segment is processed in this run, regenerate
-        # fitted/<id>.wav — stale audio can never survive with --force.
+        context = _Ctx(entry, source, fitted, compute_slot(entry, next_start))
+        contexts[seg_id] = context
+        # Task 5 (AGU3): whenever a segment is processed in this run,
+        # regenerate fitted/<id>.wav — stale audio never survives --force.
         fitted.unlink(missing_ok=True)
-
-        # Step 4: shorten + regenerate while the clip is too long.
-        while (
-            duration > slot * config.max_stretch
-            and not entry.get("reviewed")
-            and attempts_used < max_attempts
-        ):
-            attempts_used += 1
-            if llm is None:
-                llm = _llm_factory()
-            new_max = max(int(entry["max_chars"] * 0.85), 1)
-            try:
-                shortened = llm.shorten(entry["text"], entry["vi"], new_max)
-            except Exception as exc:
-                # LLM failure: leave the entry untouched and fall through to
-                # the overflow logic (task 4).
-                log.warning(
-                    "s5: id=%d shorten failed (attempt %d/%d, %d chars): %s",
-                    seg_id, attempts_used, max_attempts, len(entry.get("vi") or ""), exc,
-                )
-                break
-            entry["vi"] = shortened
-            timer = Timer()
-            try:
-                duration, cache_path = tts.synthesize(entry)
-            except TTSFailure as exc:
-                failures.record(seg_id, attempts_used, entry["vi"], exc, timer.elapsed())
-                # Restore so vi and tts_duration match the clip actually used.
-                entry["vi"] = prev_vi
-                entry["tts_duration"] = prev_duration
-                duration = prev_duration or duration
-                log.warning(
-                    "s5: id=%d TTS failed after shorten; restored previous text and clip"
-                    " (falls through to overflow)", seg_id,
-                )
-                break
-            shutil.copyfile(str(cache_path), str(source))
-            log.info(
-                "s5: id=%d shortened (attempt %d/%d) -> %.2fs (slot %.2fs)",
-                seg_id, attempts_used, max_attempts, duration, slot,
+        if entry.get("tts_duration") is None:
+            entry["tts_duration"] = round(
+                media_cache.duration(source, root=job.dir), 3
             )
-            entry["tts_duration"] = round(duration, 3)
-            prev_duration = entry["tts_duration"]
 
-        status = final_status(duration, slot, config.max_stretch, bool(entry.get("reviewed")), attempts_used)
+    def _llm_factory(mode: str | None = None) -> LLMClient | None:
+        """Build the selected provider; `mode` overrides to a named pip
+        mode's model (the 5.3 fallback). None when a fallback cannot be
+        built (missing config/keys) — the caller then runs without LLM."""
+        import copy as _copy
+
+        if mode is None:
+            try:
+                return LLMClient(get_provider(config, api_keys=api_keys, cancel=cancel))
+            except Exception as exc:
+                log.warning("s5: no LLM provider available for shortening: %s", exc)
+                return None
+        from dubtool.app import modes as modes_mod
+
+        try:
+            from dubtool.app import settings as settings_mod  # noqa: B950
+
+            user_settings = settings_mod.load()
+        except Exception:
+            user_settings = {}
+        try:
+            mode_cfg = modes_mod.get(mode, user_settings)
+        except Exception as exc:
+            log.info("s5: fallback mode %r unavailable: %s", mode, exc)
+            return None
+        pid = str(mode_cfg.get("provider", "gemini"))
+        cfg2 = _copy.copy(config)
+        llm_overrides = dict(getattr(config, "llm", {}) or {})
+        pid_cfg = dict(llm_overrides.get(pid, {}) or {})
+        pid_cfg["model"] = mode_cfg.get("model") or pid_cfg.get("model")
+        llm_overrides[pid] = pid_cfg
+        cfg2.llm = llm_overrides
+        try:
+            provider = get_provider(cfg2, provider_id=pid, api_keys=api_keys, cancel=cancel)
+            return LLMClient(provider, cancel=cancel)
+        except Exception as exc:
+            log.info("s5: fallback provider for mode %r failed: %s", mode, exc)
+            return None
+
+    llm: LLMClient | None = None
+    llm_mode: str | None = None       # which mode the client was built for
+    budget_note_logged = False
+
+    def _oversized(ctx: _Ctx) -> bool:
+        entry = ctx.entry
+        if entry.get("reviewed"):
+            return False
+        duration = entry.get("tts_duration") or 0.0
+        return duration > ctx.slot * config.max_stretch
+
+    for round_number in range(1, max_attempts + 1):
+        if cancel is not None and cancel.is_set():
+            raise StageCancelled(f"s5: cancelled by user in round {round_number}")
+        candidates = [
+            ctx for ctx in contexts.values()
+            if ctx.attempts < max_attempts and _oversized(ctx)
+        ]
+        if not candidates:
+            break
+        if llm is None:
+            llm = _llm_factory()
+            llm_mode = None if llm is not None else "none"
+            if llm is None:
+                log.warning(
+                    "s5: %d segment(s) too long but no LLM available — "
+                    "overflow stretch will be applied",
+                    len(candidates),
+                )
+                break
+        log.info(
+            "s5: round %d/%d: %d over-long segment(s) queued (%d batch(es))",
+            round_number, max_attempts, len(candidates),
+            (len(candidates) + chunk_max - 1) // chunk_max,
+        )
+        items: list[dict] = []
+        for ctx in candidates:
+            entry = ctx.entry
+            new_max = max(int(entry["max_chars"] * 0.85), 1)
+            items.append({
+                "id": entry["id"],
+                "text": entry.get("text") or "",
+                "vi": entry["vi"],
+                "max_chars": new_max,
+            })
+        updated_any = False
+        try:
+            for chunk_start in range(0, len(items), chunk_max):
+                if cancel is not None and cancel.is_set():
+                    raise StageCancelled(f"s5: cancelled in round {round_number}")
+                chunk = items[chunk_start : chunk_start + chunk_max]
+                responses = llm.shorten_batch(chunk)
+                by_id = {r.get("id"): r for r in responses if isinstance(r, dict)}
+                for ctx in candidates[chunk_start : chunk_start + chunk_max]:
+                    entry = ctx.entry
+                    response = by_id.get(entry["id"])
+                    if response is None:
+                        continue  # unchanged / not returned: keep the text
+                    prev_vi = entry["vi"]
+                    prev_duration = entry.get("tts_duration")
+                    shortened = str(response.get("vi") or "").strip()
+                    if not shortened or shortened == prev_vi:
+                        continue  # same text: nothing to re-synthesize
+                    entry["vi"] = shortened
+                    timer = Timer()
+                    try:
+                        duration, cache_path = tts.synthesize(entry, cancel=cancel)
+                    except TTSFailure as exc:
+                        failures.record(entry["id"], ctx.attempts + 1, entry["vi"], exc, timer.elapsed())
+                        # Restore so vi and tts_duration keep describing the
+                        # clip actually used (AGENT_UPDATE_3.md task 4).
+                        entry["vi"] = prev_vi
+                        entry["tts_duration"] = prev_duration
+                        log.warning(
+                            "s5: id=%d TTS failed after shorten; restored previous "
+                            "text and clip (falls through to overflow)", entry["id"],
+                        )
+                        continue
+                    shutil.copyfile(str(cache_path), str(ctx.source))
+                    entry["tts_duration"] = round(duration, 3)
+                    log.info(
+                        "s5: id=%d shortened (round %d/%d) -> %.2fs (slot %.2fs)",
+                        entry["id"], round_number, max_attempts, duration, ctx.slot,
+                    )
+                    updated_any = True
+                write_json(job.translated_path, entries)  # crash-safe per chunk
+        except BudgetExhausted as exc:  # 5.2: finish the run with what exists
+            if not budget_note_logged:
+                budget_note_logged = True
+                log.warning("s5: %s — remaining over-long segments stretch only", exc)
+        except RateLimitExhausted as exc:
+            # 5.3 fallback: when the selected mode's daily quota is gone,
+            # try ONE retry round with the configured fallback mode (fast).
+            fallback_mode = str(
+                (getattr(config, "llm", {}) or {}).get("shorten_fallback_mode", "fast")
+                or ""
+            ).lower() if isinstance(getattr(config, "llm", {}), dict) else ""
+            if fallback_mode and fallback_mode != llm_mode:
+                log.warning("s5: %s — retrying with the %r mode", exc, fallback_mode)
+                llm = _llm_factory(fallback_mode)
+                llm_mode = fallback_mode if llm is not None else llm_mode
+                # Re-queue: this round's candidates keep attempts at 0 more;
+                # the fallback batch happens on the NEXT loop round.
+                continue
+            log.warning("s5: %s — remaining over-long segments stretch only", exc)
+        except StageCancelled:
+            raise
+        except Exception as exc:
+            # LLM failure: leave entries untouched; they fall through to the
+            # overflow logic (AGENT_UPDATE_3.md task 4).
+            log.warning("s5: shorten round %d failed: %s", round_number, exc)
+        for ctx in candidates:
+            ctx.attempts += 1
+        if not updated_any:
+            log.info("s5: round %d produced no text changes — stopping", round_number)
+            break
+
+    # ------------------------------------------------------------- finalize
+    for finalize_index, (seg_id, ctx) in enumerate(contexts.items()):
+        entry = ctx.entry
+        duration = entry.get("tts_duration") or 0.0
+        raw = media_cache.duration(ctx.source, root=job.dir)
+        if not entry.get("tts_duration"):
+            duration = raw
+            entry["tts_duration"] = round(raw, 3)
+        status = final_status(
+            duration, ctx.slot, config.max_stretch, bool(entry.get("reviewed")), ctx.attempts
+        )
         entry["fit_status"] = status
         counts[status] = counts.get(status, 0) + 1
         if status == "overflow":
             overflow_ids.append(seg_id)
-        materialize_clip(source, fitted, status, duration, slot, config.max_stretch)
-        log.info("s5: progress %d/%d", processed, len(entries))
+        materialize_clip(
+            ctx.source, ctx.fitted, status, duration, ctx.slot, config.max_stretch,
+            cancel=cancel,
+        )
+        log.info(
+            "s5: progress %d/%d", done_early + finalize_index + 1, len(entries)
+        )
         write_json(job.translated_path, entries)  # crash-safe: save per segment
 
     write_json(job.translated_path, entries)

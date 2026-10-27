@@ -37,6 +37,8 @@ ALLOWLIST_TOP_LEVEL_FILES = [
     "AGENT_UPDATE_2.md",
     "AGENT_UPDATE_3.md",
     "AGENT_UPDATE_4.md",
+    "AGENT_UPDATE_5.md",
+    "README_BUILD.md",
     "REVIEW_NOTES.md",
 ]
 ALLOWLIST_DIRS = ["src", "tests", "scripts", "packaging"]

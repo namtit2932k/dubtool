@@ -16,11 +16,10 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-import subprocess
 import time
 from pathlib import Path
 
-from dubtool import audio_utils, subtitles as subs
+from dubtool import audio_utils, proc, subtitles as subs
 from dubtool.job import read_json
 
 log = logging.getLogger("dubtool")
@@ -76,7 +75,7 @@ def _load_schedule(job) -> list[dict] | None:
     return schedule if isinstance(schedule, list) else None
 
 
-def run(job, config, force: bool = False) -> None:
+def run(job, config, force: bool = False, cancel=None) -> None:
     audio_utils.require_ffmpeg()
     cfg = config.subtitles
 
@@ -135,23 +134,27 @@ def run(job, config, force: bool = False) -> None:
     tmp_out = job.dir / "output.tmp.mp4"
     if tmp_out.exists():
         tmp_out.unlink()
+    preset = str(cfg.get("preset", "medium")) or "medium"
     cmd = [
         audio_utils.ffmpeg_bin(), "-y",
         "-i", base.name,
         "-vf", graph,
         "-c:v", "libx264",
         "-crf", str(int(cfg.get("crf", 18))),
-        "-preset", str(cfg.get("preset", "medium")),
+        "-preset", preset,
         "-pix_fmt", "yuv420p",
         "-c:a", "copy",
         "-movflags", "+faststart",
         tmp_out.name,
     ]
+    threads = int(getattr(config, "encode_threads", 0) or 0)
+    if threads > 0:
+        cmd[-1:-1] = ["-threads", str(threads)]
     started = time.monotonic()
-    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(job.dir))
+    result = proc.run(cmd, cwd=str(job.dir), cancel=cancel, low_priority=True)
     seconds = time.monotonic() - started
-    if proc.returncode != 0:
-        tail = (proc.stderr or "").strip().splitlines()[-8:]
+    if result.returncode != 0:
+        tail = (result.stderr or "").strip().splitlines()[-8:]
         raise RuntimeError("burn failed: " + " | ".join(tail))
     os.replace(str(tmp_out), str(out))
     log.info("s7: burned subtitles into %s in %.1fs", out.name, seconds)

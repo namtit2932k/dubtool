@@ -34,9 +34,9 @@ def load(settings: dict | None = None, parse=None) -> dict:
             # shipped defaults mirroring modes.yaml ( resilience if the file
             # is missing from the bundle)
             raw = (
-                {"label_key": "mode.fast", "provider": "gemini", "model": "gemini-3.5-flash-lite", "translate_concurrency": 1}
+                {"label_key": "mode.fast", "provider": "gemini", "model": "gemini-3.5-flash-lite", "translate_concurrency": 1, "models": ["gemini-3.5-flash-lite", "gemini-3.6-flash"]}
                 if key == "fast"
-                else {"label_key": "mode.accurate", "provider": "gemini", "model": "gemini-3.8-flash", "translate_concurrency": 3}
+                else {"label_key": "mode.accurate", "provider": "gemini", "model": "gemini-3.8-flash", "translate_concurrency": 3, "models": ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-4-argon"]}
             )
         modes[key] = raw
     overrides = ((settings or {}).get("mode_models") or {})

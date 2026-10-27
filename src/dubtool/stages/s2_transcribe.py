@@ -195,22 +195,8 @@ def _postprocess_only(job, config) -> None:
         print(f"s2 postprocess: removed repeat from segment {seg_id}: {removed!r}")
     log.info("s2 postprocess: %d duplicate removals, %d segments remain", len(removals), len(cleaned))
 
-
-def run(job, config, force: bool = False) -> None:
-    out = job.transcript_path
-    if out.exists() and not force:
-        log.info("s2: transcript.json already exists, skipping")
-        return
-
-    from faster_whisper import WhisperModel  # lazy: keeps tests offline-light
-
-    audio_utils.require_ffmpeg()
-    log.info("s2: loading whisper model %s on %s (%s)", config.whisper_model, config.device, config.compute_type)
-    model = WhisperModel(
-        config.whisper_model,
-        device=config.device,
-        compute_type=config.compute_type,
-    )
+def _transcribe(model, job, config) -> None:
+    """Whisper pass + cleanup + write transcript.json (AGU6 4.2 split)."""
     raw_segments, info = model.transcribe(
         str(job.audio_path),
         language="en",
@@ -234,8 +220,40 @@ def run(job, config, force: bool = False) -> None:
         log.info("s2: removed repeated words from segment %d: %r", seg_id, removed)
     from dubtool.job import write_json
 
-    write_json(out, _finalize(cleaned))
+    write_json(job.transcript_path, _finalize(cleaned))
     log.info(
         "s2: transcribed %d raw -> %d cleaned segments (%.1fs of speech, lang=%s)",
         len(segments), len(cleaned), info.duration, info.language,
     )
+
+
+def run(job, config, force: bool = False) -> None:
+    out = job.transcript_path
+    if out.exists() and not force:
+        log.info("s2: transcript.json already exists, skipping")
+        return
+
+    from faster_whisper import WhisperModel  # lazy: keeps tests offline-light
+
+    audio_utils.require_ffmpeg()
+    # AGU6 4.2: cap Whisper's CPU threads at the chosen "Mức dùng CPU" level
+    # and run the app itself below normal so the desktop stays responsive
+    # (restored in the finally below).
+    from dubtool.app import cpu as cpu_mod
+
+    threads = cpu_mod.thread_budget()
+    cpu_mod.lower_app_priority()
+    log.info(
+        "s2: loading whisper model %s on %s (%s, %d threads)",
+        config.whisper_model, config.device, config.compute_type, threads,
+    )
+    try:
+        model = WhisperModel(
+            config.whisper_model,
+            device=config.device,
+            compute_type=config.compute_type,
+            cpu_threads=threads,
+        )
+        segments = _transcribe(model, job, config)
+    finally:
+        cpu_mod.restore_app_priority()

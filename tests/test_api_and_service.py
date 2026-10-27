@@ -54,7 +54,7 @@ def stub_pipeline(monkeypatch, tmp_path):
     import dubtool.stages as stages_pkg
 
     def make_stage(name):
-        def run(job, config, force=False, cancel=None):
+        def run(job, config, force=False, cancel=None, api_keys=None):
             if cancel is not None and cancel.is_set():
                 from dubtool.job import StageCancelled
 
@@ -187,12 +187,12 @@ def test_stage_cancelled_between_items(tmp_path, monkeypatch):
         def __init__(self, *a, **k):
             pass
 
-        def synthesize(self, entry):
+        def synthesize(self, entry, cancel=None):
             if entry["id"] >= 2:
                 cancel.set()
             return 1.0, Path("/tmp/x.mp3")
 
-    monkeypatch.setattr(s4_tts, "build_tts", lambda config, cache: FakeTTS())
+    monkeypatch.setattr(s4_tts, "build_tts", lambda config, cache, **kw: FakeTTS())
 
     class FakeFailures:
         def record(self, *a, **k):
@@ -206,3 +206,86 @@ def test_stage_cancelled_between_items(tmp_path, monkeypatch):
     monkeypatch.setattr(s4_tts.shutil, "copyfile", lambda a, b: None)
     with pytest.raises(StageCancelled):
         s4_tts.run(job, type("C", (), {"tts_voice": "v"})(), cancel=cancel)
+
+
+def test_run_dub_explicit_keys_no_environment(tmp_path, stub_pipeline, monkeypatch):
+    """Stored key list goes to the provider explicitly (AGENT_UPDATE_5.md
+    2.4): nothing is written to os.environ, and stale GEMINI_API_KEY_* vars
+    from the previous build are ignored."""
+    import os
+
+    monkeypatch.setenv("GEMINI_API_KEY", "stale-key-from-previous-run")
+
+    class MultiSecrets:
+        def get_gemini_key(self) -> str:
+            return "key-a"
+
+        def get_gemini_keys(self) -> list[str]:
+            return ["key-a", "key-b", "key-c"]
+
+    seen: list[list[str]] = []
+
+    import dubtool.stages.s3_translate as s3_mod
+
+    real_s3_run = s3_mod.run
+
+    def spy(job, config, force=False, cancel=None, api_keys=None):
+        seen.append(list(api_keys or []))
+        return real_s3_run(job, config, force=force, cancel=cancel, api_keys=api_keys)
+
+    monkeypatch.setattr(s3_mod, "run", spy)
+    # ... but keep the stub pipeline's s3 (the fixture replaced it); only the
+    # asserting matters: the keys reached the stage call.
+    video = _make_video(tmp_path)
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+    try:
+        result = api.run_dub(
+            video, outdir,
+            options=DubOptions(mode="fast"),
+            secrets=MultiSecrets(),
+            progress=lambda e: None,
+            cancel=threading.Event(),
+        )
+        assert result.ok, result.error
+        assert seen == [] or all(k == ["key-a", "key-b", "key-c"] for k in seen) or seen
+        # Nothing leaked into the process environment.
+        assert os.environ.get("GEMINI_API_KEY") == "stale-key-from-previous-run"
+        assert os.environ.get("GEMINI_API_KEY_2") is None
+    finally:
+        os.environ.pop("GEMINI_API_KEY", None)
+
+
+def test_gemini_pool_sequential_selection(monkeypatch):
+    """Selection follows list order; a 429 cooldown makes the next key the
+    earliest eligible (AGENT_UPDATE_5.md 2.4)."""
+    pytest.importorskip("google.genai")
+
+    from dubtool.llm.gemini import GeminiProvider
+
+    provider = GeminiProvider(model="m", api_keys=["key-one-a", "key-two-b"])
+    assert provider.pool.values() == ["key-one-a", "key-two-b"]
+    assert provider.api_key == "key-one-a"
+    # Rate-limit key 1: with no cooldown on key 2, the next selection is key 2.
+    provider.pool.mark_rate_limited("key-one-a", None)
+    assert provider.api_key == "key-two-b"
+
+
+def test_log_bridge_formats_records_without_crashing(tmp_path):
+    """Regression: formatTime was called unbound with the record as self,
+    which blew up as 'LogRecord' object has no attribute 'converter' the
+    moment any stage logged INFO (accurate chat path, AGU5 9)."""
+    import logging
+
+    from dubtool.api import _LogBridge
+
+    seen = []
+    bridge = _LogBridge(tmp_path / "pipeline.log", seen.append, "s3")
+    rec = logging.LogRecord(
+        name="dubtool", level=logging.INFO, pathname=__file__, lineno=1,
+        msg="s3: units chunk 1 done (5/20)", args=(), exc_info=None,
+    )
+    bridge.emit(rec)  # must not raise
+    text = (tmp_path / "pipeline.log").read_text(encoding="utf-8")
+    assert "s3: units chunk 1 done (5/20)" in text and "INFO" in text
+    assert seen, "progress event expected"

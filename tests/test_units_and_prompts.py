@@ -288,7 +288,7 @@ def test_stage3_unit_mode_keeps_per_segment_contract(tmp_path, monkeypatch):
     job = _unit_job(tmp_path)
     fake = FakeUnitClient({0: "Ồ, cô ấy lại làm thế nữa à?", 1: "Đúng, cô ấy làm thế."})
     monkeypatch.setattr(s3, "LLMClient", lambda provider: fake)
-    monkeypatch.setattr(s3, "get_provider", lambda config, pid=None: type("P", (), {"name": "f", "model": "m"})())
+    monkeypatch.setattr(s3, "get_provider", lambda config, pid=None, **k: type("P", (), {"name": "f", "model": "m"})())
     config = Config(chars_per_sec=14)
     s3.run(job, config, force=False, provider_id="gemini")
 
@@ -327,7 +327,7 @@ def test_stage3_skips_unit_with_reviewed_segment(tmp_path, monkeypatch):
 
     fake = MappingUnitClient({})
     monkeypatch.setattr(s3, "LLMClient", lambda provider: fake)
-    monkeypatch.setattr(s3, "get_provider", lambda config, pid=None: type("P", (), {"name": "f", "model": "m"})())
+    monkeypatch.setattr(s3, "get_provider", lambda config, pid=None, **k: type("P", (), {"name": "f", "model": "m"})())
     config = Config(chars_per_sec=14)
     s3.run(job, config, force=False, provider_id="gemini")
     entries_after = read_json(job.translated_path)
