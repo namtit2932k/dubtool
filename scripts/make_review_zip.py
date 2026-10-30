@@ -132,6 +132,11 @@ def candidate_files(root: Path) -> list[Path]:
         p = root / name
         if p.exists():
             candidates.append(p)
+    # AGU8 task 7.4: the latest REPORT_UPDATE_*.md travels in the review zip
+    # (REVIEW_NOTES.md is already allowlisted above).
+    reports = sorted(root.glob("REPORT_UPDATE_*.md"), key=lambda p: p.stat().st_mtime)
+    if reports:
+        candidates.append(reports[-1])
     for dirname in ALLOWLIST_DIRS:
         base = root / dirname
         if not base.exists():

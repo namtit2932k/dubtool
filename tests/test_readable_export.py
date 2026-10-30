@@ -355,7 +355,7 @@ def test_run_dub_failure_isolated_readable(monkeypatch, tmp_path):
     calls: list[str] = []
     real_deliver = s8.deliver
 
-    def flaky_deliver(job_dir, video_target, *, fmt, lang, duration_s=None):
+    def flaky_deliver(job_dir, video_target, *, fmt, lang, duration_s=None, mark_uncertain=False):
         calls.append(fmt)
         if fmt == "docx":
             raise RuntimeError("python-docx missing (simulated)")

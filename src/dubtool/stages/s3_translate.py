@@ -24,6 +24,7 @@ from typing import Any, Callable
 
 from dubtool.job import StageCancelled, read_json, write_json
 from dubtool.llm import LLMClient, get_provider
+from dubtool.llm.base import LLMError, OverloadFallbackFast, failed_after_timeout
 from dubtool.llm.budget import BudgetExhausted
 from dubtool.units import build_units, split_translation
 from dubtool.llm.base import RateLimitError
@@ -221,6 +222,7 @@ def units_for(entries: list[dict[str, Any]], units_cfg: dict) -> list[dict[str, 
         max_segments=int(units_cfg.get("max_segments", 4)),
         max_duration_s=float(units_cfg.get("max_duration_s", 14.0)),
         max_gap_s=float(units_cfg.get("max_gap_s", 1.0)),
+        pause_split_s=float(units_cfg.get("pause_split_s", 0.5)),
     )
     by_id = {e["id"]: e for e in entries}
     for u in units:
@@ -249,7 +251,8 @@ def write_units_file(job, units: list[dict[str, Any]]) -> None:
 
 
 def enforce_budget(
-    entries: list[dict[str, Any]], client: LLMClient, tolerance: float
+    entries: list[dict[str, Any]], client: LLMClient, tolerance: float,
+    policy: str | None = None,
 ) -> tuple[int, int]:
     """The existing one-shot enforcement pass, now with configurable tolerance."""
     over_before = count_over_budget(entries, tolerance)
@@ -265,7 +268,7 @@ def enforce_budget(
         ]
         log.info("s3: enforcement pass on %d over-budget segments", len(items))
         try:
-            shortened = client.shorten_batch(items)
+            shortened = client.shorten_batch(items, policy=policy)
             merge_translations(entries, shortened)
         except Exception as exc:  # enforcement is best-effort; stage 5 recovers
             log.warning("s3: enforcement pass failed, leaving as is: %s", exc)
@@ -273,8 +276,335 @@ def enforce_budget(
     return len(over_before), len(over_after)
 
 
+def _filter_glossary(glossary: dict | None, texts: list[str]) -> dict | None:
+    """AGU8 5.4: only the glossary entries that occur in the chunk are sent
+    (saves tokens). "_"-prefixed comment keys never reach the prompt."""
+    if not isinstance(glossary, dict):
+        return glossary
+    blob = " \n".join(str(t or "").lower() for t in texts)
+    out: dict = {}
+    for term, value in glossary.items():
+        key = str(term or "").strip().lower()
+        if not key or key.startswith("_"):
+            continue
+        if key in blob:
+            out[term] = value
+    return out
+
+
+def _words_in_range(words: list[dict], start: float, end: float) -> list[dict]:
+    """The word entries whose midpoint falls inside [start, end]."""
+    out: list[dict] = []
+    for w in words or []:
+        try:
+            ws = float(w.get("start", 0.0))
+            we = float(w.get("end", ws))
+        except (TypeError, ValueError):
+            continue
+        mid = (ws + we) / 2.0
+        if start - 0.05 <= mid < end + 0.05:
+            out.append(w)
+    return out
+
+
+def _filler_state(job, config, transcript) -> dict:
+    """AGU8 task 4: per-video suggestions, saved/doalog choices, the per-token
+    actions and the base policy text for the run.
+
+    Suggestions are always computed fresh runs (and stored in the job dir as
+    suggested_fillers.json). The GUI dialog is asked only when
+    `fillers.ask` is on, the run is app-interactive, no choice is already
+    saved for this video, and a `config.fillers_dialog` callback exists
+    (set by api.run_dub). CLI/headless runs never ask.
+    """
+    from dubtool import fillers as fillers_mod
+    from dubtool.punctuate import read_words
+
+    fill_cfg = getattr(config, "fillers", {}) or {}
+    settings = fillers_mod.load_settings()
+    words = read_words(job) or []
+    scanned: list[dict] = []
+    for seg in transcript:
+        s = dict(seg)
+        s["words"] = _words_in_range(words, float(s.get("start", 0.0)), float(s.get("end", 0.0)))
+        scanned.append(s)
+    suggestions = fillers_mod.suggest_candidates(scanned)
+    fillers_mod.write_suggestions(job.dir, suggestions)
+    log.info(
+        "s3: filler suggestions: %d token(s) above the threshold — %s",
+        len(suggestions), ", ".join(
+            f"{s['token']} x{s['count']}" for s in suggestions[:5]) or "none",
+    )
+
+    user_choices: dict | None = None
+    video = getattr(config, "fillers_video", None)
+    if suggestions and video is not None:
+        saved = fillers_mod.load_video_choices(video)
+        if saved:
+            user_choices = dict(saved)
+            log.info("s3: using saved filler choices for this video (%s)", sorted(saved))
+    if suggestions and user_choices is None:
+        interactive = bool(getattr(config, "llm_interactive", False))
+        if bool(fill_cfg.get("ask", True)) and interactive:
+            dialog = getattr(config, "fillers_dialog", None)
+            if callable(dialog):
+                choices = dialog(suggestions)
+                if choices:
+                    user_choices = dict(choices)
+                    if video is not None:
+                        fillers_mod.save_video_choices(video, user_choices)
+                    log.info("s3: filler dialog choices saved: %s", sorted(user_choices))
+
+    actions = fillers_mod.resolve_actions(suggestions, settings, user_choices)
+    policy = fillers_mod.render_policy(None, actions, settings) if actions else ""
+    if policy:
+        # Stage 5 shortening reads the same run-scoped policy.
+        try:
+            config.fillers_policy = policy
+        except Exception:
+            pass
+    return {
+        "settings": settings,
+        "actions": actions,
+        "policy": policy,
+        "words": words,
+        "suggestions": suggestions,
+        "count": len(suggestions),
+    }
+
+
+def _completeness_pass(job, entries, config, client, cancel) -> list[dict]:
+    """AGU8 6.2: flag probable truncations, re-translate each flagged unit
+    ONCE in a single batch (+30% allowance), keep the old text when the
+    re-translation is still flagged, and write quality_report.json (time,
+    English, Vietnamese, reason). Returns the still-flagged units."""
+    from dubtool import complete as complete_mod
+    from dubtool.llm import parsing as llm_parsing
+
+    tr = getattr(config, "translate", {}) or {}
+    conn = tr.get("connectors") or None
+    flags = complete_mod.flagged_entries(entries, connectors=conn)
+    if not flags:
+        return []
+    log.info(
+        "s3: completeness pass: %d unit(s) flagged (%s)", len(flags),
+        {f["reason"] for f in flags},
+    )
+    by_id = {e["id"]: e for e in entries}
+    items = [
+        {"id": f["id"], "text": f["en"], "vi": f["vi"],
+         "max_chars": max(1, int(f.get("max_chars") or 1))}
+        for f in flags
+    ]
+    try:
+        if cancel is not None and cancel.is_set():
+            raise StageCancelled("s3: cancelled during the completeness pass")
+        ids = [i["id"] for i in items]
+        user = complete_mod.render_retranslate_batch(items)
+
+        def _validate(raw):
+            return llm_parsing.parse_json_array(raw, ids)
+
+        def _note(exc):
+            return ("Your previous reply was invalid: %s. Follow the format "
+                    "exactly and reply again with only the JSON array." % exc)
+
+        upd = client._call_and_validate(
+            complete_mod.RETRANSLATE_SYSTEM, user, _validate, _note,
+        )
+    except Exception as exc:  # best effort: keep the old text, still report
+        log.warning("s3: completeness re-translation failed (%s) — the flagged units are kept", exc)
+        upd = []
+    ok_ids: set[int] = set()
+    for r in upd:
+        entry = by_id.get(r.get("id"))
+        new_vi = str(r.get("vi") or "").strip()
+        if entry is None or not new_vi or entry.get("reviewed"):
+            continue
+        if complete_mod.flag_unit(entry["text"], new_vi, conn) is None:
+            entry["vi"] = new_vi
+            ok_ids.add(entry["id"])
+    final = complete_mod.flagged_entries(entries, connectors=conn)
+    flag_ids = {f["id"] for f in final}
+    # AGU8 6.2: the entries the readable file marks. Stale flags from an
+    # earlier run clear here (the write below persists the current truth).
+    for e in entries:
+        if e.get("uncertain") and e["id"] not in flag_ids:
+            e.pop("uncertain", None)
+    for f in final:
+        by_id[f["id"]]["uncertain"] = True
+    report = [
+        {
+            "time": by_id[f["id"]]["start"],
+            "en": f["en"],
+            "vi": f["vi"],
+            "reason": f["reason"],
+        }
+        for f in final
+    ]
+    try:
+        write_json(job.dir / "quality_report.json", report)
+    except Exception:
+        pass
+    total = len(flags)
+    fixed = total - len(final)
+    log.info(
+        "s3: completeness re-translation: %d/%d fixed, %d kept flagged",
+        fixed, total, len(final),
+    )
+    return final
+
+
+def fast_model_id(config) -> str | None:
+    """The Fast mode's model id from packaging/modes.yaml plus the user's
+    settings override (used by every mechanical LLM step and the overload
+    fallback — mechanical steps always use the Fast model, AGU8 rule 4)."""
+    try:
+        from dubtool.app import modes as modes_mod
+
+        try:
+            from dubtool.app import settings as app_settings_mod
+            overrides = app_settings_mod.load()
+        except Exception:
+            overrides = None
+        return (modes_mod.load(overrides or {}) or {}).get("fast", {}).get("model")
+    except Exception as exc:
+        log.debug("s3: Fast mode model lookup failed (%s)", exc)
+        return None
+
+
+def fast_client(config, pid: str, api_keys, cancel, on_overload=None):
+    """A Fast-model LLMClient for the mechanical steps (punctuation,
+    re-translation); its requests count in the shared run budget."""
+    llm_cfg = getattr(config, "llm", {}) or {}
+    options = {
+        "server_error_backoff_s": llm_cfg.get("server_error_backoff_s"),
+        "overload_after": llm_cfg.get("overload_after", 2),
+        "overload_policy": "wait",  # mechanical steps never switch models
+    }
+    provider = get_provider(
+        config, pid, api_keys=api_keys, cancel=cancel, mode="fast",
+        model_override=fast_model_id(config),
+    )
+    return LLMClient(provider, cancel=cancel, options=options, on_overload=on_overload)
+
+
+def _prepare_sentences(job, config, transcript, pid, api_keys, cancel):
+    """AGU8 task 3 pre-translation step (fresh runs only).
+
+    1. `punctuate.enabled: auto` triggers punctuation restoration when more
+       than 30% of segments lack sentence-final punctuation or any run of
+       more than 25 words does; `on` forces it, `off` skips.
+    2. `asr.sentence_resegment` cuts the segments at sentence-final marks
+       using words.json (only when the word times cover the text).
+    Returns the (possibly updated) transcript or None when unchanged.
+    """
+    from dubtool.punctuate import (
+        needs_punctuation,
+        read_words,
+        resegment_by_sentences,
+        restore_punctuation,
+    )
+
+    changed = False
+    punct = getattr(config, "punctuate", {}) or {}
+    enabled = str(punct.get("enabled", "auto")).lower()
+    if enabled != "off" and (
+        needs_punctuation(
+            transcript,
+            max_missing_ratio=float(punct.get("max_missing_ratio", 0.30)),
+            max_unpunct_run=int(punct.get("max_unpunct_run", 25)),
+        ) or enabled == "on"
+    ):
+        client = fast_client(config, pid, api_keys, cancel)
+        try:
+            accepted, rejected = restore_punctuation(transcript, client, punct)
+        except BudgetExhausted as exc:
+            log.warning("punctuate: %s — the transcription text stays as is", exc)
+            accepted = rejected = 0
+        log.info(
+            "s3: punctuation restore: %d window(s) accepted, %d rejected",
+            accepted, rejected,
+        )
+        changed = accepted > 0
+    if bool(getattr(config, "asr", {}).get("sentence_resegment", True)):
+        words = read_words(job)
+        if words:
+            reseg = resegment_by_sentences(transcript, words)
+            if reseg is not None:
+                transcript = reseg
+                changed = True
+                log.info(
+                    "s3: resegmented into %d sentence segments from word times",
+                    len(reseg),
+                )
+        else:
+            log.info("s3: no words.json — sentence resegmentation skipped")
+    if not changed:
+        return None
+    write_json(job.transcript_path, transcript)
+    return transcript
+
+
+def translate_resilient(
+    holder: dict, translate_call: Callable[..., list],
+    payloads: list, context_payload: list, label: str, *,
+    on_fallback: Callable[[str], None], split_on_timeout: bool,
+    split_min_units: int, stats: dict, depth: int = 0,
+) -> list:
+    """AGU8 task 2 external resilience layer for one translation chunk.
+
+    - OverloadFallbackFast (the overload policy said 'use the Fast model'):
+      rebuild the client via on_fallback, then retry the same chunk once.
+      The exception is otherwise left untouched by the wrapper.
+    - A 504 / client-side timeout (split_on_timeout): split the chunk in
+      two halves and translate each with the same policy, recursively, so
+      long requests become short ones instead of timing out again. Halves
+      are only made while each is at least split_min_units payloads.
+    """
+    client = holder["client"]
+    # Agreed chunk label echoed on the request logs (AGU8 3.5). Concurrent
+    # threads share the client, so a label can be overwritten by the next
+    # call; it stays informational.
+    client.request_label = label
+    try:
+        return translate_call(client, payloads, context_payload)
+    except OverloadFallbackFast as exc:
+        if depth >= 8:
+            raise
+        on_fallback(exc.from_model)  # swaps holder['client'] to the Fast model
+        return translate_resilient(
+            holder, translate_call, payloads, context_payload, label,
+            on_fallback=on_fallback, split_on_timeout=split_on_timeout,
+            split_min_units=split_min_units, stats=stats, depth=depth + 1,
+        )
+    except LLMError as exc:
+        can_split = (
+            split_on_timeout and depth < 8 and failed_after_timeout(exc)
+            and len(payloads) >= max(2, 2 * split_min_units)
+        )
+        if not can_split:
+            raise
+        stats["splits"] = stats.get("splits", 0) + 1
+        log.warning(
+            "s3: %s failed after a timeout (%s) — splitting %d payloads in two",
+            label, exc, len(payloads),
+        )
+        mid = len(payloads) // 2
+        out: list = []
+        for k, part in enumerate((payloads[:mid], payloads[mid:]), start=1):
+            out.extend(translate_resilient(
+                holder, translate_call, part, context_payload,
+                f"{label} [part {k}/2]", on_fallback=on_fallback,
+                split_on_timeout=split_on_timeout,
+                split_min_units=split_min_units, stats=stats, depth=depth + 1,
+            ))
+        return out
+
+
 def _run_segment_mode(
-    job, entries, client, chunk_size, glossary, brief, force: bool,
+    job, entries, translate_payloads: Callable[[list, list, str], list],
+    chunk_size, glossary, brief, force: bool,
     pronouns: dict | None = None, concurrency: int = 1,
     cancel: threading.Event | None = None,
 ):
@@ -289,6 +619,7 @@ def _run_segment_mode(
 
     translated = 0
     todo_chunks = list(enumerate(chunks_of(todo, chunk_size), start=1))
+    n_chunks = len(todo_chunks)
 
     def chunk_fn(chunk_with_index):
         chunk_index, chunk = chunk_with_index
@@ -297,9 +628,12 @@ def _run_segment_mode(
         context_payload = [
             {"id": e["id"], "text": e["text"], "vi": e.get("vi") or ""} for e in context
         ]
-        return client.translate_batch(
-            chunk, context_payload, glossary, brief=brief, pronouns=pronouns
+        total_chars = sum(len(s.get("text") or "") for s in chunk)
+        label = (
+            f"translate chunk {chunk_index}/{n_chunks} "
+            f"({len(chunk)} segments, {total_chars} chars)"
         )
+        return translate_payloads(chunk, context_payload, label)
 
     def apply_chunk(idx, updates):
         nonlocal translated
@@ -333,7 +667,16 @@ def run(
             log.warning("s3: translated.json has unexpected format, regenerating")
             existing = None
 
+    pid = (provider_id or config.llm_provider).lower()
+
     if existing is None:
+        # AGU8 4.2/4.3: fresh runs may restore punctuation and re-cut the
+        # segments into sentences BEFORE translations are built. Resume runs
+        # keep the saved ids intact (translated.json already exists) so the
+        # step is skipped there.
+        _prep = _prepare_sentences(job, config, transcript, pid, api_keys, cancel)
+        if _prep is not None:
+            transcript = _prep
         entries = build_translated(transcript, config.chars_per_sec)
     else:
         entries = existing
@@ -343,12 +686,101 @@ def run(
                 entries.extend(build_translated([seg], config.chars_per_sec))
         entries.sort(key=lambda e: e["id"])
 
-    pid = (provider_id or config.llm_provider).lower()
-    provider = get_provider(config, pid, api_keys=api_keys, cancel=cancel)
+    # AGU8 3.5: the per-mode request timeout (Fast mode uses the shorter
+    # llm.request_timeout_s_fast). config.llm_mode is set by api.run_dub;
+    # the CLI keeps the legacy single timeout.
+    llm_cfg = getattr(config, "llm", {}) or {}
+    mode = getattr(config, "llm_mode", None)
+    interactive = bool(getattr(config, "llm_interactive", False))
+    provider = get_provider(config, pid, api_keys=api_keys, cancel=cancel, mode=mode)
     translate_cfg = config.translate or {}
     concurrency = max(1, int(translate_cfg.get("concurrency", 1)))
     pronouns = {k: v for k, v in (translate_cfg.get("pronouns") or {}).items() if v}
-    client = LLMClient(provider)
+    # AGU8 6.3 fidelity preset: the meaning-vs-timing trade-off.
+    priority = str(translate_cfg.get("priority", "balanced")).lower()
+    priority_mult = {"faithful": 1.5, "timing": 0.9}.get(priority, 1.0)
+    # AGU8 task 2: the retry knobs come from config llm; the stage owns the
+    # overload policy callback and the split-on-timeout resilience layer.
+    split_on_timeout = bool(llm_cfg.get("split_on_timeout", True))
+    split_min_units = max(2, int(llm_cfg.get("split_min_units", 4) or 4))
+    overload_policy = str(
+        llm_cfg.get("overload_policy", ("ask" if interactive else "fallback_fast"))
+    ).lower()
+    client_options = {
+        "server_error_backoff_s": llm_cfg.get("server_error_backoff_s"),
+        "overload_after": llm_cfg.get("overload_after", 2),
+        "overload_policy": overload_policy,
+    }
+    stats: dict = {"splits": 0, "fallback": False, "fast_model": None}
+    # AGU8 task 4: suggestions + per-video choices + the filler policy.
+    fill_state = _filler_state(job, config, transcript)
+    base_policy = fill_state["policy"]
+
+    def _overload_callback() -> str:
+        # AGU8 3.4. interactive asks the dialog; 'ask' without a dialog and
+        # 'wait' keep backing off; 'fallback_fast' makes the wrapper raise
+        # OverloadFallbackFast, which translate_resilient turns into the
+        # Fast-model switch below.
+        if overload_policy == "ask":
+            dialog = getattr(config, "llm_overload_dialog", None)
+            if interactive and callable(dialog):
+                action = str(dialog()).lower()  # may raise (dialog Cancel)
+                if action in ("cancel", "cancelled"):
+                    raise StageCancelled("s3: overload — cancelled by user")
+                return "fallback_fast" if action in (
+                    "fallback_fast", "fallback-fast", "fast", "switch",
+                ) else "wait"
+            # AGU8 3.4: 'ask' is a GUI-only policy — with no dialog (CLI,
+            # --headless-run) it degrades to fallback_fast instead of waiting
+            # out a real overload (which would only end in a give-up).
+            return "fallback_fast"
+        return "fallback_fast" if overload_policy in (
+            "fallback_fast", "fallback-fast"
+        ) else "wait"
+
+    def switch_to_fast_model(_from_model: str) -> None:
+        fast_provider = get_provider(
+            config, pid, api_keys=api_keys, cancel=cancel,
+            mode="fast", model_override=fast_model_id(config),
+        )
+        holder["client"] = LLMClient(
+            fast_provider, cancel=cancel, options=client_options,
+            on_overload=_overload_callback,
+        )
+        stats["fallback"] = True
+        stats["fast_model"] = fast_provider.model
+        log.info(
+            "s3: overload policy switched the rest of stage 3 to the Fast model %s",
+            fast_provider.model,
+        )
+
+    holder: dict = {"client": LLMClient(
+        provider, cancel=cancel, options=client_options, on_overload=_overload_callback,
+    )}
+
+    def translate_payloads(payloads, context_payload, label: str,
+                           policy: str | None = None,
+                           glossary_override: dict | None = None) -> list:
+        def do_translate(client, payloads_, ctx):
+            # AGU8 6.3: the preset scales the per-unit character budget sent
+            # to the model ('balanced' keeps the current numbers).
+            scaled = [
+                dict(p, max_chars=max(1, int(round((p.get("max_chars") or 0) * priority_mult))))
+                if priority_mult != 1.0 else p
+                for p in payloads_
+            ]
+            return client.translate_batch(
+                scaled, ctx,
+                glossary if glossary_override is None else glossary_override,
+                brief=brief, pronouns=pronouns, policy=policy or base_policy,
+            )
+        return translate_resilient(
+            holder, do_translate, payloads, context_payload, label,
+            on_fallback=switch_to_fast_model,
+            split_on_timeout=split_on_timeout,
+            split_min_units=split_min_units, stats=stats,
+        )
+
     chunk_size = config.chunk_size(pid)
     log.info(
         "s3: provider=%s model=%s chunk_size=%d concurrency=%d",
@@ -396,8 +828,32 @@ def run(
                 {"id": u["unit_id"], "text": u["text"], "max_chars": u["max_chars"]}
                 for u in chunk
             ]
-            return client.translate_batch(
-                payloads, context_payload, glossary, brief=brief, pronouns=pronouns
+            # AGU8 5.4: per-chunk detected spans + glossary filtering.
+            chunk_spans: list[dict] = []
+            from dubtool import fillers as fillers_mod
+            chunk_texts = [u["text"] for u in chunk]
+            for u in chunk:
+                uw = _words_in_range(
+                    fill_state["words"], float(u["start"]), float(u["end"])
+                )
+                chunk_spans.extend(fillers_mod.tag_fillers(
+                    u["text"], uw, fill_state["settings"],
+                    float((getattr(config, "fillers", {}) or {}).get("pause_s", 0.25)),
+                ))
+            chunk_policy = fillers_mod.render_policy(
+                chunk_spans, fill_state["actions"], fill_state["settings"]
+            ) or base_policy
+            chunk_glossary = _filter_glossary(
+                glossary, chunk_texts + [s["text"] for s in chunk_spans]
+            )
+            total_chars = sum(len(u["text"]) for u in chunk)
+            label = (
+                f"translate chunk {chunk_index}/{len(unit_chunks)} "
+                f"({len(payloads)} units, {total_chars} chars)"
+            )
+            return translate_payloads(
+                payloads, context_payload, label,
+                policy=chunk_policy, glossary_override=chunk_glossary,
             )
 
         def apply_units(idx, updates):
@@ -426,23 +882,62 @@ def run(
     else:
         try:
             translated_count = _run_segment_mode(
-                job, entries, client, chunk_size, glossary, brief, force,
+                job, entries, translate_payloads, chunk_size, glossary, brief, force,
                 pronouns=pronouns, concurrency=concurrency, cancel=cancel,
             )
         except BudgetExhausted as exc:  # 5.2: finish with what exists
             log.warning("s3: %s — the rerun fills the remaining segments", exc)
 
+    final_client = holder["client"]
     # One-shot enforcement pass (soft-budget tolerance, AGU3 task 7).
-    over_before, over_after = enforce_budget(entries, client, tolerance)
+    over_before, over_after = enforce_budget(
+        entries, final_client, tolerance, policy=base_policy
+    )
     write_json(job.translated_path, entries)
 
+    # AGU8 6.2: truncation/shrink guard — one re-translation batch, then the
+    # quality report for what is still flagged.
+    uncertain = _completeness_pass(job, entries, config, final_client, cancel)
+    if uncertain:
+        write_json(job.translated_path, entries)
+
+    cli_provider = getattr(final_client, "provider", None)
+    provider_name = getattr(cli_provider, "name", "?")
+    provider_model = getattr(cli_provider, "model", "?")
     summary = (
-        f"s3 summary: provider={provider.name} model={provider.model} "
-        f"mode={unit_mode} units_translated={translated_count if unit_mode == 'sentence' else translated_count} "
+        f"s3 summary: provider={provider_name} model={provider_model} "
+        f"mode={unit_mode} units_translated={translated_count} "
         f"over_max_chars_before={over_before} over_max_chars_after={over_after}"
     )
-    if client.total_input_tokens or client.total_output_tokens:
-        summary += f" tokens(in={client.total_input_tokens}, out={client.total_output_tokens})"
-    summary += f" llm_requests={client.total_calls}"  # AGU6 5.2 per-stage count
+    if final_client.total_input_tokens or final_client.total_output_tokens:
+        summary += (
+            f" tokens(in={final_client.total_input_tokens}, "
+            f"out={final_client.total_output_tokens})"
+        )
+    summary += f" llm_requests={final_client.total_calls}"  # AGU6 5.2 per-stage count
+    if stats["splits"]:
+        summary += f" timeout_splits={stats['splits']}"
+    if stats["fallback"]:
+        summary += f" overload_fallback=fast({stats['fast_model']})"
+    if fill_state["count"]:
+        summary += f" filler_suggestions={fill_state['count']}"
+    if uncertain:
+        summary += f" uncertain_units={len(uncertain)}"
     log.info(summary)
+    if uncertain:
+        # AGU8 6.2: the plain-language line for the run summary.
+        try:
+            from dubtool.app import i18n
+            from dubtool.audio_utils import format_mmss
+
+            log.info(
+                "%s",
+                i18n.tr(
+                    "s3.uncertain_plain",
+                    n=len(uncertain),
+                    times=", ".join(format_mmss(u["time"]) for u in uncertain[:10]),
+                ),
+            )
+        except Exception:
+            pass
     print(summary)

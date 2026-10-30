@@ -9,6 +9,7 @@ description = "English -> Vietnamese video dubbing tool"
 requires-python = ">=3.11"
 dependencies = [
   "faster-whisper>=1.0",
+  "av>=11,<19",  # AGU8 7.1: PyAV 19+ changes the APIs faster-whisper uses
   "anthropic>=0.40",
   "edge-tts>=6.1",
   "pydub>=0.25",

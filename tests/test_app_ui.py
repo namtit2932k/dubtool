@@ -157,6 +157,45 @@ def test_key_hint_removed(dialog):
     for table in i18n.STRINGS.values():
         for key in table:
             assert "key.hint" not in key
+
+
+def test_priority_dropdown_round_trip(qtbot, dialog, tmp_path):
+    """AGU8 6.3: Settings → General has the fidelity-preset dropdown with
+    the three values (Faithful first per the spec) and the tooltip."""
+    assert dialog.priority_combo.count() == 3
+    assert [dialog.priority_combo.itemData(i) for i in range(3)] == ["faithful", "balanced", "timing"]
+    assert dialog.priority_combo.toolTip()
+    dialog.priority_combo.setCurrentIndex(dialog.priority_combo.findData("faithful"))
+    saved = dialog.apply_changes()
+    assert saved["translate_priority"] == "faithful"
+    from dubtool.app import settings as settings_mod
+
+    assert settings_mod.load()["translate_priority"] == "faithful"
+
+
+def test_whisper_dropdown_shapes(qtbot, dialog, monkeypatch, tmp_path):
+    """AGU8 task 7: the whisper dropdown lists base/small/medium/large-v3
+    with one-line descriptions in the items and a non-empty tooltip."""
+    from dubtool.app.ui import settings_dialog as sd
+
+    monkeypatch.setattr(sd, "_asr_progress", lambda: {"s2_elapsed_s": 12.0, "video_s": 30.0})
+    dlg = SettingsDialog()
+    qtbot.addWidget(dlg)
+    data = [dlg.whisper_combo.itemData(i) for i in range(dlg.whisper_combo.count())]
+    assert data == ["base", "small", "medium", "large-v3"]
+    texts = [dlg.whisper_combo.itemText(i) for i in range(dlg.whisper_combo.count())]
+    assert all("—" in t for t in texts)  # descriptions are in the items
+    tip = dlg.whisper_combo.toolTip()
+    assert "00:12" in tip and "00:30" in tip  # last-run real time (AGU8 7)
+
+
+def test_whisper_tooltip_falls_back_to_size_hint(qtbot, dialog, monkeypatch, tmp_path):
+    from dubtool.app.ui import settings_dialog as sd
+
+    monkeypatch.setattr(sd, "_asr_progress", lambda: {})
+    dlg = SettingsDialog()
+    qtbot.addWidget(dlg)
+    assert "kích thước" in dlg.whisper_combo.toolTip() or "shown before" in dlg.whisper_combo.toolTip()
     body = " ".join(
         str(w.text()) for w in dialog.findChildren(QLabel) if w.text()
     ).lower()

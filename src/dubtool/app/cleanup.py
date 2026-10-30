@@ -233,18 +233,11 @@ def plan(root: Path, *, jobs_days: int = 14, now: float | None = None) \
     for p in zips[:3]:
         add(p, "review_zips", "keep")
 
-    # dist: keep only the newest artifact (a DubTool folder or a zip)
-    dist = root / "dist"
-    if dist.is_dir():
-        try:
-            artifacts = [p for p in dist.iterdir()]
-        except OSError:
-            artifacts = []
-        ordered = _by_mtime(artifacts)
-        for p in ordered[1:]:
-            add(p, "dist_old", "delete", "older dist artifact")
-        if ordered:
-            add(ordered[0], "dist_old", "keep", "newest artifact")
+    # AGU8 7.6: keep the newest PAIR — the dist build folder and its zip,
+    # matched by the build id (BUILD_INFO.txt git token in the zip name when
+    # present, otherwise the zip whose mtime sits nearest the folder's) —
+    # and delete older folders and the older zips.
+    _dist_pair_plan(root, add)
 
     deletions.extend(_plan_jobs(root, jobs_days, now))
 
@@ -274,6 +267,59 @@ def _mt(p: Path) -> float:
         return p.stat().st_mtime
     except OSError:
         return 0.0
+
+
+def _dist_pair_plan(root: Path, add) -> None:
+    """dist/ keeps its newest PAIR (AGU8 7.6): the build folder whose
+    BUILD_INFO.txt carries the newest "git: <token>" plus the zip belonging
+    to that same build — matched by the token in the zip name when the build
+    system embeds it, otherwise the zip whose mtime sits nearest the
+    folder's. Older folders and zips are marked delete."""
+    dist = root / "dist"
+    if not dist.is_dir():
+        return
+    try:
+        folders = [p for p in dist.iterdir() if p.is_dir()]
+        zips = [p for p in dist.iterdir() if p.is_file() and p.suffix == ".zip"]
+    except OSError:
+        return
+    ordered_folders = _by_mtime(folders)
+    ordered_zips = _by_mtime(zips)
+
+    tokens: set[str] = set()
+    if ordered_folders:
+        info = ordered_folders[0] / "BUILD_INFO.txt"
+        try:
+            text = info.read_text(encoding="utf-8", errors="replace")
+            for line in text.splitlines():
+                if line.strip().startswith("git:"):
+                    token = line.split(":", 1)[1].strip().split(" ")[0]
+                    if token and token.lower() != "nogit":
+                        tokens.add(token)
+        except OSError:
+            pass
+
+    keep_folder = ordered_folders[0] if ordered_folders else None
+    keep_zip = None
+    if keep_folder is not None:
+        if tokens:  # exact build-id match when the zip name carries it
+            for p in ordered_zips:
+                if any(t in p.stem for t in tokens):
+                    keep_zip = p
+                    break
+        if keep_zip is None and ordered_zips:
+            # Legacy zip names carry no build id: pair by nearest mtime.
+            keep_zip = min(ordered_zips, key=lambda p: abs(_mt(p) - _mt(keep_folder)))
+
+    for p in ordered_folders[1:]:
+        add(p, "dist_old", "delete", "older dist build folder")
+    for p in ordered_zips:
+        if p is not keep_zip:
+            add(p, "dist_old", "delete", "zip from an older build (pair rule)")
+    if keep_folder is not None:
+        add(keep_folder, "dist_old", "keep", "newest build folder")
+    if keep_zip is not None:
+        add(keep_zip, "dist_old", "keep", "zip paired with the newest build folder")
 
 
 def check_root(root: Path) -> None:

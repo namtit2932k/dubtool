@@ -24,6 +24,29 @@ from dubtool.tts.base import TTSFailure
 log = logging.getLogger("dubtool")
 
 
+def _shorten_policy(config) -> str | None:
+    """AGU8 6.3: the instruction text the LLM sees for shortening —
+    the run-scoped fillers policy (kept identical for the whole run) plus
+    the fidelity-preset directive. `faithful` allows only fillers/redundancy
+    removal; `timing` may also drop modifiers (never subjects/negations)."""
+    base = getattr(config, "fillers_policy", None)
+    parts = [base.strip()] if isinstance(base, str) and base.strip() else []
+    tr = getattr(config, "translate", {}) or {}
+    prio = str((tr.get("priority") if isinstance(tr, dict) else None) or "balanced").lower()
+    if prio == "faithful":
+        parts.append(
+            "FAITHFUL preset: only filler words and redundancy may be "
+            "removed; never remove any clause, modifier or content word."
+        )
+    elif prio == "timing":
+        parts.append(
+            "TIMING preset: to fit the budget you may also remove modifiers "
+            "and redundancy, but never subjects, objects or negations."
+        )
+    merged = "\n\n".join(parts)
+    return merged or None
+
+
 def compute_slot(seg: dict, next_start: float | None, tail_slack_s: float = 1.0) -> float:
     if next_start is not None:
         return next_start - seg["start"]
@@ -230,7 +253,9 @@ def run(job, config, force: bool = False, cancel=None, api_keys: list[str] | Non
                 if cancel is not None and cancel.is_set():
                     raise StageCancelled(f"s5: cancelled in round {round_number}")
                 chunk = items[chunk_start : chunk_start + chunk_max]
-                responses = llm.shorten_batch(chunk)
+                responses = llm.shorten_batch(
+                    chunk, policy=_shorten_policy(config)
+                )
                 by_id = {r.get("id"): r for r in responses if isinstance(r, dict)}
                 for ctx in candidates[chunk_start : chunk_start + chunk_max]:
                     entry = ctx.entry

@@ -160,6 +160,13 @@ def _classify_error(exc: Exception) -> tuple[str, str | None]:
         _transport_kind,
         _walk,
     )
+    # AGU8 2.4: the dedicated TTS-unavailable error (all retry rounds +
+    # optional fallback exhausted, finished clips preserved) is never
+    # matched by the generic network branch.
+    from dubtool.tts.base import TTSUnavailableError
+    for e in _walk(exc):
+        if isinstance(e, TTSUnavailableError):
+            return "tts_unavailable", detail
     for e in _walk(exc):
         if isinstance(e, (RateLimitError, RateLimitExhausted)):
             return "quota", detail
@@ -245,8 +252,16 @@ def run_dub(
     jobs_dir: Path | None = None,
     force: bool = False,
     extra_overrides: dict | None = None,
+    interactive: bool = True,
+    overload_dialog: Callable[[], str] | None = None,
+    fillers_dialog: Callable[[list], dict | None] | None = None,
 ) -> DubResult:
-    """Run the full pipeline on one video. Never raises; returns a DubResult."""
+    """Run the full pipeline on one video. Never raises; returns a DubResult.
+
+    `interactive` marks an app-driven run (the overload policy may ask the
+    user); `overload_dialog` is the AGU8 3.4 callback answering 'wait' or
+    'fallback_fast' when Gemini is overloaded, called only when the policy
+    is 'ask'."""
     budget: Any = None  # bound below, inside the try (exception paths read it)
     try:
         video, output_dir = Path(video), Path(output_dir)
@@ -277,7 +292,8 @@ def run_dub(
         # (AGENT_UPDATE_5.md task 1).
         from dubtool.app import modes as modes_mod
 
-        mode_cfg: dict[str, Any] = modes_mod.get(options.mode, _user_settings())
+        user_settings = _user_settings()
+        mode_cfg: dict[str, Any] = modes_mod.get(options.mode, user_settings)
         pid = str(mode_cfg.get("provider", "gemini"))
         overrides: dict[str, Any] = {
             "llm_provider": pid,
@@ -291,6 +307,11 @@ def run_dub(
                 else mode_cfg.get("translate_concurrency", 1)
             )},
         }
+        # AGU8 6.3: the Settings → General fidelity preset rides inside
+        # cfg.translate (so it is hashed into the stage 3/5 inputs too).
+        prio = str(user_settings.get("translate_priority", "balanced") or "balanced").lower()
+        if prio in ("faithful", "timing"):
+            overrides["translate"]["priority"] = prio
         if options.whisper_model:
             overrides["whisper_model"] = options.whisper_model
         if options.whisper_device:
@@ -298,6 +319,19 @@ def run_dub(
         if extra_overrides:
             for k, v in extra_overrides.items():
                 overrides.setdefault(k, {}).update(v) if isinstance(v, dict) else overrides.update({k: v})
+
+        llm_volatility: dict[str, Any] = {
+            # AGU8 3.5: which mode is running (per-mode request timeout) —
+            # read through getattr in the stages so the CLI keeps None.
+            "llm_mode": options.mode,
+            "llm_interactive": interactive,
+            "llm_overload_dialog": overload_dialog,
+            # AGU8 task 4: the filler suggestions dialog (called at most once
+            # per run, only on fresh runs, only when the run is interactive)
+            # and the video identity for per-video choice storage.
+            "fillers_dialog": fillers_dialog,
+            "fillers_video": video,
+        }
 
         # Config lives next to the shipped files, so behavior is identical
         # from source and frozen; config.yaml must ship in the bundle.
@@ -314,6 +348,14 @@ def run_dub(
         from dubtool.app import cpu as cpu_mod
 
         cfg.encode_threads = cpu_mod.thread_budget()
+        # AGU8 task-2 LLM state shared with the stages (per-mode timeout,
+        # the interactive flag and the overload dialog callback). Plain
+        # attributes: they are run-scoped, never hashed into resume state.
+        cfg.llm_mode = llm_volatility["llm_mode"]
+        cfg.llm_interactive = llm_volatility["llm_interactive"]
+        cfg.llm_overload_dialog = llm_volatility["llm_overload_dialog"]
+        cfg.fillers_dialog = llm_volatility["fillers_dialog"]
+        cfg.fillers_video = llm_volatility["fillers_video"]
         _saved = _user_settings()
         _preset = str(_saved.get("video_encode_preset", "")) or None
         if _preset in ("veryfast", "faster", "medium"):
@@ -374,7 +416,7 @@ def run_dub(
                 return DubResult(code="cancelled", cancelled=True, job_id=job.dir.name)
             except Exception as exc:
                 done_s = round(time.monotonic() - started, 1)
-                job.finish_stage(stage, status="failed", error=str(exc))
+                job.finish_stage(stage, status="failed", error=str(exc), elapsed_s=done_s)
                 code, detail = _classify_error(exc)
                 progress(ProgressEvent(stage=stage, state="error", message=str(exc), elapsed_s=done_s))
                 return DubResult(
@@ -391,9 +433,26 @@ def run_dub(
                     "%s: %d LLM request(s) used (run total %d/%d)",
                     stage, stage_requests, budget.used, budget.limit,
                 )
-            job.finish_stage(stage, inputs_hash=current_hash)
+            stage_elapsed = round(time.monotonic() - started, 1)
+            if stage == "s2":
+                # AGU8 task 7: real stage-2 time for the whisper-model
+                # tooltip in Settings (model, elapsed, video length).
+                from dubtool.app import asr_stats
+
+                try:
+                    from dubtool import audio_utils as _au
+
+                    _au.MediaCache(job.dir)
+                    asr_stats.save({
+                        "model": cfg.whisper_model,
+                        "s2_elapsed_s": stage_elapsed,
+                        "video_s": _au.probe_duration(job.dir / "input.mp4"),
+                    })
+                except Exception:
+                    pass
+            job.finish_stage(stage, inputs_hash=current_hash, elapsed_s=stage_elapsed)
             progress(
-                ProgressEvent(stage=stage, state="done", elapsed_s=round(time.monotonic() - started, 1))
+                ProgressEvent(stage=stage, state="done", elapsed_s=stage_elapsed)
             )
 
         # Deliver the outputs atomically; never overwrite silently (AGU4 6.3).
@@ -430,13 +489,19 @@ def run_dub(
             except Exception:
                 duration_s = None  # header row is simply left out
             try:
-                out_readable = s8.deliver(job.dir, target, fmt=fmt, lang=lang, duration_s=duration_s)
+                out_readable = s8.deliver(
+                    job.dir, target, fmt=fmt, lang=lang, duration_s=duration_s,
+                    mark_uncertain=bool((cfg.readable or {}).get("mark_uncertain")),
+                )
             except Exception as exc:
                 logging.getLogger("dubtool").warning(
                     "s8: %s export failed (%s) — trying the .txt fallback", fmt, exc
                 )
                 try:
-                    out_readable = s8.deliver(job.dir, target, fmt="txt", lang=lang, duration_s=duration_s)
+                    out_readable = s8.deliver(
+                        job.dir, target, fmt="txt", lang=lang, duration_s=duration_s,
+                        mark_uncertain=bool((cfg.readable or {}).get("mark_uncertain")),
+                    )
                 except Exception as exc2:
                     logging.getLogger("dubtool").warning(
                         "s8: readable translation could not be created: %s", exc2

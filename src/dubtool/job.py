@@ -171,6 +171,7 @@ class Job:
             "created_at": datetime.now(timezone.utc).isoformat(),
             "last_error": None,
             "inputs": {},
+            "stage_s": {},  # recorded elapsed seconds per finished stage (AGU8 7.2)
         }
         if self.state_path.exists():
             try:
@@ -209,8 +210,10 @@ class Job:
         self.save()
 
     def finish_stage(self, stage: str, status: str = "done", error: str | None = None,
-                     inputs_hash: str | None = None) -> None:
+                     inputs_hash: str | None = None, elapsed_s: float | None = None) -> None:
         self.state["stages"][stage] = status
+        if elapsed_s is not None:
+            self.state.setdefault("stage_s", {})[stage] = elapsed_s
         if error:
             self.state["last_error"] = f"{stage}: {error}"
         if status == "done" and inputs_hash:
@@ -249,13 +252,20 @@ def _cfg_part(cfg, stage: str):
     if stage == "s1":
         return {}
     if stage == "s2":
-        return [cfg.whisper_model, cfg.device, cfg.compute_type]
+        # AGU8 4.x: ASR knobs (word_timestamps, condition_on_previous_text,
+        # initial_prompt) change the transcript itself.
+        return [cfg.whisper_model, cfg.device, cfg.compute_type, cfg.asr]
     if stage in ("s3", "s5"):
         pid = cfg.llm_provider
         return {
             "model": [pid, cfg.provider_config(pid).get("model")],
             "translate": cfg.translate,
             "units": cfg.units,
+            # AGU8 tasks 3.3/4: the punctuation step and the filler policy
+            # change what is translated (AGU8 5.5 "part of inputs_hash").
+            "punctuate": cfg.punctuate,
+            "asr_resegment": bool((cfg.asr or {}).get("sentence_resegment", True)),
+            "fillers": cfg.fillers,
         }
     if stage == "s4":
         return [cfg.tts_voice, cfg.tts_rate, cfg.tts_trim_silence,

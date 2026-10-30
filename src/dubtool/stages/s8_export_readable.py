@@ -48,12 +48,17 @@ def _join_deduped(texts: list[str]) -> str:
     return " ".join(s["text"].strip() for s in cleaned if s["text"].strip())
 
 
-def build_rows(job_dir: Path) -> list[dict]:
+def build_rows(job_dir: Path, mark_uncertain: bool = False) -> list[dict]:
     """One row per sentence: {"time": seconds, "en": text, "vi": text}.
 
     Sentence grouping comes from units.json; for older jobs without it the
     units are rebuilt from translated.json with the existing build_units.
     Rows with an empty English or Vietnamese text are skipped.
+
+    `mark_uncertain` (AGU8 6.2, config readable.mark_uncertain): rows whose
+    translation was still flagged after the completeness re-translation
+    pass get the customer-facing "(cần kiểm tra)" marker on the Vietnamese
+    text.
     """
     from dubtool.job import read_json
     from dubtool.schedule import load_schedule
@@ -94,8 +99,20 @@ def build_rows(job_dir: Path) -> list[dict]:
             seconds = play_start[first]
         else:
             seconds = float(by_id[first]["start"]) if first is not None else 0.0
+        if mark_uncertain and any(
+            by_id[i].get("uncertain") for i in seg_ids if i in by_id
+        ):
+            vi = f"{vi} {place_uncertain()}".strip()
         rows.append({"time": seconds, "en": en, "vi": vi})
     return rows
+
+
+# --------------------------------------------------------- unsure marker
+def place_uncertain() -> str:
+    """AGU8 6.2: the localized check marker for flagged translations."""
+    from dubtool.app import i18n
+
+    return str(i18n.tr("readable.uncertain") or "(cần kiểm tra)")
 
 
 # ----------------------------------------------------------------- meta
@@ -346,6 +363,7 @@ def deliver(
     fmt: str = "docx",
     lang: str = "vi",
     duration_s: float | None = None,
+    mark_uncertain: bool = False,
 ) -> Path:
     """Build the readable file for the video delivered at `video_target`
     and return its path. Raises on failure (the CALLER isolates it; section
@@ -356,7 +374,7 @@ def deliver(
     i18n.set_language(lang)
     target = readable_target(video_target, fmt)
     meta = make_meta(video_target, lang=lang, duration_s=duration_s)
-    rows = build_rows(job_dir)
+    rows = build_rows(job_dir, mark_uncertain=mark_uncertain)
     if not rows:
         raise RuntimeError("no sentence rows to export (empty translations?)")
     if str(fmt).lower() == "docx":

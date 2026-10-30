@@ -8,6 +8,23 @@ from dubtool import schedule as sched
 from dubtool.subtitles import build_srt
 
 
+def test_faithful_priority_raises_shift_cap():
+    """AGENT_UPDATE_8 6.3: `faithful` raises max_shift to at least 4 s; the
+    other presets keep the configured cap, and a larger config value wins."""
+    from types import SimpleNamespace
+
+    from dubtool.stages.s6_mix import effective_max_shift
+
+    cfg = SimpleNamespace(translate={"priority": "faithful"})
+    assert effective_max_shift(cfg, {}) == 4.0
+    assert effective_max_shift(cfg, {"max_shift_s": 2.0}) == 4.0
+    assert effective_max_shift(cfg, {"max_shift_s": 5.0}) == 5.0
+    for prio in (None, "balanced", "timing"):
+        cfg = SimpleNamespace(translate={} if prio is None else {"priority": prio})
+        assert effective_max_shift(cfg, {"max_shift_s": 2.0}) == 2.0
+
+
+
 def test_no_overlap_when_clips_fit():
     out = sched.schedule_clips([(0, 0.0, 1.0), (1, 1.5, 1.0)])
     assert out[0]["play_start"] == 0.0

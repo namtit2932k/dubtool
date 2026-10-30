@@ -27,6 +27,14 @@ Rules:
   "max_chars", first remove filler words and redundancy; never drop a
   clause or change the meaning to fit. Exceeding a little is acceptable;
   later stages handle it.
+- Do not drop small function words ("trong", "của", "để", "với", "cho"...):  -- their absence makes the sentence ungrammatical. Reproduce every
+  grammatical relation of the English with the correct Vietnamese word.
+- Use the pronoun choices given below; never use the literary pronoun 'ta'
+  unless the video brief asks for it.
+- Every reply must be a complete sentence ending with the same kind of
+  sentence-final punctuation as its source English (., !, ?). Never stop
+  mid-sentence: if the source is cut by the app, end at a natural clause
+  boundary of the English instead.
 - Glossary terms are applied exactly; a glossary value of "keep original"
   means leave the English term unchanged in the Vietnamese text.
 - Prefer established Vietnamese terms over literal calques. Technical or
@@ -63,11 +71,12 @@ TRANSLATE_USER_TEMPLATE = """{brief_block}Context from earlier in the video (rea
 Glossary terms that MUST be applied exactly (string "keep original" means leave the English term unchanged in the Vietnamese text):
 {glossary}
 
-{pronoun_block}Translate these fragments into Vietnamese. Rules:
+{policy_block}{pronoun_block}Translate these fragments into Vietnamese. Rules:
 - Translate the meaning faithfully; accuracy first. Do not add information that is not in the English and do not drop a clause or idea.
 - Neutral, natural, conversational Vietnamese matching the speaker's tone; no slang unless the English is slang.
 - Keep subjects and pronouns when needed for clarity. Names stay as they are.
 - "max_chars" is a soft target: if the Vietnamese would exceed it, first remove filler words and redundancy; never drop a clause or change the meaning to fit. Exceeding a little is acceptable.
+- The reply must be a complete sentence: never stop at a connector or function word (và, mà, nhưng, vì, nếu, rằng, là, của, để, một, những, các, thì, với, cho, khi, như, hay, hoặc, bởi, luôn) — when the English is cut, end at a natural clause boundary instead.
 - Apply glossary terms exactly.
 - Reply with ONLY a JSON array: [{{"id": <int>, "vi": "<str>"}}, ...] containing exactly the ids provided, in the same order.
 
@@ -88,7 +97,7 @@ SHORTEN_BATCH_SYSTEM = (
 
 SHORTEN_BATCH_USER_TEMPLATE = """Shorten each Vietnamese translation below so every output is at most the given "max_chars" characters for Vietnamese. Remove filler words and redundancy first. Never change the meaning, never add slang, never drop a clause.
 
-Fragments:
+{policy_block}Fragments:
 {segments}
 
 Reply with ONLY a JSON array: [{{"id": <int>, "vi": "<str>"}}, ...] with exactly the ids provided, in the same order."""
@@ -138,7 +147,8 @@ def render_pronoun_block(pronouns: dict | None, has_brief: bool = False) -> str:
 
 
 def render_translate_user(
-    segments, context, glossary, brief: str | None = None, pronouns: dict | None = None
+    segments, context, glossary, brief: str | None = None,
+    pronouns: dict | None = None, policy: str | None = None,
 ) -> str:
     compact = [
         {"id": s["id"], "text": s["text"], "max_chars": s["max_chars"]} for s in segments
@@ -148,13 +158,15 @@ def render_translate_user(
         pronoun_block=render_pronoun_block(pronouns, has_brief=bool((brief or "").strip())),
         context=json.dumps(context, ensure_ascii=False),
         glossary=json.dumps(glossary or {}, ensure_ascii=False, indent=2),
+        policy_block=(policy.strip() + "\n\n" if (policy or "").strip() else ""),
         segments=json.dumps(compact, ensure_ascii=False, indent=2),
     )
 
 
-def render_shorten_batch_user(items) -> str:
+def render_shorten_batch_user(items, policy: str | None = None) -> str:
     """items: [{"id", "text": original English, "vi": current, "max_chars"}]."""
     return SHORTEN_BATCH_USER_TEMPLATE.format(
+        policy_block=((policy or "").strip() + "\n\n" if (policy or "").strip() else ""),
         segments=json.dumps(items, ensure_ascii=False, indent=2)
     )
 

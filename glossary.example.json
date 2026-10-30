@@ -1,6 +1,7 @@
 {
   "_comment": "English term -> required Vietnamese term, or the string 'keep original' to leave the English term untranslated. Copy this file to glossary.json to activate.",
   "subscribe": "đăng ký",
+  "a girl's girl": "người luôn đứng về phía phụ nữ",
   "AI": "keep original",
   "ChatGPT": "keep original"
 }

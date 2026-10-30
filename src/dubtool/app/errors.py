@@ -15,6 +15,7 @@ CODE_KEYS = {
     "quota": "error.quota",
     "model_not_found": "error.model_not_found",
     "network": "error.network",
+    "tts_unavailable": "error.tts_unavailable",   # AGU8 2.4
     "timeout": "error.timeout",
     "internal": "error.internal",
     "disk_full": "error.disk_full",

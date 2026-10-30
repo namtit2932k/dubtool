@@ -23,6 +23,8 @@ from dubtool.llm.base import (
     NetworkLLMError,
     RateLimitError,
     RateLimitExhausted,
+    ServerErrorLLMError,
+    OverloadFallbackFast,
     TimeoutLLMError,
 )
 from dubtool.llm import budget as budget_mod
@@ -37,31 +39,99 @@ from dubtool.llm.prompts import (
 log = logging.getLogger("dubtool")
 
 MAX_RETRIES = 3
+MAX_VALIDATION_ATTEMPTS = 2   # AGU8 3.1: reply-invalid (parse) attempts only
 BACKOFF_BASE_S = 2.0
 RATE_LIMIT_BASE_WAIT_S = 30.0
+DEFAULT_SERVER_BACKOFF_S = [10.0, 30.0, 90.0]
 
 
 class LLMClient:
     def __init__(self, provider: LLMProvider, on_rate_limit: Callable[[float], None] | None = None,
-                 cancel=None):
+                 cancel=None, options: dict | None = None,
+                 on_overload: Callable[[], str] | None = None):
         """on_rate_limit(seconds) is called ONLY when every key is limited and
         the wrapper has to wait (AGENT_UPDATE_5.md 2.4): a caller running
         chunks in parallel can back off and reduce concurrency. A successful
         key switch never triggers it. `cancel` reaches the pool's waits via
-        provider.wait_for_key()."""
+        provider.wait_for_key().
+
+        `options` carries the AGU8 task-2 retry knobs read from config llm:
+        server_error_backoff_s, overload_after, split_on_timeout,
+        split_min_units. `on_overload` is the AGU8 3.4 overload-policy
+        callback: returns "wait" (keep backing off), "fallback_fast" (README
+        raises OverloadFallbackFast itself), or raises (e.g. StageCancelled).
+        """
         self.provider = provider
         self.on_rate_limit = on_rate_limit
         self.cancel = cancel
+        self.options = options or {}
+        self.on_overload = on_overload
         # Key positions that failed — keypool logging only, never values.
         self.key_switches = 0
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.total_calls = 0
+        self.consecutive_server_errors = 0
+        self.overload_asked = False  # 'ask' consults on_overload only once
+        # Labels from the stage ("translate chunk 3/4, 20 units, 2431 chars")
+        # are attached per call and echoed on every request log line.
+        self.request_label = ""
+        self.last_request_elapsed_s: float | None = None
         # The per-run request budget is captured at construction (the stage's
         # main thread has the bound context; worker threads do not).
         self._budget = budget_mod.current()
 
     # ------------------------------------------------------------ internals
+    def _server_backoff_s(self, attempt: int) -> float:
+        """AGU8 3.2: exponential-with-jitter delay (s) after the `attempt`-th
+        consecutive server error (1-based), from llm.server_error_backoff_s."""
+        import random
+
+        delays = [float(v) for v in self.options.get("server_error_backoff_s") or DEFAULT_SERVER_BACKOFF_S]
+        base = delays[min(max(attempt - 1, 0), len(delays) - 1)]
+        return max(0.1, base * (0.8 + 0.4 * random.random()))
+
+    def _handle_overload(self) -> str:
+        """AGU8 3.4: the overload policy after `overload_after` consecutive
+        503/504. Returns "wait" (keep retrying) or raises OverloadFallbackFast
+        (the stage then rebuilds the client around the Fast model). The
+        callback may raise (e.g. StageCancelled) — it propagates untouched.
+        With no callback, 'ask' behaves like 'wait'."""
+        overload_after = int(self.options.get("overload_after") or 2)
+        if self.consecutive_server_errors < max(1, overload_after):
+            return "wait"
+        if self.overload_asked:
+            return "wait"  # the user already decided; keep the decision
+        self.overload_asked = True
+        default_policy = str(self.options.get("overload_policy") or "ask").lower()
+        if self.on_overload is None:
+            policy = default_policy
+        else:
+            action = self.on_overload()  # may raise (dialog Cancel)
+            policy = str(action or default_policy).lower()
+        if policy in ("fallback_fast", "fallback-fast"):
+            from dubtool.llm.base import OverloadFallbackFast
+
+            raise OverloadFallbackFast(self.provider.model)
+        return "wait"
+
+    def _request_started_log(self, kind: str) -> None:
+        """AGU8 3.5: name the model, the request kind and its size before the
+        call; the stage sets request_label like 'translate chunk 3/4 (20
+        units, 2431 chars)'."""
+        label = self.request_label or kind
+        # The per-mode timeout lives on the provider (llm/__init__.py get_provider).
+        timeout = float(getattr(self.provider, "timeout_s", 0) or 0)
+        tail = f" — đang chờ phản hồi (timeout {timeout:.0f} s)" if timeout else ""
+        log.info("llm %s/%s — %s%s", self.provider.name, self.provider.model, label, tail)
+
+    def _call_logged(self, provider_call, *args, **kwargs):
+        """Wrap one provider.complete() with the elapsed-time log line."""
+        started = time.monotonic()
+        text_result = provider_call(*args, **kwargs)
+        self.last_request_elapsed_s = round(time.monotonic() - started, 2)
+        return text_result
+
     def _consume_budget(self) -> None:
         """One slot per actual request attempt (retries count too). Raises
         BudgetExhausted BEFORE any network call when the run is out."""
@@ -97,27 +167,49 @@ class LLMClient:
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 self._consume_budget()
-                result = self.provider.complete(
-                    system, user, json_mode=json_mode, max_tokens=max_tokens
+                self._request_started_log("complete")
+                result = self._call_logged(
+                    self.provider.complete,
+                    system, user, json_mode=json_mode, max_tokens=max_tokens,
                 )
                 self.total_calls += 1
+                self.consecutive_server_errors = 0
                 if result.input_tokens is not None:
                     self.total_input_tokens += result.input_tokens
                 if result.output_tokens is not None:
                     self.total_output_tokens += result.output_tokens
                 log.info(
-                    "llm %s/%s call %d: in=%s out=%s tokens (total in=%s out=%s)",
+                    "llm %s/%s call %d (%s%s): in=%s out=%s tokens — replied in %.1f s (total in=%s out=%s)",
                     self.provider.name,
                     self.provider.model,
                     self.total_calls,
+                    self.request_label or "",
+                    f", {self.last_request_elapsed_s:.1f}s reply" if self.last_request_elapsed_s else "",
                     result.input_tokens,
                     result.output_tokens,
+                    self.last_request_elapsed_s or 0.0,
                     self.total_input_tokens,
                     self.total_output_tokens,
                 )
                 return result.text
+            except ServerErrorLLMError as exc:
+                # AGU8 3.2: model-wide server errors — rotating keys cannot
+                # help, so NO key rotation; exponential-with-jitter backoff
+                # instead, capped at MAX_RETRIES transport attempts.
+                last_error = exc
+                self.consecutive_server_errors += 1
+                log.warning(
+                    "llm %s/%s server error %s (attempt %d/%d, %s): %s — backoff %.0f s (model-wide: no key rotation)",
+                    self.provider.name, self.provider.model,
+                    getattr(exc, "status", "?"), attempt, MAX_RETRIES,
+                    self.request_label or "", exc, self._server_backoff_s(attempt),
+                )
+                self._handle_overload()  # raises OverloadFallbackFast per policy
+                if attempt < MAX_RETRIES:
+                    time.sleep(self._server_backoff_s(attempt))
             except RateLimitError as exc:
                 last_error = exc
+                self.consecutive_server_errors = 0
                 wait = RATE_LIMIT_BASE_WAIT_S * attempt
                 if getattr(exc, "retry_after", None):
                     wait = max(wait, float(exc.retry_after))
@@ -138,6 +230,7 @@ class LLMClient:
                 raise
             except (LLMError, ConnectionError, OSError) as exc:
                 last_error = exc
+                self.consecutive_server_errors = 0
                 log.warning(
                     "llm %s attempt %d/%d failed: %s",
                     self.provider.name, attempt, MAX_RETRIES, exc,
@@ -160,19 +253,24 @@ class LLMClient:
         while attempts < MAX_RETRIES:
             try:
                 self._consume_budget()
-                result = self.provider.complete(
-                    system, user, json_mode=json_mode, max_tokens=max_tokens
+                self._request_started_log("complete")
+                result = self._call_logged(
+                    self.provider.complete,
+                    system, user, json_mode=json_mode, max_tokens=max_tokens,
                 )
                 self.total_calls += 1
+                self.consecutive_server_errors = 0
                 if result.input_tokens is not None:
                     self.total_input_tokens += result.input_tokens
                 if result.output_tokens is not None:
                     self.total_output_tokens += result.output_tokens
                 log.info(
-                    "llm %s/%s call %d: in=%s out=%s tokens (total in=%s out=%s)",
+                    "llm %s/%s call %d (%s replied in %.1f s): in=%s out=%s tokens (total in=%s out=%s)",
                     self.provider.name,
                     self.provider.model,
                     self.total_calls,
+                    self.request_label or "complete",
+                    self.last_request_elapsed_s or 0.0,
                     result.input_tokens,
                     result.output_tokens,
                     self.total_input_tokens,
@@ -180,9 +278,26 @@ class LLMClient:
                 )
                 self.key_switches = getattr(self.provider, "switches", 0)
                 return result.text
+            except ServerErrorLLMError as exc:
+                # AGU8 3.2/3.4: model-wide server errors — NO key rotation in
+                # the pool loop either; jittered backoff, then the overload
+                # policy after `overload_after` consecutive errors.
+                attempts += 1
+                last_error = exc
+                self.consecutive_server_errors += 1
+                log.warning(
+                    "llm %s/%s server error %s (attempt %d/%d, %s): %s — backoff %.0f s (model-wide: no key rotation)",
+                    self.provider.name, self.provider.model,
+                    getattr(exc, "status", "?"), attempts, MAX_RETRIES,
+                    self.request_label or "", exc, self._server_backoff_s(attempts),
+                )
+                self._handle_overload()  # raises OverloadFallbackFast per policy
+                if attempts < MAX_RETRIES:
+                    time.sleep(self._server_backoff_s(attempts))
             except RateLimitError as exc:
                 attempts += 1
                 last_error = exc
+                self.consecutive_server_errors = 0
                 used = getattr(exc, "key_used", None)
                 outcome = self.provider.handle_rate_limit(exc, used or "")
                 self.key_switches = getattr(self.provider, "switches", 0)
@@ -226,6 +341,7 @@ class LLMClient:
             except (LLMError, ConnectionError, OSError) as exc:
                 attempts += 1
                 last_error = exc
+                self.consecutive_server_errors = 0
                 log.warning(
                     "llm %s attempt %d/%d failed: %s",
                     self.provider.name, attempts, MAX_RETRIES, exc,
@@ -259,27 +375,46 @@ class LLMClient:
     def _call_and_validate(
         self, system: str, user_base: str, validate: Callable[[str], object], error_note_builder
     ):
+        """AGU8 3.1: the OUTER loop catches ONLY reply-invalid (parse and
+        validation) errors, at most MAX_VALIDATION_ATTEMPTS times. Transport,
+        rate-limit and server errors are retried ONLY by the inner loop
+        (self._call); the old nesting multiplied a persistent 503 into up to
+        9 requests."""
         error_note = ""
         last_error: Exception | None = None
-        for attempt in range(1, MAX_RETRIES + 1):
+        for attempt in range(1, MAX_VALIDATION_ATTEMPTS + 1):
             text = None
             try:
                 text = self._call(system, user_base + ("\n\n" + error_note if error_note else ""))
-                return validate(text)
-            except LLMError as exc:
-                last_error = exc
-                if text is not None:
+                # _call returns text; only validate() raising below counts
+                # as a reply-invalid failure (a reply arrived but is bad).
+                try:
+                    return validate(text)
+                except LLMError as exc:
+                    last_error = exc
                     _log_raw_reply_diagnosis(text)
-                error_note = error_note_builder(exc)
-                log.warning("llm validation retry: %s", exc)
+                    error_note = error_note_builder(exc)
+                    log.warning("llm validation retry: %s", exc)
+            except OverloadFallbackFast:
+                raise
+            except LLMError as exc:
+                # A transport/side-error while text is still None: the inner
+                # loop already gave up or the outcome is final — propagate.
+                if text is None:
+                    raise
+                last_error = exc
+        if isinstance(last_error, RateLimitError):
+            raise last_error
         raise LLMError(
-            f"giving up after {MAX_RETRIES} attempts ({self.provider.name}): {last_error}"
+            f"giving up after {MAX_VALIDATION_ATTEMPTS} invalid replies "
+            f"({self.provider.name}): {last_error}"
         ) from last_error
 
     # ------------------------------------------------------------------ API
     def translate_batch(
         self, segments: list[dict], context: list[dict], glossary: dict | None = None,
         brief: str | None = None, pronouns: dict | None = None,
+        policy: str | None = None,
     ) -> list[dict]:
         ids = [s["id"] for s in segments]
 
@@ -294,7 +429,10 @@ class LLMClient:
 
         return self._call_and_validate(
             _system_of("translate"),
-            render_translate_user(segments, context, glossary, brief=brief, pronouns=pronouns),
+            render_translate_user(
+                segments, context, glossary, brief=brief, pronouns=pronouns,
+                policy=policy,
+            ),
             validate,
             note,
         )
@@ -313,7 +451,7 @@ class LLMClient:
             note,
         )
 
-    def shorten_batch(self, items: list[dict]) -> list[dict]:
+    def shorten_batch(self, items: list[dict], policy: str | None = None) -> list[dict]:
         """One-time enforcement batch: shorten over-budget segments."""
         ids = [s["id"] for s in items]
 
@@ -328,7 +466,7 @@ class LLMClient:
 
         return self._call_and_validate(
             _system_of("shorten_batch"),
-            render_shorten_batch_user(items),
+            render_shorten_batch_user(items, policy=policy),
             validate,
             note,
         )

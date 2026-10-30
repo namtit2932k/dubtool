@@ -30,6 +30,7 @@ DEFAULTS: dict = {
     "cpu_usage": "balanced",     # low | balanced | maximum (AGU6 4.2)
     "video_encode_preset": "veryfast",  # veryfast | faster | medium (AGU6 4.2)
     "jobs_max_days": 14,         # prune old job folders after N days (AGU6 6.7)
+    "translate_priority": "balanced",  # balanced | faithful | timing (AGU8 6.3)
 }
 
 
@@ -48,6 +49,12 @@ def load(raw_path: Path | None = None) -> dict:
     merged = dict(DEFAULTS)
     merged.update({k: v for k, v in (data or {}).items() if v is not None or k in ("privacy_acknowledged",)})
     merged["mode_models"] = dict(data.get("mode_models") or {})
+    # AGU8 task 7.3: one key for the output folder. Migrate the old
+    # `default_output` value to `default_output_dir` on load.
+    legacy_out = str(data.get("default_output") or "").strip()
+    if legacy_out and not str(merged.get("default_output_dir") or "").strip():
+        merged["default_output_dir"] = legacy_out
+    merged.pop("default_output", None)  # the old key is never written back
     return merged
 
 
@@ -88,6 +95,8 @@ def validate(settings: dict) -> list[str]:
         problems.append("readable_format must be docx|txt")
     if str(settings.get("video_encode_preset", "")).lower() not in ("veryfast", "faster", "medium"):
         problems.append("video_encode_preset must be veryfast|faster|medium")
+    if str(settings.get("translate_priority", "balanced")).lower() not in ("balanced", "faithful", "timing"):
+        problems.append("translate_priority must be balanced|faithful|timing")
     days = settings.get("jobs_max_days", 14)
     if not isinstance(days, int) or not (1 <= days <= 365):
         problems.append("jobs_max_days must be an integer between 1 and 365")

@@ -128,6 +128,57 @@ def test_reviews_and_dist_keep_newest(tree: Path):
     assert tree / "dist" / "DubTool" not in _cat(deletions, "dist_old")
 
 
+def test_dist_keeps_newest_pair(tmp_path: Path):
+    """AGU8 7.6: the newest build folder and its zip survive together; older
+    folders and the older zip are deleted."""
+    import os
+    from dubtool.app import cleanup as cw
+
+    base = 1_700_000_000.0
+    dist = tmp_path / "dist"
+    dist.mkdir(parents=True)
+    for name, dt in (("DubTool", 100.0), ("DubToolOld", 0.0)):
+        (dist / name).mkdir()
+        (dist / name / "BUILD_INFO.txt").write_text(
+            "git: abc1234\nbuild id: Update N (abc1234)\n", encoding="utf-8"
+        )
+        os.utime(dist / name, (base + dt, base + dt))
+        os.utime(dist / name / "BUILD_INFO.txt", (base + dt, base + dt))
+    (dist / "DubTool-1.0.0-win64-new.zip").write_text("x", encoding="utf-8")
+    (dist / "DubTool-1.0.0-win64-old.zip").write_text("x", encoding="utf-8")
+    os.utime(dist / "DubTool-1.0.0-win64-new.zip", (base + 99.0, base + 99.0))
+    os.utime(dist / "DubTool-1.0.0-win64-old.zip", (base + 1.0, base + 1.0))
+
+    items, reported, _ = cw.plan(tmp_path, now=base + 999)
+    keep = [i.path.name for i in reported if i.category == "dist_old" and i.action == "keep"]
+    delete = [i.path.name for i in items if i.category == "dist_old" and i.action == "delete"]
+    assert sorted(keep) == ["DubTool", "DubTool-1.0.0-win64-new.zip"]
+    assert sorted(delete) == ["DubTool-1.0.0-win64-old.zip", "DubToolOld"]
+
+
+def test_dist_pair_prefers_build_id_token(tmp_path: Path):
+    """When the legacy-named zip is not nearest but a newer zip carries the
+    build token, the token match wins."""
+    import os
+    from dubtool.app import cleanup as cw
+
+    base = 1_700_000_000.0
+    dist = tmp_path / "dist"
+    dist.mkdir(parents=True)
+    (dist / "DubTool").mkdir()
+    (dist / "DubTool" / "BUILD_INFO.txt").write_text("git: deadbee\n", encoding="utf-8")
+    os.utime(dist / "DubTool", (base, base))
+    os.utime(dist / "DubTool" / "BUILD_INFO.txt", (base, base))
+    (dist / "DubTool-1.0.0-win64-old.zip").write_text("x", encoding="utf-8")
+    (dist / "DubTool-1.0.0-win64-deadbee.zip").write_text("x", encoding="utf-8")
+    os.utime(dist / "DubTool-1.0.0-win64-old.zip", (base - 5, base - 5))
+    os.utime(dist / "DubTool-1.0.0-win64-deadbee.zip", (base + 300, base + 300))
+
+    items, reported, _ = cw.plan(tmp_path, now=base + 999)
+    keep = sorted(i.path.name for i in reported if i.category == "dist_old" and i.action == "keep")
+    assert keep == ["DubTool", "DubTool-1.0.0-win64-deadbee.zip"]
+
+
 # ----------------------------------------------------------------- applying
 def test_categories_filter(tree: Path):
     category = "caches"

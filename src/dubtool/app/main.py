@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import logging
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -72,6 +73,17 @@ def run_gui() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("DubTool")
     app.setApplicationVersion(app_version())
+    # AGU8 7.1: from source, PyAV 19+ breaks stage 2 — tell the user the
+    # exact repair command before any caption fails deep in the run.
+    from dubtool import av_check
+    from dubtool.app.paths import is_frozen
+
+    av_warn = None if is_frozen() else av_check.problem()
+    if av_warn:
+        from PySide6.QtWidgets import QMessageBox
+
+        logging.getLogger("dubtool").warning("startup: %s", av_warn)
+        QMessageBox.warning(None, "DubTool — PyAV", av_warn)
     window = MainWindow()
     window.show()
     return app.exec()
@@ -324,7 +336,8 @@ def run_gui_smoke() -> int:
     run_calls: list[str] = []
 
     def fake_run_dub(video, outdir, options, secrets=None, progress=None,
-                     cancel=None, jobs_dir=None, force=False, extra_overrides=None):
+                     cancel=None, jobs_dir=None, force=False, extra_overrides=None,
+                     overload_dialog=None, fillers_dialog=None):
         run_calls.append(options.mode)
         for name in ("s1_extract_audio", "s2_transcribe", "s3_translate",
                      "s4_tts", "s5_fit_duration", "s6_mix", "s7_subtitles"):
@@ -587,6 +600,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="DubTool")
     parser.add_argument("--version", action="store_true")
     parser.add_argument("--selftest", action="store_true")
+    parser.add_argument("--network", action="store_true",
+                        help="with --selftest: add the DNS/TLS connectivity table (AGU8 2.2)")
     parser.add_argument("--json", default=None, help="--selftest output file")
     parser.add_argument("--screenshots", default=None, metavar="DIR")
     parser.add_argument("--layout-check", action="store_true")
@@ -596,15 +611,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--profile", action="store_true",
                         help="with --headless-run: sample CPU once per second into profile.csv")
     parser.add_argument("--mode", choices=("fast", "accurate"), default="fast")
+    parser.add_argument("--fault", action="append", default=[], metavar="STAGE:SPEC=N",
+                        help="debug-only fault injection, e.g. --fault tts:fail-first=6 (AGU8 2.5; ignored by the GUI)")
     args = parser.parse_args(argv)
 
     if args.version:
         _print_version()
         return 0
+    if args.fault:
+        from dubtool import faults as faults_mod
+
+        faults_mod.set_faults(args.fault)
+        faults_mod.announce()
     if args.selftest:
         from dubtool.app.selftest import run_selftest
 
-        return run_selftest(Path(args.json) if args.json else None)
+        code = run_selftest(Path(args.json) if args.json else None)
+        if args.network:
+            from dubtool.app.selftest import check_network
+
+            network_result = check_network()
+            code = code if network_result["ok"] else 1
+        return code
     if args.layout_check:
         return 0 if run_layout_check(args.scale) == 0 else 1
     if args.gui_smoke:

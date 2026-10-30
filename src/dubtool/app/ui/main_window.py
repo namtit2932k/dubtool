@@ -341,7 +341,10 @@ class MainWindow(QMainWindow):
         self.service.finishedRun.connect(self._on_finished)
         self.video_path: Path | None = None
         saved = settings.load()
-        self.output_dir = Path(saved["default_output"]) if saved.get("default_output") else None
+        # AGU8 7.3: one key — `default_output_dir` (the old `default_output`
+        # was migrated on load; it is never written back).
+        saved_out = saved.get("default_output_dir")
+        self.output_dir = Path(saved_out) if saved_out else None
         self._split_state: str = ""
 
         # AGU6 4.3: progress events coalesce to <=~10 dispatches/s; the
@@ -590,7 +593,7 @@ class MainWindow(QMainWindow):
             self.output_dir = Path(chosen)
             self.output_edit.setText(chosen)
             s = settings.load()
-            s["default_output"] = chosen
+            s["default_output_dir"] = chosen
             settings.save(s)
             self._validate_output()
             self._refresh_buttons()
@@ -637,6 +640,25 @@ class MainWindow(QMainWindow):
         self.progress_group.show_running()
         self.fast_btn.setEnabled(False)
         self.accurate_btn.setEnabled(False)
+        from dubtool.app.ui.fillers_dialog import DialogBridge, FillersDialog, OverloadDialog
+
+        bridge = DialogBridge(self)  # lives on the GUI thread
+
+        def _fillers_dialog(suggestions):
+            from dubtool import fillers as fillers_mod
+
+            defaults_map = {
+                **{k.lower(): str(v) for k, v in (fillers_mod.load_settings().get("vocative") or {}).items()},
+                **{k.lower(): str(v) for k, v in (fillers_mod.load_settings().get("discourse") or {}).items()},
+            }
+            return bridge.call(lambda: FillersDialog(suggestions, parent=self, defaults=defaults_map).result_choices())
+
+        def _overload_dialog():
+            from dubtool.app.modes import get as mode_get
+
+            model = str((mode_get(mode, settings.load()) or {}).get("model"))
+            return bridge.call(lambda: OverloadDialog(model=model, parent=self).choice)
+
         started = self.service.start(
             video=self.video_path,
             output_dir=self.output_dir,
@@ -644,6 +666,8 @@ class MainWindow(QMainWindow):
             secrets=secrets,
             force=force,
             jobs_dir=self._jobs_dir(),
+            overload_dialog=_overload_dialog,
+            fillers_dialog=_fillers_dialog,
         )
         if not started:
             self._refresh_buttons()
@@ -691,9 +715,35 @@ class MainWindow(QMainWindow):
             self._show_error(result)
 
     def _show_error(self, result: api.DubResult) -> None:
+        def _export_diag() -> None:
+            try:
+                diagnostics.export_diagnostics(
+                    Path.home() / "Desktop" / "dubtool-diagnostics.zip",
+                    jobs_dir=self._jobs_dir(),
+                )
+            except Exception:
+                pass
+
         dialog = QMessageBox(self)
         dialog.setIcon(QMessageBox.Icon.Critical)
         dialog.setWindowTitle("DubTool")
+        if result.code == "tts_unavailable":
+            # AGU8 2.4: the dedicated error gets exactly Resume (keeps every
+            # finished clip) and Open settings (voice / backup voice); never
+            # the generic message or generic buttons for this case.
+            dialog.setText(errors.message_for_code("tts_unavailable"))
+            resume_btn = dialog.addButton(
+                i18n.tr("error.button.resume"), QMessageBox.ButtonRole.AcceptRole
+            )
+            settings_btn = dialog.addButton(
+                i18n.tr("error.button.open_settings"), QMessageBox.ButtonRole.ActionRole
+            )
+            dialog.exec()
+            if dialog.clickedButton() == settings_btn:
+                self.open_settings()
+            elif dialog.clickedButton() == resume_btn:
+                self.start_run(self.progress_group._last_mode, force=False)
+            return
         dialog.setText(errors.message_for_code(result.code))
         if result.code == "internal":
             # AGENT_UPDATE_7.md 4.3: an internal failure says plainly it is
@@ -706,16 +756,6 @@ class MainWindow(QMainWindow):
         export_btn = dialog.addButton(
             i18n.tr("app.export_diagnostics"), QMessageBox.ButtonRole.ActionRole
         )
-
-        def _export_diag() -> None:
-            try:
-                diagnostics.export_diagnostics(
-                    Path.home() / "Desktop" / "dubtool-diagnostics.zip",
-                    jobs_dir=self._jobs_dir(),
-                )
-            except Exception:
-                pass
-
         export_btn.clicked.connect(_export_diag)
         dialog.addButton(QMessageBox.StandardButton.Ok)
         dialog.exec()

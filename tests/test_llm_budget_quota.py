@@ -175,7 +175,7 @@ class _CountingLLM:
     def __init__(self, provider=None):
         self.requests = 0
 
-    def shorten_batch(self, items):
+    def shorten_batch(self, items, policy=None):
         self.requests += 1
         return [{"id": item["id"], "vi": "ngắn"} for item in items]
 
@@ -270,7 +270,7 @@ def test_s5_falls_back_to_fallback_mode_on_quota_out(tmp_path, monkeypatch):
             self.provider = provider
             self.calls = 0
 
-        def shorten_batch(self, items):
+        def shorten_batch(self, items, policy=None):
             self.calls += 1
             return [{"id": item["id"], "vi": "ok-short"} for item in items]
 
@@ -281,7 +281,7 @@ def test_s5_falls_back_to_fallback_mode_on_quota_out(tmp_path, monkeypatch):
         def __init__(self, provider=None):
             self.provider = provider
 
-        def shorten_batch(self, items):
+        def shorten_batch(self, items, policy=None):
             raise RateLimitExhausted(
                 "all keys daily-exhausted for the selected model"
             )

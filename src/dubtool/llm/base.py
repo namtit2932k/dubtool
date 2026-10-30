@@ -75,6 +75,31 @@ class TimeoutLLMError(LLMError):
     retryable (AGENT_UPDATE_7.md 4.3: distinct from no-connection)."""
 
 
+class ServerErrorLLMError(LLMError):
+    """AGU8 task 2: a model-wide server failure (503 UNAVAILABLE,
+    504 DEADLINE_EXCEEDED, or any other 5xx). These are retried with the
+    server_error_backoff_s schedule WITHOUT rotating keys — rotating keys
+    cannot help a 503 — and count toward the overload policy."""
+
+    def __init__(self, message: str, *, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
+
+class OverloadFallbackFast(RuntimeError):
+    """NOT an LLMError: raised by the overload-policy callback when the
+    policy says 'use the Fast model for the rest' (AGU8 3.4). It must pass
+    untouched through the wrapper's except clauses (they catch
+    LLMError/ConnectionError/OSError only)."""
+
+    def __init__(self, from_model: str):
+        super().__init__(
+            f"overload policy: switching the rest of the run from {from_model!r} "
+            "to the Fast model"
+        )
+        self.from_model = from_model
+
+
 # --- error classification by TYPE + cause chain (AGENT_UPDATE_7.md 4.3) ----
 # Update 6 searched the message text, which misfiled SDK validation errors
 # mentioning "timeout" as network failures. _walk() follows __cause__ and
@@ -163,6 +188,19 @@ def _is_internal(exc: BaseException) -> bool:
         if type(e).__name__ == "ValidationError" and "pydantic" in type(e).__module__:
             return True
     return False
+
+
+def failed_after_timeout(exc: BaseException) -> bool:
+    """AGU8 3.6: True when `exc` is a client-side timeout or a 504
+    server deadline — the two failures that mean 'the request may have
+    reached the model and the answer was too big', so retrying the whole
+    chunk whole will likely fail again and splitting it in half helps."""
+    for e in _walk(exc):
+        if isinstance(e, TimeoutLLMError):
+            return True
+        if isinstance(e, ServerErrorLLMError) and getattr(e, "status", None) == 504:
+            return True
+    return _transport_kind(exc) == "timeout"
 
 
 # --- 429 payload classification (AGENT_UPDATE_5.md 2.4) ---------------------

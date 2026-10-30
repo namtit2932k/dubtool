@@ -183,7 +183,14 @@ def test_stage_cancelled_between_items(tmp_path, monkeypatch):
 
     cancel = threading.Event()
 
+    class FakeProvider:
+        rate_limit_s = 0.0
+
     class FakeTTS:
+        # s4 (AGU8 task 1) reads tts.provider for fault wrapping and the
+        # backup fallback.
+        provider = FakeProvider()
+
         def __init__(self, *a, **k):
             pass
 

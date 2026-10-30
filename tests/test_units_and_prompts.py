@@ -263,11 +263,11 @@ class FakeUnitClient:
         self.mapping = mapping
         self.seen_payloads = []
 
-    def translate_batch(self, segments, context, glossary, brief=None, pronouns=None):
+    def translate_batch(self, segments, context, glossary, brief=None, pronouns=None, policy=None):
         self.seen_payloads.extend(segments)
         return [{"id": s["id"], "vi": self.mapping[s["id"]]} for s in segments]
 
-    def shorten_batch(self, items):
+    def shorten_batch(self, items, policy=None):
         return []
 
 
@@ -287,7 +287,7 @@ def _unit_job(tmp_path) -> Job:
 def test_stage3_unit_mode_keeps_per_segment_contract(tmp_path, monkeypatch):
     job = _unit_job(tmp_path)
     fake = FakeUnitClient({0: "Ồ, cô ấy lại làm thế nữa à?", 1: "Đúng, cô ấy làm thế."})
-    monkeypatch.setattr(s3, "LLMClient", lambda provider: fake)
+    monkeypatch.setattr(s3, "LLMClient", lambda provider, **k: fake)
     monkeypatch.setattr(s3, "get_provider", lambda config, pid=None, **k: type("P", (), {"name": "f", "model": "m"})())
     config = Config(chars_per_sec=14)
     s3.run(job, config, force=False, provider_id="gemini")
@@ -317,7 +317,7 @@ def test_stage3_skips_unit_with_reviewed_segment(tmp_path, monkeypatch):
     calls = {"n": 0}
 
     class MappingUnitClient(FakeUnitClient):
-        def translate_batch(self, segments, context, glossary, brief=None, pronouns=None):
+        def translate_batch(self, segments, context, glossary, brief=None, pronouns=None, policy=None):
             calls["n"] += 1
             self.seen_payloads.extend(list(segments))
             return [
@@ -326,7 +326,7 @@ def test_stage3_skips_unit_with_reviewed_segment(tmp_path, monkeypatch):
             ]
 
     fake = MappingUnitClient({})
-    monkeypatch.setattr(s3, "LLMClient", lambda provider: fake)
+    monkeypatch.setattr(s3, "LLMClient", lambda provider, **k: fake)
     monkeypatch.setattr(s3, "get_provider", lambda config, pid=None, **k: type("P", (), {"name": "f", "model": "m"})())
     config = Config(chars_per_sec=14)
     s3.run(job, config, force=False, provider_id="gemini")

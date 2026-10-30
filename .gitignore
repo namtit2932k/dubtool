@@ -18,6 +18,9 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 
+# AGU8 task 9: generated evaluation files (never in Git)
+eval/
+
 # Build output
 build/
 dist/

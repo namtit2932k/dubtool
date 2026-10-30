@@ -32,6 +32,15 @@ def _strip_closers(token: str) -> str:
     return token
 
 
+def ends_with_comma(text: str) -> bool:
+    """True when the final word token is a comma tail (with optional closers)."""
+    tokens = (text or "").strip().split()
+    if not tokens:
+        return False
+    token = _strip_closers(tokens[-1])
+    return bool(token) and token[-1] == ","
+
+
 def ends_with_sentence(text: str) -> bool:
     """True when the final word ends with sentence-final punctuation and is
     not an abbreviation or a single initial."""
@@ -56,6 +65,7 @@ def build_units(
     max_segments: int = 4,
     max_duration_s: float = 14.0,
     max_gap_s: float = 1.0,
+    pause_split_s: float = 0.5,
 ) -> list[dict]:
     """Group segments in order into translation units (pure)."""
     units: list[dict] = []
@@ -99,6 +109,10 @@ def build_units(
             gap = float(segments[index + 1]["start"]) - float(seg["end"])
             duration = current_end - current_start
             if ends_with_sentence(text):
+                close_now = True
+            elif pause_split_s > 0 and gap >= pause_split_s and not ends_with_comma(text):
+                # AGU8 4.4: a real pause closes the unit unless the previous
+                # segment ends with a comma (continuation).
                 close_now = True
             elif gap > max_gap_s:
                 close_now = True

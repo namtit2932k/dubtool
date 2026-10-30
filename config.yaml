@@ -24,7 +24,17 @@ llm:
   max_all_keys_wait_s: 600     # give up after this total wait when ALL keys are limited
   # AGENT_UPDATE_6.md task 5 (quota/budget).
   max_requests_per_run: 40     # one run stops calling the LLM after this many requests
-  request_timeout_s: 180       # per-request cap before the call is abandoned
+  request_timeout_s: 180       # per-request cap (Accurate mode); Fast mode: request_timeout_s_fast
+  request_timeout_s_fast: 90   # AGU8 3.5: Fast mode gets a tighter cap
+  # AGENT_UPDATE_8 task 2: 503/504 retry schedule (seconds, exponential with jitter).
+  server_error_backoff_s:
+    - 10
+    - 30
+    - 90
+  split_on_timeout: true       # after a timeout, split the chunk instead of resending
+  split_min_units: 4           # chunks below this size are never split
+  overload_after: 2            # consecutive 503/504 before the overload policy kicks in
+  overload_policy: ask         # ask | fallback_fast | wait (CLI/--headless-run default fallback_fast)
   shorten_fallback_mode: fast  # stage-5 shortening retries with the Fast model on daily quota
   gemini:
     model: gemini-3.5-flash-lite   # default: stable, free-of-charge tier (checked official docs 2026-10-25)
@@ -55,6 +65,8 @@ mix:
 translate:
   unit_mode: sentence    # sentence | segment (segment = previous behavior)
   budget_overshoot: 1.15 # enforcement pass triggers only above max_chars * this
+  # AGENT_UPDATE_8 task 5.3: fidelity preset (the default is the Update 7 behavior).
+  priority: balanced     # balanced | faithful | timing
   concurrency: 1         # parallel translation chunk calls (235AGU4 A3)
   pronouns:              # one pick per video, kept consistent (AGU4 A2)
     first: "tôi"
@@ -66,16 +78,49 @@ units:
   max_segments: 4
   max_duration_s: 14
   max_gap_s: 1.0
+  pause_split_s: 0.5     # AGU8 4.4: a pause this long closes the unit (unless a comma)
 
 # ASR post-processing (stage 2)
 asr:
   dedupe_min_words: 3            # shortest repeated run removed across a boundary
   condition_on_previous_text: false  # passed to faster-whisper for new transcriptions
+  word_timestamps: true          # AGU8 4.2: word times -> words.json
+  sentence_resegment: true       # AGU8 4.2: cut segments at sentence-final marks
+  initial_prompt: ""             # optional faster-whisper initial_prompt (empty default)
 
 # Playback schedule (stage 6/7, AGENT_UPDATE_3 task 3): clips never overlap.
 schedule:
   gap_s: 0.08            # pause between adjacent Vietnamese clips
   max_shift_s: 2.0       # cap for delaying a clip; beyond -> overlap: true
+# AGENT_UPDATE_8 task 1: TTS resilience.
+tts:
+  retry_rounds: 3              # deferred retry rounds after the first pass
+  round_cooldown_s:            # cooldowns before each retry round
+    - 60
+    - 180
+    - 300
+  breaker_consecutive: 3       # stop calling the service after N failures in a row
+  pacing_delay_s: 0.3          # wait between requests; grows after failures
+  max_delay_s: 2               # pacing delay cap
+  max_cooldown_s: 120          # provider cooldown cap (was 30)
+  fallback: none               # none | windows_sapi | piper (AGU8 2.3)
+  piper_voice: ""              # path of the voice model when fallback: piper
+
+# AGENT_UPDATE_8 task 3.3: LLM punctuation restoration for the transcript.
+punctuate:
+  enabled: auto               # auto | on | off
+  window_segments: 40
+  max_missing_ratio: 0.30     # trigger when more than this share lacks final punctuation
+  max_unpunct_run: 25         # trigger when a word run this long has no sentence-final mark
+
+# AGENT_UPDATE_8 task 4: filler/vocative tagging.
+fillers:
+  ask: true                    # GUI shows the suggestions dialog when set; CLI never asks
+  pause_s: 0.25
+
+# AGENT_UPDATE_8 task 5.2: (cần kiểm tra) markers in the customer-readable file.
+readable:
+  mark_uncertain: false
 
 # Vietnamese subtitles (stage 7): soft .srt + optionally burned in.
 subtitles:

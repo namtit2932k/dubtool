@@ -1,0 +1,46 @@
+# AGENT_UPDATE_8 task 4: filler and vocative words.
+# The first language is English. A user override can replace any block from
+# the app data folder (fillers.yaml next to settings.json).
+vocative:
+  # Sentence starting/at-ends vocatives. action: drop | keep | translate_as
+  girl: drop
+  girls: drop
+  babe: drop
+  bestie: drop
+  sis: drop
+  guys: drop
+  dude: drop
+  bro: drop
+  honey: drop
+  ladies: drop
+discourse:
+  # Discourse fillers, omitted in translation when tagged.
+  um: drop
+  uh: drop
+  like: drop
+  you know: drop
+  I mean: drop
+  kind of: drop
+  sort of: drop
+  literally: drop
+  basically: drop
+  actually: drop
+  okay so: drop
+  well: drop
+protected:
+  # Never treated as fillers even when they contain a filler word.
+  - "girl's girl"
+  - "girl power"
+  - "girl dad"
+  - "trans girl"
+  - "trans girls"
+  - "the girls"
+  - "my girl"
+  - "his girl"
+  - "little girl"
+  - "girl friend"
+idioms:
+  # Translated by meaning, never word by word.
+  "a girl's girl": "người luôn đứng về phía phụ nữ"
+  "girl power": "sức mạnh phụ nữ"
+  "you know what I mean": "anh hiểu ý em chứ"

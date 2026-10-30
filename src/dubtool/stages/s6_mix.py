@@ -18,6 +18,17 @@ from dubtool.job import read_json
 log = logging.getLogger("dubtool")
 
 
+def effective_max_shift(config, sched_cfg: dict | None) -> float:
+    """AGU8 6.3: the faithful preset raises the lag cap to 4 s (a config-set
+    larger value still wins; `balanced`/`timing` keep the configured one)."""
+    sched_cfg = sched_cfg or {}
+    max_shift = float(sched_cfg.get("max_shift_s", sched.DEFAULT_MAX_SHIFT_S))
+    translate = getattr(config, "translate", None) or {}
+    if str(translate.get("priority", "balanced")).lower() == "faithful":
+        max_shift = max(max_shift, 4.0)
+    return max_shift
+
+
 def run(job, config, force: bool = False, cancel=None) -> None:
     audio_utils.require_ffmpeg()
     from dubtool.audio_utils import MediaCache
@@ -49,10 +60,11 @@ def run(job, config, force: bool = False, cancel=None) -> None:
         for seg_id, _start in clip_items
     }
     sched_cfg = getattr(config, "schedule", None) or {}
+    max_shift = effective_max_shift(config, sched_cfg)
     schedule = sched.schedule_clips(
         [(seg_id, start, durations[seg_id]) for seg_id, start in clip_items],
         gap_s=float(sched_cfg.get("gap_s", sched.DEFAULT_GAP_S)),
-        max_shift_s=float(sched_cfg.get("max_shift_s", sched.DEFAULT_MAX_SHIFT_S)),
+        max_shift_s=max_shift,
     )
     sched.write_schedule(job.dir, schedule)
     sched.log_report(schedule)

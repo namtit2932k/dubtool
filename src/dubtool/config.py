@@ -44,6 +44,37 @@ SCHEDULE_DEFAULTS: dict = {
     "max_shift_s": 2.0, # cap on how far a clip may be delayed (AGU3 task 3)
 }
 
+# AGENT_UPDATE_8 task 1: TTS resilience.
+TTS_DEFAULTS: dict = {
+    "retry_rounds": 3,
+    "round_cooldown_s": [60, 180, 300],
+    "breaker_consecutive": 3,
+    "pacing_delay_s": 0.3,
+    "max_delay_s": 2.0,
+    "max_cooldown_s": 120.0,
+    "fallback": "none",  # none | windows_sapi | piper
+    "piper_voice": "",
+}
+
+# AGENT_UPDATE_8 task 3.3: LLM punctuation restoration.
+PUNCTUATE_DEFAULTS: dict = {
+    "enabled": "auto",  # auto | on | off
+    "window_segments": 40,
+    "max_missing_ratio": 0.30,
+    "max_unpunct_run": 25,
+}
+
+# AGENT_UPDATE_8 task 4: filler/vocative tagging.
+FILLERS_DEFAULTS: dict = {
+    "ask": True,       # GUI shows the suggestions dialog when set; CLI never asks
+    "pause_s": 0.25,
+}
+
+# AGENT_UPDATE_8 task 5.2: readable-file uncertainty markers.
+READABLE_DEFAULTS: dict = {
+    "mark_uncertain": False,
+}
+
 from dubtool.llm.prompts import DEFAULT_PRONOUNS
 
 TRANSLATE_DEFAULTS: dict = {
@@ -51,17 +82,22 @@ TRANSLATE_DEFAULTS: dict = {
     "budget_overshoot": 1.15, # enforcement pass triggers above max_chars * this
     "concurrency": 1,         # parallel translation chunk calls (ACU4 A3)
     "pronouns": dict(DEFAULT_PRONOUNS),  # muted per video, kept consistent (AGU4 A2)
+    "priority": "balanced",   # AGU8 6.3: balanced | faithful | timing
 }
 
 UNITS_DEFAULTS: dict = {
     "max_segments": 4,
     "max_duration_s": 14.0,
     "max_gap_s": 1.0,
+    "pause_split_s": 0.5,     # AGU8 4.4: pause closes the unit (unless a comma)
 }
 
 ASR_DEFAULTS: dict = {
     "dedupe_min_words": 3,
     "condition_on_previous_text": False,  # used only for new transcriptions
+    "word_timestamps": True,     # AGU8 4.2: word times -> words.json
+    "sentence_resegment": True,  # AGU8 4.2: cut segments at sentence-final marks
+    "initial_prompt": "",        # optional faster-whisper initial_prompt (AGU8 4.1)
 }
 
 SUBTITLES_DEFAULTS: dict = {
@@ -83,6 +119,42 @@ LLM_PROVIDER_DEFAULTS: dict = {
     },
     "anthropic": {"model": "claude-sonnet-5-5", "chunk_size": 40},
 }
+
+LLM_DEFAULTS: dict = {
+    # AGU8 task 2: retry redesign knobs.
+    "server_error_backoff_s": [10, 30, 90],
+    "split_on_timeout": True,
+    "split_min_units": 4,
+    "overload_after": 2,
+    "overload_policy": "ask",   # ask | fallback_fast | wait (CLI uses fallback_fast)
+    "request_timeout_s": 180,   # Accurate-mode per-request cap
+    "request_timeout_s_fast": 90,
+}
+
+
+def _deep_copy(d: dict) -> dict:
+    return {k: (dict(v) if isinstance(v, dict) else v) for k, v in d.items()}
+
+
+def _nested_defaults() -> dict:
+    """Fresh copies of every nested defaults group (never shared between
+    Config instances)."""
+    return {
+        "llm": _deep_copy(LLM_DEFAULTS) | {pid: dict(vals) for pid, vals in LLM_PROVIDER_DEFAULTS.items()},
+        "mix": _deep_copy(MIX_DEFAULTS),
+        "subtitles": _deep_copy(SUBTITLES_DEFAULTS),
+        "schedule": _deep_copy(SCHEDULE_DEFAULTS),
+        "translate": _deep_copy(TRANSLATE_DEFAULTS),
+        "units": _deep_copy(UNITS_DEFAULTS),
+        "asr": _deep_copy(ASR_DEFAULTS),
+        "tts": _deep_copy(TTS_DEFAULTS),
+        "punctuate": _deep_copy(PUNCTUATE_DEFAULTS),
+        "fillers": _deep_copy(FILLERS_DEFAULTS),
+        "readable": _deep_copy(READABLE_DEFAULTS),
+    }
+
+
+_NESTED_KEYS = tuple(_nested_defaults())
 
 
 def _parse_scalar(raw: str):
@@ -200,6 +272,10 @@ class Config:
     translate: dict = field(default_factory=lambda: _deep_copy(TRANSLATE_DEFAULTS))
     units: dict = field(default_factory=lambda: _deep_copy(UNITS_DEFAULTS))
     asr: dict = field(default_factory=lambda: _deep_copy(ASR_DEFAULTS))
+    tts: dict = field(default_factory=lambda: _deep_copy(TTS_DEFAULTS))
+    punctuate: dict = field(default_factory=lambda: _deep_copy(PUNCTUATE_DEFAULTS))
+    fillers: dict = field(default_factory=lambda: _deep_copy(FILLERS_DEFAULTS))
+    readable: dict = field(default_factory=lambda: _deep_copy(READABLE_DEFAULTS))
 
     def provider_config(self, provider_id: str | None = None) -> dict:
         pid = (provider_id or self.llm_provider).lower()
@@ -211,25 +287,15 @@ class Config:
         return int(self.provider_config(provider_id).get("chunk_size", 25))
 
 
-def _deep_copy(d: dict) -> dict:
-    return {k: (dict(v) if isinstance(v, dict) else v) for k, v in d.items()}
-
-
 def load(root: Path, overrides: dict | None = None) -> Config:
     data = dict(DEFAULTS)
-    data["llm"] = {pid: dict(vals) for pid, vals in LLM_PROVIDER_DEFAULTS.items()}
-    data["mix"] = _deep_copy(MIX_DEFAULTS)
-    data["subtitles"] = _deep_copy(SUBTITLES_DEFAULTS)
-    data["schedule"] = _deep_copy(SCHEDULE_DEFAULTS)
-    data["translate"] = _deep_copy(TRANSLATE_DEFAULTS)
-    data["units"] = _deep_copy(UNITS_DEFAULTS)
-    data["asr"] = _deep_copy(ASR_DEFAULTS)
+    data.update(_nested_defaults())
 
     yaml_file = root / "config.yaml"
     if yaml_file.exists():
         parsed = parse_simple_yaml(yaml_file)
         for key, value in parsed.items():
-            if key in ("llm", "mix", "subtitles", "schedule", "translate", "units", "asr") and isinstance(value, dict):
+            if key in _NESTED_KEYS and isinstance(value, dict):
                 for sub_key, vals in value.items():
                     if isinstance(vals, dict):
                         data[key].setdefault(sub_key, {})
@@ -256,7 +322,7 @@ def load(root: Path, overrides: dict | None = None) -> Config:
         for key, value in overrides.items():
             if value is None:
                 continue
-            if key in ("llm", "mix", "subtitles", "schedule", "translate", "units", "asr") and isinstance(value, dict):
+            if key in _NESTED_KEYS and isinstance(value, dict):
                 for sub_key, sub_value in value.items():
                     if sub_value is not None:
                         data[key][sub_key] = sub_value
@@ -273,4 +339,8 @@ def load(root: Path, overrides: dict | None = None) -> Config:
     cfg.translate = data["translate"]
     cfg.units = data["units"]
     cfg.asr = data["asr"]
+    cfg.tts = data["tts"]
+    cfg.punctuate = data["punctuate"]
+    cfg.fillers = data["fillers"]
+    cfg.readable = data["readable"]
     return cfg

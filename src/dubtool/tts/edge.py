@@ -18,12 +18,15 @@ from dubtool.tts.base import TTSFailure  # noqa: E402
 class EdgeTTSProvider:
     def __init__(
         self, retries: int = 5, backoff_base_s: float = 3.0, rate_limit_s: float = 0.3,
-        rate: str = "+0%",
+        rate: str = "+0%", max_cooldown_s: float = 30.0,
     ):
         self.retries = retries
         self.backoff_base_s = backoff_base_s
         self.rate_limit_s = rate_limit_s
         self.rate = rate  # edge-tts speaking-rate parameter, e.g. "+0%"
+        # AGU8 2.1: the cooldown cap is configurable (config tts.max_cooldown_s,
+        # default raised from 30 s to 120 s).
+        self.max_cooldown_s = max_cooldown_s
         # Adaptive cooldown: the service occasionally throttles an IP for over
         # a minute, so after failures we slow down across calls, not just
         # inside one synthesize() retry loop.
@@ -38,7 +41,7 @@ class EdgeTTSProvider:
 
     def _cool_down(self) -> None:
         self._consecutive_failures += 1
-        cooldown = min(8.0 * self._consecutive_failures, 30.0)
+        cooldown = min(8.0 * self._consecutive_failures, self.max_cooldown_s)
         self._cooldown_until = time.monotonic() + cooldown
 
     def synthesize(self, text: str, voice: str, out_path: Path) -> None:

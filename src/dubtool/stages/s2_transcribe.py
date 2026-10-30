@@ -197,19 +197,35 @@ def _postprocess_only(job, config) -> None:
 
 def _transcribe(model, job, config) -> None:
     """Whisper pass + cleanup + write transcript.json (AGU6 4.2 split)."""
-    raw_segments, info = model.transcribe(
-        str(job.audio_path),
-        language="en",
-        vad_filter=True,
-        condition_on_previous_text=bool(
+    want_words = bool(config.asr.get("word_timestamps", True))
+    kwargs: dict[str, Any] = {
+        "language": "en",
+        "vad_filter": True,
+        "condition_on_previous_text": bool(
             config.asr.get("condition_on_previous_text", False)
         ),
-    )
-    segments = [
-        {"start": float(s.start), "end": float(s.end), "text": s.text.strip()}
-        for s in raw_segments
-        if s.text and s.text.strip()
-    ]
+    }
+    if config.asr.get("initial_prompt"):
+        kwargs["initial_prompt"] = config.asr.get("initial_prompt")
+    words: list[dict] | None = None
+    try:
+        if want_words:
+            # AGU8 4.2: word-level timestamps -> words.json (the transcript
+            # contract stays untouched).
+            kwargs["word_timestamps"] = True
+        raw_segments, info = model.transcribe(str(job.audio_path), **kwargs)
+        segments, words = _collect(raw_segments)
+    except TypeError as exc:
+        if want_words and "word_timestamps" in str(exc):
+            log.warning(
+                "s2: faster-whisper %s does not accept word_timestamps (%s) "
+                "— continuing without word times", _fw_version(), exc,
+            )
+            kwargs.pop("word_timestamps", None)
+            raw_segments, info = model.transcribe(str(job.audio_path), **kwargs)
+            segments, words = _collect(raw_segments)
+        else:
+            raise
     if not segments:
         raise RuntimeError("transcription produced no segments — is the audio silent?")
 
@@ -221,10 +237,40 @@ def _transcribe(model, job, config) -> None:
     from dubtool.job import write_json
 
     write_json(job.transcript_path, _finalize(cleaned))
+    if words:
+        from dubtool.punctuate import write_words
+
+        write_words(job, words)
     log.info(
-        "s2: transcribed %d raw -> %d cleaned segments (%.1fs of speech, lang=%s)",
+        "s2: transcribed %d raw -> %d cleaned segments (%.1fs of speech, "
+        "lang=%s, words=%s)",
         len(segments), len(cleaned), info.duration, info.language,
+        len(words) if words else "n/a",
     )
+
+
+def _collect(raw_segments) -> tuple[list[dict], list[dict | Any] | list]:
+    segments: list[dict] = []
+    words: list[dict] = []
+    for s in raw_segments:
+        if not (s.text and s.text.strip()):
+            continue
+        segments.append({"start": float(s.start), "end": float(s.end), "text": s.text.strip()})
+        ws = getattr(s, "words", None)
+        for w in ws or []:
+            token = (getattr(w, "word", "") or "").strip()
+            if token:
+                words.append({"w": token, "start": float(w.start), "end": float(w.end)})
+    return segments, words
+
+
+def _fw_version() -> str:
+    try:
+        import faster_whisper
+
+        return getattr(faster_whisper, "__version__", "?")
+    except Exception:
+        return "?"
 
 
 def run(job, config, force: bool = False) -> None:

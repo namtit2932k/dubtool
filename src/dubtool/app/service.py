@@ -42,9 +42,15 @@ class PipelineService(QObject):
         force: bool = False,
         jobs_dir: Path | None = None,
         extra_overrides: dict | None = None,
+        overload_dialog=None,
+        fillers_dialog=None,
     ) -> bool:
         """Start a run (resume happens automatically via the stable job id).
-        Returns False if a run is already active."""
+        Returns False if a run is already active.
+
+        `overload_dialog` (AGU8 3.4) and `fillers_dialog` (AGU8 5.3) are the
+        thread-safe callables that raise the GUI dialog and block until the
+        user answers; they are only called twice for the whole run."""
         if self.running:
             return False
         self.cancel_event = threading.Event()
@@ -73,6 +79,8 @@ class PipelineService(QObject):
                 jobs_dir=jobs_dir,
                 force=force,
                 extra_overrides=extra_overrides,
+                overload_dialog=overload_dialog,
+                fillers_dialog=fillers_dialog,
             )
             self.running = False
             self.finishedRun.emit(result)

@@ -139,7 +139,8 @@ def _doc_lang() -> str:
         return "vi"
 
 
-def _export_readable_cli(job: Job, video_out: Path, fmt: str = "docx") -> Path | None:
+def _export_readable_cli(job: Job, video_out: Path, fmt: str = "docx",
+                         mark_uncertain: bool = False) -> Path | None:
     """The readable file next to the CLI's final video, failure-isolated
     exactly like the app path (AGENT_UPDATE_7.md 5.5)."""
     from dubtool.stages import s8_export_readable as s8
@@ -152,11 +153,17 @@ def _export_readable_cli(job: Job, video_out: Path, fmt: str = "docx") -> Path |
     except Exception:
         duration_s = None
     try:
-        path = s8.deliver(job.dir, video_out, fmt=fmt, lang=lang, duration_s=duration_s)
+        path = s8.deliver(
+            job.dir, video_out, fmt=fmt, lang=lang, duration_s=duration_s,
+            mark_uncertain=mark_uncertain,
+        )
     except Exception as exc:
         log.warning("s8: %s export failed (%s) — trying the .txt fallback", fmt, exc)
         try:
-            path = s8.deliver(job.dir, video_out, fmt="txt", lang=lang, duration_s=duration_s)
+            path = s8.deliver(
+                job.dir, video_out, fmt="txt", lang=lang, duration_s=duration_s,
+                mark_uncertain=mark_uncertain,
+            )
         except Exception as exc2:
             print(
                 "WARNING: the video is ready; the readable translation file "
@@ -202,7 +209,7 @@ def cmd_export_readable(args) -> int:
     except Exception:
         duration_s = None
     meta = s8.make_meta(job.output_path if job.output_path.exists() else target, lang=lang, duration_s=duration_s)
-    rows = s8.build_rows(job.dir)
+    rows = s8.build_rows(job.dir, mark_uncertain=True)
     if fmt == "docx":
         s8.render_docx(target, meta, rows)
     else:
@@ -282,7 +289,11 @@ def cmd_run(args) -> int:
     _copy_to_out(job, out)
     # AGENT_UPDATE_7.md task 4: the CLI produces the readable file too.
     if not args.no_readable:
-        _export_readable_cli(job, out if out is not None else job.output_path, fmt=args.readable_format or "docx")
+        _export_readable_cli(
+            job, out if out is not None else job.output_path,
+            fmt=args.readable_format or "docx",
+            mark_uncertain=bool((conf.readable or {}).get("mark_uncertain")),
+        )
     print(f"Done. Output: {job.output_path} and {job.vi_audio_path}")
     return 0
 
@@ -370,6 +381,29 @@ def cmd_retts(args) -> int:
     print("retts: done; now rebuilding stage s5/s6 as needed")
     _run_stage(job, conf, "s5", api_keys=_env_keys())
     _run_stage(job, conf, "s6")
+    return 0
+
+
+def cmd_eval_translation(args) -> int:
+    """`dubtool eval-translation <job_id> [--variants current,punctuated,faithful]`
+    — write eval/<timestamp>.md (AGU8 task 9) for the user to read."""
+    _setup_logging(getattr(args, "verbose", False))
+    from dubtool.eval_translation import run_eval
+
+    job = load_job(args.job_id, Path("jobs"))
+    cfg = config_mod.load(Path.cwd())
+    budget = None
+    from dubtool.llm import budget as llm_budget
+    try:
+        budget = llm_budget.from_config(cfg)
+    except Exception:
+        pass
+    try:
+        path = run_eval(job, cfg, variants=args.variants, budget=budget)
+    except Exception as exc:
+        print(f"ERROR: evaluation failed: {exc}", file=sys.stderr)
+        return 1
+    print(f"Evaluation file: {path}")
     return 0
 
 
@@ -558,6 +592,15 @@ def build_parser() -> argparse.ArgumentParser:
     clean_p.add_argument("--jobs-days", type=int, default=14)
     clean_p.set_defaults(func=cmd_clean)
 
+    eval_p = sub.add_parser(
+        "eval-translation", help="write eval/<timestamp>.md for one job (no scoring)"
+    )
+    eval_p.add_argument("job_id")
+    eval_p.add_argument(
+        "--variants", default="current",
+        help="comma list from current,punctuated,faithful",
+    )
+    eval_p.set_defaults(func=cmd_eval_translation)
     cmp_p = sub.add_parser(
         "compare-translate",
         help="translate the same units with several models for human comparison",
@@ -580,6 +623,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    # AGU8 7.1: from source, PyAV 19+ breaks stage 2 (faster-whisper).
+    # Warn once with the exact repair command when a dub command runs.
+    if getattr(args, "func", None) is not None and args.func.__name__ in (
+        "cmd_dub", "cmd_export_readable",
+    ):
+        from dubtool.app.paths import is_frozen
+        from dubtool.av_check import problem as _av_problem
+
+        if not is_frozen():
+            _warn = _av_problem()
+            if _warn:
+                print(f"WARNING: {_warn}", file=sys.stderr)
     try:
         return args.func(args)
     except RuntimeError as exc:

@@ -22,6 +22,7 @@ from dubtool.llm.base import (
     NetworkLLMError,
     RateLimitError,
     RateLimitExhausted,
+    ServerErrorLLMError,
     TimeoutLLMError,
     _is_internal,
     _transport_kind,
@@ -101,6 +102,12 @@ class GeminiProvider:
         # SDK call through the HTTP options so a stalled request cannot hang
         # the pipeline for minutes.
         self._timeout_s = timeout_s
+
+    @property
+    def timeout_s(self) -> float | None:
+        """AGU8 3.5: the request cap the request logs report (read alias of
+        the private _timeout_s)."""
+        return self._timeout_s
         # Optional UI-facing event callback for user-facing key notices
         # ("key #2 invalid — skipped"); positions only, never values.
         self.key_event = None
@@ -306,7 +313,25 @@ class GeminiProvider:
                 "Google AI Studio (the key value is never shown here)",
                 key_used=used_key,
             )
+        # AGU8 task 2: 5xx are model-wide (a key switch cannot help) and
+        # map to the server-error type with its HTTP status.
+        if isinstance(code, int) and code >= 500:
+            label = {503: "UNAVAILABLE (high demand)", 504: "DEADLINE_EXCEEDED"}.get(
+                code, f"HTTP {code}"
+            )
+            return ServerErrorLLMError(
+                f"{self.name} server error {code} {label}", status=code
+            )
         text = str(exc)
+        # Some SDK error shapes carry the status only in the message.
+        if "UNAVAILABLE" in text or "unavailable" in text:
+            return ServerErrorLLMError(
+                f"{self.name} server error 503 UNAVAILABLE (high demand)", status=503
+            )
+        if "DEADLINE_EXCEEDED" in text:
+            return ServerErrorLLMError(
+                f"{self.name} server error 504 DEADLINE_EXCEEDED", status=504
+            )
         if "RESOURCE_EXHAUSTED" in text or "quota" in text.lower():
             return RateLimitError(self.name, text, key_used=used_key)
         if "API key" in text or "API_KEY" in text:

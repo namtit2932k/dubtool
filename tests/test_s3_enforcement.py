@@ -6,12 +6,17 @@ import json
 
 import pytest
 
+from types import SimpleNamespace
+
 import dubtool.stages.s3_translate as s3
 from dubtool.config import Config
 from dubtool.job import Job, write_json
 
 
 class FakeClient:
+    # s3's summary line reads provider.name / provider.model.
+    provider = SimpleNamespace(name="fake", model="fake-model")
+
     def __init__(self, translate_out, shorten_batch_out):
         self.translate_calls = 0
         self.batch_calls = 0
@@ -22,11 +27,11 @@ class FakeClient:
         self.total_output_tokens = 0
         self.total_calls = 0
 
-    def translate_batch(self, segments, context, glossary, brief=None, pronouns=None):
+    def translate_batch(self, segments, context, glossary, brief=None, pronouns=None, policy=None):
         self.translate_calls += 1
         return self.translate_out
 
-    def shorten_batch(self, items):
+    def shorten_batch(self, items, policy=None):
         self.batch_calls += 1
         self.seen_items = items
         return self.shorten_batch_out
@@ -53,7 +58,7 @@ def test_over_budget_single_batch_shorten(job_with_transcript, monkeypatch, caps
     short = "Dòng ngắn hơn"
 
     fake = FakeClient(translate_out, [{"id": 0, "vi": short}])
-    monkeypatch.setattr(s3, "LLMClient", lambda provider: fake)
+    monkeypatch.setattr(s3, "LLMClient", lambda provider, **k: fake)
 
     class FakeProvider:
         name = "fake"

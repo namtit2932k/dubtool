@@ -342,7 +342,35 @@ CHECKS: dict[str, callable] = {
 }
 
 
+def check_network() -> dict:
+    """AGU8 2.2 (--selftest --network): DNS + TLS reachability of the Gemini,
+    Whisper-model and edge-tts hosts, plus the clock offset; prints a table.
+    Never part of the default offline CHECKS."""
+    import time as _t
+    from dubtool import netcheck
+
+    started = _t.monotonic()
+    try:
+        rows = netcheck.check_hosts()
+    except Exception as exc:
+        return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
+    elapsed = _t.monotonic() - started
+    print(netcheck.format_table(rows, elapsed))
+    ok = all(r["dns"] == "ok" and r["tls"] == "ok" for r in rows) and bool(rows)
+    return {"ok": ok, "detail": f"{sum(1 for r in rows if r['tls']== 'ok')}/{len(rows)} hosts reachable"}
+
+
 def run_selftest(json_path: Path | None = None) -> int:
+    # A Windows console can be cp1252 while the output carries Vietnamese
+    # (the connectivity table header) — reconfigure to UTF-8 with replacement
+    # instead of crashing the selftest on the first non-ASCII character
+    # (AGENT_UPDATE_8.md 2.2).
+    import sys as _sys
+
+    try:
+        _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
     results = {name: fn() for name, fn in CHECKS.items()}
     ok = all(r["ok"] for r in results.values())
     header = f"{'check':<20} {'status':<6} detail"

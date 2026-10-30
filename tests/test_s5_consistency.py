@@ -69,10 +69,10 @@ class FakeLLMOK:
     def __init__(self, provider=None):
         pass
 
-    def shorten(self, english, current_vi, max_chars):
+    def shorten(self, english, current_vi, max_chars, policy=None):
         return "ngắn gọn"
 
-    def shorten_batch(self, items):
+    def shorten_batch(self, items, policy=None):
         return [{"id": item["id"], "vi": "ngắn gọn"} for item in items]
 
 
@@ -83,10 +83,10 @@ class FakeLLMBoom:
     def __init__(self, provider=None):
         pass
 
-    def shorten(self, english, current_vi, max_chars):
+    def shorten(self, english, current_vi, max_chars, policy=None):
         raise RuntimeError("LLM exploded")
 
-    def shorten_batch(self, items):
+    def shorten_batch(self, items, policy=None):
         raise RuntimeError("LLM exploded")
 
 
@@ -151,7 +151,57 @@ def test_stage5_runs_without_llm_key_when_nothing_needs_shortening(monkeypatch, 
     assert entries_after[0]["fit_status"] == "ok"  # 0.5 s fits the 2.0 s slot
 
 
-def test_force_regenerates_fitted_clip(monkeypatch, tmp_path):
+def test_shorten_forwards_run_policy(monkeypatch, tmp_path):
+    """AGENT_UPDATE_8 6.3: s5 forwards the run-scoped fidelity policy —
+    faithful keeps the fillers rules and only allows filler removal."""
+    job = _too_long_job(tmp_path)
+    seen = {}
+
+    class PolicyProbe(FakeLLMOK):
+        def shorten_batch(self, items, policy=None):
+            seen["items"] = items
+            seen["policy"] = policy
+            return [{"id": item["id"], "vi": "ngắn gọn"} for item in items]
+
+    cfg = FakeConfig()
+    cfg.translate = {"priority": "faithful"}
+    cfg.fillers_policy = "Chỉ được bỏ filler words cho phép."
+    run_with_probes(job, cfg, monkeypatch, _OkTTS(), PolicyProbe)
+    entries = json.loads(job.translated_path.read_text(encoding="utf-8"))
+    assert entries[0]["vi"] == "ngắn gọn"
+    assert "filler words cho phép" in seen["policy"]
+    assert "FAITHFUL preset" in seen["policy"]
+
+
+def test_shorten_policy_balanced_is_fillers_only(monkeypatch, tmp_path):
+    job = _too_long_job(tmp_path)
+    seen = {}
+
+    class PolicyProbe(FakeLLMOK):
+        def shorten_batch(self, items, policy=None):
+            seen["policy"] = policy
+            return []
+
+    cfg = FakeConfig()
+    cfg.translate = {"priority": "balanced"}
+    run_with_probes(job, cfg, monkeypatch, _OkTTS(), PolicyProbe)
+    assert seen["policy"] is None  # balanced: no extra directive
+
+
+def test_shorten_policy_timing_directive(monkeypatch, tmp_path):
+    job = _too_long_job(tmp_path)
+    seen = {}
+
+    class PolicyProbe(FakeLLMOK):
+        def shorten_batch(self, items, policy=None):
+            seen["policy"] = policy
+            return []
+
+    cfg = FakeConfig()
+    cfg.translate = {"priority": "timing"}
+    run_with_probes(job, cfg, monkeypatch, _OkTTS(), PolicyProbe)
+    assert "TIMING preset" in (seen["policy"] or "")
+
     job = FakeJob(tmp_path)
     entries = [
         {"id": 0, "start": 0.0, "end": 1.0, "text": "hi", "vi": "chào",

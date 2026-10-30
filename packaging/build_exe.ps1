@@ -124,11 +124,11 @@ try {
     $gitOut = & git -C $root rev-parse --short HEAD 2>$null
     if ($LASTEXITCODE -eq 0 -and $gitOut) { $git = ([string]$gitOut).Trim() }
     $buildLines = @(
-        "update: 7",
+        "update: 8",
         "git: $git",
         "built (UTC): $stamp",
         "sha256: $sha",
-        "build id: Update 7 ($git)"
+        "build id: Update 8 ($git)"
     )
     Set-Content -Path (Join-Path $tmpAppDir "BUILD_INFO.txt") -Value $buildLines -Encoding UTF8
 
@@ -169,7 +169,7 @@ try {
     # tests gate on purpose: the PNGs must prove the exe that was just
     # promoted, not a previous one.
     Write-Host "== [7/6] screenshots from the fresh exe"
-    $buildIdFull = "Update 7 ($git)"
+    $buildIdFull = "Update 8 ($git)"
     $slug = ($buildIdFull.ToLower() -replace " ", "_") -replace "[()]", ""
     $shotsRoot = Join-Path $root "screenshots"
     $shotDir = Join-Path $shotsRoot $slug

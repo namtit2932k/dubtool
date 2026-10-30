@@ -40,6 +40,14 @@ from PySide6.QtWidgets import (
 from dubtool.app import i18n, modes, secrets, settings
 from dubtool.app.key_test import run_key_test
 
+
+def _asr_progress() -> dict:
+    """The last stage-2 measurement for the whisper-model tooltip (AGU8 7);
+    imported lazily so the dialog loads on a machine without audio files."""
+    from dubtool.app import asr_stats
+
+    return asr_stats.last()
+
 log = logging.getLogger("dubtool")
 
 VOICE_KEYS = ("vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural")
@@ -569,13 +577,37 @@ class SettingsDialog(QDialog):
             self.voice_combo.addItem(voice, voice)
         form.addRow(i18n.tr("options.voice"), self.voice_combo)
         self.whisper_combo = QComboBox()
-        for size in ("tiny", "base", "small", "medium", "large-v3"):
-            self.whisper_combo.addItem(size, size)
+        # AGU8 task 7: base/small/medium/large-v3 with a one-line description
+        # ("nhanh nhất", "cân bằng", …) baked into the item text.
+        for size, desc_key in (("base", "settings.whisper_base"), ("small", "settings.whisper_small"), ("medium", "settings.whisper_medium"), ("large-v3", "settings.whisper_large")):
+            self.whisper_combo.addItem(f"{size} — {i18n.tr(desc_key)}", size)
+        # Last-run stage-2 real time + video length in the tooltip (AGU8 7).
+        last = _asr_progress()
+        if last:
+            from dubtool.audio_utils import format_mmss
+
+            self.whisper_combo.setToolTip(
+                i18n.tr(
+                    "settings.whisper_last_run",
+                    seconds=format_mmss(last.get("s2_elapsed_s", 0.0)),
+                    video=format_mmss(last.get("video_s", 0.0)),
+                )
+            )
+        else:
+            self.whisper_combo.setToolTip(i18n.tr("settings.whisper_size_hint"))
         form.addRow(i18n.tr("settings.whisper_model"), self.whisper_combo)
         self.device_combo = QComboBox()
         for dev in ("auto", "cpu", "cuda"):
             self.device_combo.addItem(dev, dev)
         form.addRow(i18n.tr("settings.whisper_device"), self.device_combo)
+        # AGU8 6.3 fidelity preset: the meaning-vs-timing trade-off.
+        self.priority_combo = QComboBox()
+        for key in ("faithful", "balanced", "timing"):
+            self.priority_combo.addItem(
+                i18n.tr("settings.priority_" + key), key
+            )
+        self.priority_combo.setToolTip(i18n.tr("settings.priority_tooltip"))
+        form.addRow(i18n.tr("settings.priority"), self.priority_combo)
         # AGU6 4.2: "Mức dùng CPU / CPU usage" — thread budget for Whisper
         # and the FFmpeg encode (low = 1/4 of cores, balanced = 1/2, max = all).
         self.cpu_combo = QComboBox()
@@ -636,11 +668,12 @@ class SettingsDialog(QDialog):
         self.voice_combo.setCurrentIndex(max(0, self.voice_combo.findData(s["voice"])))
         self.whisper_combo.setCurrentIndex(max(0, self.whisper_combo.findData(s["whisper_model"])))
         self.device_combo.setCurrentIndex(max(0, self.device_combo.findData(s["whisper_device"])))
+        self.priority_combo.setCurrentIndex(max(0, self.priority_combo.findData(s.get("translate_priority", "balanced"))))
         self.cpu_combo.setCurrentIndex(max(0, self.cpu_combo.findData(s.get("cpu_usage", "balanced"))))
         self.preset_combo.setCurrentIndex(max(0, self.preset_combo.findData(s.get("video_encode_preset", "veryfast"))))
         self.jobs_days_spin.setValue(int(s.get("jobs_max_days", 14) or 14))
         self.jobs_edit.setText(s.get("jobs_dir") or "")
-        self.output_edit.setText(s.get("default_output") or "")
+        self.output_edit.setText(s.get("default_output_dir") or "")
 
     def apply_changes(self) -> dict | None:
         s = settings.load()
@@ -648,11 +681,13 @@ class SettingsDialog(QDialog):
         s["voice"] = self.voice_combo.currentData() or s["voice"]
         s["whisper_model"] = self.whisper_combo.currentData() or s["whisper_model"]
         s["whisper_device"] = self.device_combo.currentData() or s["whisper_device"]
+        s["translate_priority"] = self.priority_combo.currentData() or "balanced"
         s["cpu_usage"] = self.cpu_combo.currentData() or "balanced"
         s["video_encode_preset"] = self.preset_combo.currentData() or "veryfast"
         s["jobs_max_days"] = int(self.jobs_days_spin.value())
         s["jobs_dir"] = self.jobs_edit.text().strip()
-        s["default_output"] = self.output_edit.text().strip()
+        s["default_output_dir"] = self.output_edit.text().strip()
+        s.pop("default_output", None)  # old key is never written (AGU8 7.3)
         # Model ids: the Custom text field is validated; an empty custom id
         # keeps the previously saved one (nothing to revert to silently).
         fast = self._selected_model("fast")

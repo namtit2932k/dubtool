@@ -23,6 +23,31 @@ MAX_TEXT_LOG_CHARS = 120
 _DIGIT_OR_SYMBOL = re.compile(r"[\d\W]")
 
 
+def _exc_kind(error: Exception | str) -> str:
+    """AGU8 2.2: the failure is recorded by exception TYPE (e.g.
+    NoAudioReceived, HTTP-status handshake errors), not just its message."""
+    if isinstance(error, BaseException):
+        # Fold the full cause chain into one dotted name for grouping.
+        names = [type(error).__name__]
+        seen = {id(error)}
+        link = error.__cause__ or error.__context__
+        while link is not None and id(link) not in seen:
+            names.append(type(link).__name__)
+            seen.add(id(link))
+            link = link.__cause__ or link.__context__
+        return " <- ".join(names)
+    return "message"
+
+
+def _edge_tts_version() -> str:
+    try:
+        import edge_tts
+
+        return str(getattr(edge_tts, "__version__", "unknown"))
+    except Exception:
+        return "unavailable"
+
+
 class TTSFailureLog:
     def __init__(self, job_dir: Path):
         self.path = Path(job_dir) / "tts_failures.json"
@@ -42,22 +67,34 @@ class TTSFailureLog:
         text: str,
         error: Exception | str,
         elapsed_s: float,
+        *,
+        voice: str = "",
+        rate: str = "",
+        details: dict | None = None,
     ) -> None:
         message = str(error)
         log.warning(
-            "tts failure: id=%s attempt=%d chars=%d elapsed=%.1fs error=%s text=%r",
-            seg_id, attempt, len(text), elapsed_s, message, text[:MAX_TEXT_LOG_CHARS],
+            "tts failure: kind=%s id=%s attempt=%d chars=%d elapsed=%.1fs error=%s "
+            "voice=%s rate=%s edge-tts=%s text=%r",
+            _exc_kind(error), seg_id, attempt, len(text), elapsed_s, message,
+            voice or "?", rate or "?", _edge_tts_version(),
+            text[:MAX_TEXT_LOG_CHARS],
         )
-        self.records.append(
-            {
-                "id": seg_id,
-                "attempt": attempt,
-                "chars": len(text),
-                "text": text[:MAX_TEXT_LOG_CHARS],
-                "error": message,
-                "elapsed_s": round(elapsed_s, 2),
-            }
-        )
+        record: dict = {
+            "id": seg_id,
+            "attempt": attempt,
+            "chars": len(text),
+            "text": text[:MAX_TEXT_LOG_CHARS],
+            "error": message,
+            "error_kind": _exc_kind(error),
+            "voice": voice or "?",
+            "rate": rate or "?",
+            "edge_tts_version": _edge_tts_version(),
+            "elapsed_s": round(elapsed_s, 2),
+        }
+        if details:
+            record.update({k: v for k, v in details.items() if k not in record})
+        self.records.append(record)
         self.save()
 
     def save(self) -> None:
