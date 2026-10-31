@@ -51,9 +51,26 @@ def ffmpeg_bin() -> str:
 
 def ffprobe_bin() -> str | None:
     """None when unavailable: probes are in-process now, so a missing
-    ffprobe only disables the fallback (AGENT_UPDATE_6.md 3.1)."""
+    ffprobe only disables the fallback (AGENT_UPDATE_6.md 3.1). Since
+    Update 9 the bundled ffprobe.exe is no longer shipped (it duplicated
+    ffmpeg's 122 MB build); the fallback only fires if the user's system
+    has one on PATH."""
     path = _bundled_bin("ffprobe") or shutil.which("ffprobe") or shutil.which("ffprobe.exe")
     return path
+
+
+def _ffprobe_or_raise(path: Path, probe: str) -> str:
+    """The ffprobe binary for the fallback, or a clear RuntimeError that
+    names the in-process failure (Update 9: ffprobe is not bundled, so the
+    old 'program not found' crash must never reach the user)."""
+    bin_path = ffprobe_bin()
+    if bin_path:
+        return bin_path
+    raise RuntimeError(
+        f"could not read {path.name} in-process ({probe}); ffprobe is not "
+        "bundled and was not found on PATH — the file may be damaged or "
+        "use an unsupported container"
+    )
 
 
 def require_ffmpeg() -> None:
@@ -105,7 +122,7 @@ def probe_duration(path: Path) -> float:
 
 def _ffprobe_duration(path: Path) -> float:
     args = [
-        ffprobe_bin() or "ffprobe", "-v", "error", "-select_streams", "a",
+        _ffprobe_or_raise(path, "PyAV"), "-v", "error", "-select_streams", "a",
         "-show_entries", "format=duration", "-of", "default=nk=1:nw=1", str(path),
     ]
     result = proc.run(args)
@@ -126,7 +143,7 @@ def probe_audio_streams(path: Path) -> int:
             return sum(1 for s in container.streams if s.type == "audio")
     except Exception:
         args = [
-            ffprobe_bin() or "ffprobe", "-v", "error", "-select_streams", "a",
+            _ffprobe_or_raise(path, "PyAV"), "-v", "error", "-select_streams", "a",
             "-show_entries", "stream=index", "-of", "default=nw=1", str(path),
         ]
         result = proc.run(args, check=True)
@@ -157,7 +174,7 @@ def probe_video_info(path: Path) -> dict:
             }
     except Exception:
         args = [
-            ffprobe_bin() or "ffprobe", "-v", "error", "-select_streams", "v:0",
+            _ffprobe_or_raise(path, "PyAV"), "-v", "error", "-select_streams", "v:0",
             "-show_entries", "stream=codec_name,width,height,r_frame_rate:format=duration",
             "-of", "json", str(path),
         ]
@@ -185,8 +202,13 @@ def probe_audio_format(path: Path) -> tuple[int, int]:
                 return int(astream.rate), int(astream.channels or 1)
     except Exception:
         pass
+    if ffprobe_bin() is None:
+        # No audio stream reachable in-process and no ffprobe on PATH
+        # (Update 9: ffprobe is not bundled): use the standard output
+        # format rather than failing the whole job over metadata.
+        return OUT_SAMPLE_RATE, 2
     args = [
-        ffprobe_bin() or "ffprobe", "-v", "error", "-select_streams", "a:0",
+        ffprobe_bin(), "-v", "error", "-select_streams", "a:0",
         "-show_entries", "stream=sample_rate,channels", "-of", "default=nw=1:nk=1",
         str(path),
     ]
@@ -273,12 +295,145 @@ def is_valid_media(path: Path) -> bool:
 
 
 # -------------------------------------------------------- ffmpeg process wrappers
-def run_ffmpeg(args: list[str], *, cancel=None, low_priority: bool = False) -> None:
+def _parse_progress_seconds(line: str) -> float | None:
+    """Seconds encoded in one ffmpeg `-progress pipe:1` value line
+    (Update 9 task 3.3): `out_time_us=1234567`, `out_time_ms=1234.567` and
+    `out_time=HH:MM:SS.micro` are all accepted; other lines return None."""
+    line = line.strip()
+    try:
+        if line.startswith("out_time_us="):
+            return int(line.split("=", 1)[1]) / 1_000_000.0
+        if line.startswith("out_time_ms="):
+            # ffmpeg prints milliseconds as microseconds*1000 despite the name.
+            return int(line.split("=", 1)[1]) / 1_000_000.0
+        if line.startswith("out_time="):
+            t = line.split("=", 1)[1].strip()
+            if t in ("", "N/A", "-"):
+                return None
+            parts = t.split(":")
+            seconds = 0.0
+            for part in parts:
+                seconds = seconds * 60 + float(part)
+            return seconds
+    except (ValueError, IndexError):
+        return None
+    return None
+
+
+def _emit_ffmpeg_ratio(seconds: float, total_s: float, pf: float, progress: Any, out_state: list) -> bool:
+    """Call progress(ratio) once per whole percent change; True when the
+    line should mark the event as throttled (not every half-second tick)."""
+    ratio = 0.0 if total_s <= 0 else max(0.0, min(1.0, seconds / total_s))
+    pct = int(ratio * 100)
+    if pct != out_state[0]:
+        out_state[0] = pct
+        try:
+            progress(ratio)
+        except Exception:
+            pass
+    return pct != pf
+
+
+def run_ffmpeg(args: list[str], *, cancel=None, low_priority: bool = False,
+               progress=None, total_s: float | None = None, cwd=None) -> None:
+    """Run ffmpeg through the hidden-window helper.
+
+    With `progress` (and a known `total_s`) the run adds
+    `-progress pipe:1 -nostats`, parses `out_time_*` values off the pipe
+    without blocking the UI thread (a reader thread; the caller is the
+    worker thread anyway) and calls progress([0..1]) hill every whole
+    percent. The cancel path keeps the same process-tree kill as proc.run.
+    """
     cmd = [ffmpeg_bin(), "-y", *args]
-    result = proc.run(cmd, cancel=cancel, low_priority=low_priority)
-    if result.returncode != 0:
-        tail = (result.stderr or "").strip().splitlines()[-5:]
-        raise RuntimeError("ffmpeg failed: " + " | ".join(tail))
+    if progress is None or not total_s or total_s <= 0:
+        result = proc.run(cmd, cancel=cancel, low_priority=low_priority,
+                          cwd=str(cwd) if cwd is not None else None)
+        if result.returncode != 0:
+            tail = (result.stderr or "").strip().splitlines()[-5:]
+            raise RuntimeError("ffmpeg failed: " + " | ".join(tail))
+        return
+
+    from queue import Empty, Queue
+    from threading import Thread
+
+    from dubtool import proc as _proc
+    from dubtool.job import StageCancelled
+
+    cmd = cmd + ["-progress", "pipe:1", "-nostats"]
+    p = _proc.popen(cmd, cwd=cwd, low_priority=low_priority)
+    assert p.stdout is not None and p.stderr is not None
+    q: "Queue[str | None]" = Queue()
+    state = [-1]           # last emitted percent
+
+    def _reader() -> None:
+        assert p.stdout is not None
+        try:
+            for line in p.stdout:
+                q.put(line)
+        except Exception:
+            pass
+        finally:
+            q.put(None)
+
+    class _StderrTail:
+        tail: list[str] = []
+
+    def _stderr_reader() -> None:
+        assert p.stderr is not None
+        for line in p.stderr:
+            _StderrTail.tail.append(line)
+            if len(_StderrTail.tail) > 10:
+                del _StderrTail.tail[: len(_StderrTail.tail) - 10]
+
+    Thread(target=_reader, daemon=True, name="ffmpeg-out").start()
+    Thread(target=_stderr_reader, daemon=True, name="ffmpeg-err").start()
+
+    def _fail() -> RuntimeError:
+        tail = (_StderrTail().tail or [""])[-5:]
+        text = "".join(tail).strip()
+        reason = " | ".join(text.splitlines()[-5:]) if text else ""
+        msg = "ffmpeg failed: " + (reason or f"exit code {p.returncode}")
+        return RuntimeError(msg)
+
+    StageCancelled_placeholder = StageCancelled
+    try:
+        while True:
+            try:
+                item = q.get(timeout=0.2)
+            except Empty:
+                if p.poll() is not None:
+                    break
+                if cancel is not None and cancel.is_set():
+                    _proc._kill_tree(p.pid)
+                    try:
+                        p.wait(timeout=5)
+                    except Exception:
+                        pass
+                    raise StageCancelled_placeholder("ffmpeg: cancelled") from None
+                continue
+            if item is None:
+                break
+            seconds = _parse_progress_seconds(str(item))
+            if seconds is None:
+                continue
+            _emit_ffmpeg_ratio(seconds, float(total_s or 1.0), state[0], progress, state)
+        if p.poll() is None:
+            try:
+                p.wait(timeout=300)
+            except Exception:
+                _proc._kill_tree(p.pid)
+                p.wait(timeout=5)
+        if cancel is not None and cancel.is_set():
+            raise StageCancelled_placeholder("ffmpeg: cancelled") from None
+        if p.returncode != 0:
+            raise _fail()
+    finally:
+        for stream in (p.stdout, p.stderr):
+            try:
+                if stream is not None:
+                    stream.close()
+            except Exception:
+                pass
 
 
 def extract_audio(src: Path, dst: Path, *, cancel=None) -> None:

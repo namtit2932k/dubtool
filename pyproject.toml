@@ -4,9 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dubtool"
-version = "0.1.0"
 description = "English -> Vietnamese video dubbing tool"
 requires-python = ">=3.11"
+# AGU9 5.2: single version source (dubtool.__version__, 1.0.<update>).
+dynamic = ["version"]
 dependencies = [
   "faster-whisper>=1.0",
   "av>=11,<19",  # AGU8 7.1: PyAV 19+ changes the APIs faster-whisper uses
@@ -26,6 +27,9 @@ dubtool = "dubtool.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "dubtool.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

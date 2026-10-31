@@ -285,12 +285,33 @@ def collect_info() -> dict:
         "packages": versions,
         "free_space": _free_space(),
         "connectivity": _connectivity(),
+        "clock_hint": _clock_hint(),
         "last_s2_stats": _asr_stats_summary(),
         "quota_summary": _quota_summary(),
         "tts_failures": _tts_summary(_jobs_dir()),
         "jobs": _jobs_summary(_jobs_dir()),
     }
     return info
+
+
+def _clock_hint() -> dict | None:
+    """AGU9 10.7: the clock-offset hint when the last measured offset is
+    over 30 s (Update 8 measured +54.36 s on this machine). States a
+    possibility, never a cause, and never changes the clock."""
+    try:
+        from dubtool import netcheck
+
+        offset = netcheck.large_offset()
+        if offset is None:
+            return None
+        from dubtool.app import i18n
+
+        return {
+            "offset_s": round(offset, 2),
+            "hint": i18n.tr("error.clock_hint", n=int(round(abs(offset)))),
+        }
+    except Exception:
+        return None
 
 
 def _jobs_dir() -> Path:

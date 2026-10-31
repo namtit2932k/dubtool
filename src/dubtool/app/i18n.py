@@ -12,6 +12,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "video.choose": "Chọn video…",
         "video.drop": "Kéo thả video vào đây hoặc bấm chọn",
         "video.no_stream": "Tệp này không có luồng video.",
+        "video.remove": "Bỏ chọn video",
         "video.warn_long": "Video dài hơn 30 phút — có thể tốn nhiều thời gian.",
         "audio.no_stream_warn": "Cảnh báo: video không có luồng âm thanh; kết quả sẽ chỉ có giọng đọc lồng tiếng.",
         "output.header": "Thư mục xuất",
@@ -37,6 +38,13 @@ STRINGS: dict[str, dict[str, str]] = {
         "progress.header": "Tiến trình",
         "progress.heavy_cpu_note": "Giai đoạn {stage} dùng nhiều CPU — đây là hành vi bình thường.",
         "progress.cancel": "Hủy",
+        "progress.details": "Chi tiết tiến trình",
+        "details.copy": "Sao chép chi tiết",
+        "details.open_log": "Mở thư mục log",
+        "details.doing": "Đang làm: {stage} — {what}",
+        "details.last_update": "Cập nhật lần cuối: {s} giây trước",
+        "details.still_running": "— vẫn đang chạy",
+        "details.worker_dead": "— tiến trình đã dừng đột ngột",
         "progress.resume": "Tiếp tục chạy lại",
         "error.button.resume": "Tiếp tục",
         "error.button.open_settings": "Mở cài đặt",
@@ -61,7 +69,35 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.tab_models": "Mô hình",
         "settings.tab_general": "Chung",
         "settings.tab_advanced": "Nâng cao",
+        "progress.folder_missing": "Thư mục không tồn tại.",
+        "hb.model_wait": "Đang chờ phản hồi từ mô hình… ({n} giây)",
+        "hb.model_backoff": "Mô hình đang bận, thử lại sau {n} giây…",
+        "hb.asr_progress": "Đang nhận dạng giọng nói… {n}%",
+        "settings.read_only_banner": "Đang chạy — chưa thể thay đổi cài đặt. Chỉ đọc.",
         "settings.jobs_days": "Giữ job tối đa (ngày)",
+        "adv.working_files_title": "Tệp tạm của các lần dịch",
+        "adv.working_files_info": (
+            "Mỗi lần dịch, DubTool lưu các tệp tạm (âm thanh, bản dịch, giọng "
+            "đọc đã tạo, nhật ký) trong thư mục này. Nhờ vậy có thể tiếp tục "
+            "nếu bị gián đoạn và không phải tạo lại. Video và bản dịch xuất ra "
+            "không nằm ở đây."
+        ),
+        "adv.open_jobs_dir": "Mở thư mục",
+        "adv.jobs_stats": "Hiện đang lưu: {count} lần dịch, dung lượng {size}.",
+        "adv.jobs_days_hint": "Các lần dịch cũ hơn số ngày này sẽ được xóa khi mở ứng dụng.",
+        "adv.confirm_text": (
+            "Sẽ xóa {count} lần dịch, tổng dung lượng {size}; lần cũ nhất là {oldest}.\n\n"
+            "Không bao giờ xóa: video và bản dịch xuất ra, lần dịch đang chạy, "
+            "các tệp mô hình nhận dạng giọng nói."
+        ),
+        "adv.choice_older": "Xóa các lần dịch cũ hơn {n} ngày",
+        "adv.choice_all": "Xóa tất cả tệp tạm (trừ lần đang chạy)",
+        "adv.clean_done": "Đã xóa {n} lần dịch, giải phóng {size}.\nModel cache: {models_size} (không bao giờ tự xoá).",
+        "adv.nothing_to_delete": "Không có lần dịch nào đủ điều kiện xóa.",
+        "options.keep_hint": (
+            "Nếu tắt, tệp tạm của lần dịch được xóa ngay khi hoàn tất; "
+            "bạn sẽ không thể tiếp tục hoặc tái sử dụng chúng."
+        ),
         "settings.clean_now": "Dọn dẹp ngay",
         "settings.clean_now_title": "Dọn dẹp job cũ",
         "settings.clean_now_report": (
@@ -102,6 +138,13 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.key_removed": "Đã xóa khóa",
         "settings.language": "Ngôn ngữ",
         "settings.cpu_usage": "Mức dùng CPU",
+        "settings.asr_prompt_label": "Gợi ý dấu câu",
+        # AGU9 10.4: measured on test2 (Update 8): with the hint 52.5% of
+        # segments end with sentence-final punctuation vs 41.0% without, at
+        # the same speed; the transcription text changes, affecting the
+        # resume hash and what later stages work with.
+        "settings.asr_prompt": "Gợi ý dấu câu cho nhận dạng giọng nói",
+        "settings.asr_prompt_tooltip": "Đã đo trên video thử nghiệm: dấu câu cuối câu tăng từ 41% lên 52% của các đoạn, không chậm hơn — nhưng văn bản nhận dạng thay đổi, ảnh hưởng tới tiếp tục sau gián đoạn.",
         "settings.cpu_low": "Thấp",
         "settings.cpu_balanced": "Cân bằng",
         "settings.cpu_maximum": "Tối đa",
@@ -146,6 +189,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "error.ffmpeg_missing": "Thiếu FFmpeg trong bản cài đặt — hãy đóng gói lại or dùng bản zip đầy đủ.",
         "error.cancelled": "Đã hủy. Chạy có thể được tiếp tục.",
         "error.tts_unavailable": "Dịch vụ giọng đọc không phản hồi. Tiến trình đã được lưu; bạn có thể tiếp tục sau vài phút, đổi giọng đọc trong Cài đặt, hoặc bật giọng dự phòng.",
+        # AGU9 10.7: a possibility, never a cause claim.
+        "error.clock_hint": "Đồng hồ máy có thể lệch khoảng {n} giây so với máy chủ — hãy đồng bộ giờ Windows.",
         "error.timeout": "Máy chủ trả lời quá lâu — hãy thử lại (không phải lỗi mạng của bạn).",
         "error.internal": "Có lỗi bên trong ứng dụng — không phải lỗi kết nối mạng. Chi tiết có thể sao chép.",
         "fillers.header": "Phát hiện từ đệm/đại danh xưng: {tokens}.",
@@ -162,9 +207,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.store_error": "Không thể lưu khóa: {detail}",
         "copy_details": "Sao chép chi tiết",
         "export_diagnostics": "Xuất chẩn đoán",
-        "about.license": "Giấy phép và nguồn: xem THIRD_PARTY.md trong thư mục cài đặt.",
-        "about.ffmpeg": "FFmpeg",
-        "about.version": "Phiên bản",
+    "about.license": "Giấy phép và nguồn: xem THIRD_PARTY.md trong thư mục cài đặt.",
+    "about.author": "Tác giả",
+    "about.version": "Phiên bản",
         "options.readable": "Xuất kèm bản dịch dễ đọc",
         "options.readable_format": "Định dạng bản dịch",
         "readable.format_docx": "Word (.docx)",
@@ -194,6 +239,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "video.choose": "Choose video…",
         "video.drop": "Drop a video here or click to choose",
         "video.no_stream": "This file has no video stream.",
+        "video.remove": "Remove video",
         "video.warn_long": "Video is longer than 30 minutes — this may take a long time.",
         "audio.no_stream_warn": "Warning: the video has no audio stream; the result will contain the dub voice only.",
         "output.header": "Output folder",
@@ -219,6 +265,13 @@ STRINGS: dict[str, dict[str, str]] = {
         "progress.header": "Progress",
         "progress.heavy_cpu_note": "The {stage} stage is CPU-heavy — high usage here is normal.",
         "progress.cancel": "Cancel",
+        "progress.details": "Progress details",
+        "details.copy": "Copy details",
+        "details.open_log": "Open log folder",
+        "details.doing": "Working on: {stage} — {what}",
+        "details.last_update": "Last update: {s} s ago",
+        "details.still_running": "— still running",
+        "details.worker_dead": "— the worker stopped unexpectedly",
         "progress.resume": "Resume",
         "error.button.resume": "Resume",
         "error.button.open_settings": "Open settings",
@@ -243,7 +296,35 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.tab_models": "Models",
         "settings.tab_general": "General",
         "settings.tab_advanced": "Advanced",
+        "progress.folder_missing": "The folder does not exist.",
+        "hb.model_wait": "Waiting for the model's reply… ({n} s)",
+        "hb.model_backoff": "Model is busy — retrying in {n} s…",
+        "hb.asr_progress": "Transcribing speech… {n}%",
+        "settings.read_only_banner": "A run is in progress — settings are read-only.",
         "settings.jobs_days": "Keep jobs for at most (days)",
+        "adv.working_files_title": "Working files of past runs",
+        "adv.working_files_info": (
+            "For every dub, DubTool keeps temporary files (audio, translation, "
+            "generated voice, logs) in this folder. That is what makes an "
+            "interrupted run resumable without redoing everything. Output "
+            "videos and translations are not stored here."
+        ),
+        "adv.open_jobs_dir": "Open folder",
+        "adv.jobs_stats": "Currently stored: {count} run(s), {size}.",
+        "adv.jobs_days_hint": "Runs older than this number of days are deleted when the app opens.",
+        "adv.confirm_text": (
+            "About to delete {count} run(s), {size} in total; the oldest is {oldest}.\n\n"
+            "Never deleted: output videos and translations, the run in "
+            "progress, the speech-recognition model files."
+        ),
+        "adv.choice_older": "Delete runs older than {n} day(s)",
+        "adv.choice_all": "Delete all temporary files (except the running one)",
+        "adv.clean_done": "Deleted {n} run(s), freed {size}.\nModel cache: {models_size} (never deleted automatically).",
+        "adv.nothing_to_delete": "No run qualifies for deletion.",
+        "options.keep_hint": (
+            "If off, the run's temporary files are deleted when it completes; "
+            "you will not be able to resume or reuse them."
+        ),
         "settings.clean_now": "Clean up now",
         "settings.clean_now_title": "Clean up old jobs",
         "settings.clean_now_report": (
@@ -284,6 +365,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.key_removed": "Key deleted",
         "settings.language": "Language",
         "settings.cpu_usage": "CPU usage",
+        "settings.asr_prompt_label": "Punctuation hint",
+        "settings.asr_prompt": "Punctuation hint for speech recognition",
+        "settings.asr_prompt_tooltip": "Measured on the test video: sentence-final punctuation rises from 41% to 52% of segments, at the same speed — but the transcription text changes, which affects resuming after an interruption.",
         "settings.cpu_low": "Low",
         "settings.cpu_balanced": "Balanced",
         "settings.cpu_maximum": "Maximum",
@@ -329,6 +413,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "error.ffmpeg_missing": "FFmpeg is missing from this install — rebuild or use the full zip.",
         "error.cancelled": "Cancelled. The run can be resumed.",
         "error.tts_unavailable": "The voice service did not respond. Your progress is saved; you can resume in a few minutes, change the voice in Settings, or enable the backup voice.",
+        "error.clock_hint": "Your computer's clock may be about {n} seconds off from the server — sync Windows time.",
         "error.timeout": "The server took too long to answer — try again (this is not a network problem on your side).",
         "error.internal": "Something went wrong inside the app — this is not a network problem. Details are copyable.",
         "fillers.header": "Detected filler/vocative words: {tokens}.",
@@ -345,9 +430,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.store_error": "Keys could not be saved: {detail}",
         "copy_details": "Copy details",
         "export_diagnostics": "Export diagnostics",
-        "about.license": "Licenses and sources: see THIRD_PARTY.md in the install folder.",
-        "about.ffmpeg": "FFmpeg",
-        "about.version": "Version",
+    "about.license": "Licenses and sources: see THIRD_PARTY.md in the install folder.",
+    "about.author": "Author",
+    "about.version": "Version",
         "options.readable": "Export readable translation",
         "options.readable_format": "Readable file format",
         "readable.format_docx": "Word (.docx)",

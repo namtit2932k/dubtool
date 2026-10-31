@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import shutil
 import os
+import re
 import sys
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QTimer
@@ -39,21 +41,34 @@ from dubtool.app.coalesce import ProgressGate
 from dubtool.app.service import PipelineService
 from dubtool.app.ui import first_run
 from dubtool.app.ui.settings_dialog import VOICE_KEYS, SettingsDialog
-from dubtool.app.ui.widgets import DropZone, LogView, StageList
+from dubtool.app.ui.widgets import DropZone, FileCard, LogView, StageList, STAGES
 
 VIDEO_FILTERS = "Videos (*.mp4 *.mkv *.mov *.webm *.avi *.m4v)"
 
 
-def _open_in_explorer(path: Path) -> None:
+def _open_in_explorer(path: Path, *, select: Path | None = None) -> None:
+    """Open a folder in Explorer (Update 9 task 5).
+
+    Folders go through os.startfile — starting GUI programs through the
+    hidden-window helper was the open-folder bug: the helper's SW_HIDE
+    (the AGU6 console fix) hid Explorer's own window. Only the
+    argument-taking case (reveal/select a file, highlight it) still goes
+    through proc — with gui=True, which skips SW_HIDE/CREATE_NO_WINDOW."""
     try:
         if sys.platform == "win32":
-            # explorer needs its own process; through the helper it stays
-            # hidden (no console flash, AGU6 task 1).
+            if select is not None:
+                from dubtool import proc
+
+                proc.run(
+                    ["explorer", f"/select,{str(select)}"],
+                    capture=False, gui=True,
+                )
+            else:
+                os.startfile(str(path))  # type: ignore[attr-defined]
+        else:
             from dubtool import proc
 
-            proc.run(["explorer", str(path)], capture=False)
-        else:
-            os.startfile(str(path))  # type: ignore[attr-defined]
+            proc.run(["xdg-open", str(path)], capture=False, gui=True)
     except OSError:
         pass
 
@@ -91,6 +106,13 @@ def _ffmpeg_version() -> str:
         return (out.stdout or out.stderr).splitlines()[0]
     except Exception:
         return "?"
+
+
+def _redact(text: str) -> str:
+    """Redact key-shaped tokens before the details log lands on the
+    clipboard (Update 9 task 3.2): any run of 20+ key characters becomes
+    bullets; a key value can never be embedded in copied details."""
+    return re.sub(r"[A-Za-z0-9_\-]{20,}", "•••", text)
 
 
 # ------------------------------------------------------------------- widgets
@@ -137,6 +159,8 @@ class OptionsWidget(QGroupBox):
         self.srt_check.setChecked(s["save_srt"])
         self.keep_check = QCheckBox(i18n.tr("options.keep"))
         self.keep_check.setChecked(s["keep_intermediate"])
+        # Update 9 task 6: one-line consequence of turning this off.
+        self.keep_check.setToolTip(i18n.tr("options.keep_hint"))
         # AGENT_UPDATE_7.md task 4: the customer-readable translation that
         # ships next to every exported video (default on, docx or txt).
         self.readable_check = QCheckBox(i18n.tr("options.readable"))
@@ -229,8 +253,97 @@ class ProgressWidget(QGroupBox):
         layout.addLayout(self.action_row)
 
         self.log = LogView()
+        # Update 9 task 3: the details area — header line, liveness line,
+        # copy and open-log-folder buttons — all hidden while collapsed.
+        self.details_header = QLabel("")
+        self.details_header.setWordWrap(True)
+        self.details_header.setObjectName("details_header")
+        self.details_liveness = QLabel("")
+        self.details_liveness.setObjectName("details_liveness")
+        self.details_copy_btn = QPushButton(i18n.tr("details.copy"))
+        self.details_copy_btn.setObjectName("details_copy")
+        self.details_copy_btn.clicked.connect(self._copy_details)
+        self.details_open_btn = QPushButton(i18n.tr("details.open_log"))
+        self.details_open_btn.setObjectName("details_open_log")
+        self.details_open_btn.clicked.connect(self._open_log_folder)
+        details_row = QHBoxLayout()
+        details_row.addWidget(self.details_copy_btn)
+        details_row.addWidget(self.details_open_btn)
+        details_row.addStretch(1)
+        for w in (self.details_header, self.details_liveness, self.details_copy_btn,
+                  self.details_open_btn):
+            w.setVisible(False)
+        self.log.openChanged.connect(self._on_details_toggled)
+        self._last_event_mono: float | None = None   # time.monotonic of last event
+        self._last_stage: str | None = None
+        self._last_desc = ""
+        self._deadline_note = False                 # "— vẫn đang chạy" state
+        self._liveness_timer = QTimer(self)
+        self._liveness_timer.setInterval(1000)
+        self._liveness_timer.timeout.connect(self._tick_liveness)
+        self._liveness_timer.start()
+        layout.addWidget(self.details_header)
+        layout.addWidget(self.details_liveness)
         layout.addWidget(self.log)
+        layout.addLayout(details_row)
         self.hide()
+
+    # ------------------------------------------------- details (AGU9 task 3)
+    def _on_details_toggled(self, open_: bool) -> None:
+        for w in (self.details_header, self.details_liveness, self.details_copy_btn,
+                  self.details_open_btn):
+            w.setVisible(open_)
+        if open_:
+            self._tick_liveness()
+        else:
+            self.details_header.setText("")
+            self.details_liveness.setText("")
+
+    def is_busy(self) -> bool:
+        return bool(getattr(self.window_ref, "_busy", False))
+
+    def _tick_liveness(self) -> None:
+        """Update the liveness line once per second (Update 9 task 3.2)."""
+        if not self.log.is_open():
+            return
+        self.details_header.setText(self._header_text())
+        if not self.service.running:
+            self.details_liveness.setText("")
+            return
+        now = time.monotonic()
+        if self._last_event_mono is None:
+            seconds = 0
+        else:
+            seconds = int(now - self._last_event_mono)
+        quiet_after = 20
+        try:
+            from dubtool.app import settings as _settings_mod
+
+            quiet_after = int(_settings_mod.load().get("quiet_after_s", 20) or 20)
+        except Exception:
+            pass
+        text = i18n.tr("details.last_update", s=seconds)
+        if seconds >= quiet_after:
+            thread = getattr(self.service, "_thread", None)
+            if thread is not None and thread.is_alive():
+                text += "  " + i18n.tr("details.still_running")
+                self._deadline_note = True
+            else:
+                text = i18n.tr("details.last_update", s=seconds) + "  " + i18n.tr("details.worker_dead")
+        else:
+            self._deadline_note = False
+        self.details_liveness.setText(text)
+        self.details_liveness.setVisible(self.log.is_open())
+
+    def _header_text(self) -> str:
+        stage = self._last_stage
+        if not stage:
+            return ""
+        label = i18n.tr(stage) if stage in STAGES else stage
+        desc = self._last_desc
+        if desc and self._deadline_note:
+            desc = desc.rstrip(".")
+        return i18n.tr("details.doing", stage=label, what=desc or "")
 
     def reset_for_check(self):
         """Pristine state between layout-check/screenshot states (AGENT_UPDATE_5.md task 4)."""
@@ -246,6 +359,14 @@ class ProgressWidget(QGroupBox):
         self.play_btn.hide()
         self.readable_btn.hide()
         self._last_result = None
+        # Update 9 task 3 details state reset.
+        self._last_stage = None
+        self._last_desc = ""
+        self._last_event_mono = None
+        self._deadline_note = False
+        self.details_header.setText("")
+        self.details_liveness.setText("")
+        self.log.text.clear()
 
     def show_running(self) -> None:
         self.show()
@@ -255,6 +376,9 @@ class ProgressWidget(QGroupBox):
         self.stages.setAllPending()
 
     def on_progress(self, stage: str, state: str, done: int, total: int, message: str, eta: float) -> None:
+        import time as _time
+
+        self._last_event_mono = _time.monotonic()
         self.stages.update_state(stage, state, done if done > 0 else None, total if total > 0 else None)
         if state == "progress" and total > 0 and done >= 0:
             self.bar.setRange(0, total)
@@ -263,11 +387,27 @@ class ProgressWidget(QGroupBox):
             self.counter.setText(f"{done}/{total}{eta_text}")
         elif state == "start":
             self.bar.setRange(0, 0)
+        # Update 9 task 3.2 header content: the stage being worked on and
+        # exactly what it is doing (item count or the event message).
+        if state in ("start", "progress"):
+            self._last_stage = stage
+            if state == "progress" and total > 0 and 0 <= done:
+                self._last_desc = f"{done}/{total}"
+            elif message:
+                self._last_desc = message.splitlines()[0][:120]
+        # Timestamped activity log lines (HH:MM:SS), coalescing handled by
+        # the ProgressGate upstream as before.
+        stamp = _time.strftime("%H:%M:%S")
         if message:
-            self.log.append(f"[{stage}] {state}: {message}")
+            self.log.append(f"[{stamp}] [{stage}] {message}")
+        elif state in ("start", "done", "error", "skipped"):
+            self.log.append(f"[{stamp}] [{stage}] {state}")
 
     def on_finished(self, result: api.DubResult) -> None:
         self._last_result = result
+        import time as _time
+
+        self._last_event_mono = _time.monotonic()
         self.cancel_btn.hide()
         if result.ok:
             self.bar.setRange(0, 1)
@@ -296,9 +436,39 @@ class ProgressWidget(QGroupBox):
     def _retry(self, force: bool) -> None:
         self.window_ref.start_run(self._last_mode, force=force)
 
+    def _copy_details(self) -> None:
+        """Copy the details log, redacted (Update 9 task 3.2)."""
+        QApplication.clipboard().setText(_redact(self.log.log_text()))
+
+    def _open_log_folder(self) -> None:
+        """Open the log folder with the fixed open function (task 5)."""
+        target = self.window_ref._jobs_dir()
+        if not target or not Path(target).is_dir():
+            QMessageBox.information(self.window_ref, i18n.tr("details.open_log"), i18n.tr("progress.folder_missing"))
+            return
+        _open_in_explorer(target)
+
     def _open_folder(self) -> None:
-        if self.window_ref.output_dir:
-            _open_in_explorer(self.window_ref.output_dir)
+        """Open the folder of the last successful result (Update 9 task 5),
+        not the current field value the user may have changed; highlight
+        the output video when it exists; message when nothing is there."""
+        target: Path | None = None
+        select: Path | None = None
+        result = self._last_result
+        if result and result.out_video is not None:
+            target = result.out_video.parent
+            if result.out_video.exists():
+                select = result.out_video
+        if target is None:
+            target = self.window_ref.output_dir
+        if not target or not Path(target).is_dir():
+            QMessageBox.information(
+                self.window_ref,
+                i18n.tr("progress.open_folder"),
+                i18n.tr("progress.folder_missing"),
+            )
+            return
+        _open_in_explorer(target, select=select if (select and select.exists()) else None)
 
     def _play(self) -> None:
         if self._last_result and self._last_result.out_video:
@@ -339,6 +509,7 @@ class MainWindow(QMainWindow):
         self.service = service or PipelineService()
         self.service.progressed.connect(self._on_progress)
         self.service.finishedRun.connect(self._on_finished)
+        self._busy = False
         self.video_path: Path | None = None
         saved = settings.load()
         # AGU8 7.3: one key — `default_output_dir` (the old `default_output`
@@ -396,6 +567,11 @@ class MainWindow(QMainWindow):
         self.drop_zone.clicked.connect(self.choose_video)
         self.drop_zone.filesDropped.connect(lambda p: self.set_video(Path(p)))
         video_layout.addWidget(self.drop_zone)
+        # Update 9 task 2: the file card replaces the drop zone once a
+        # video is imported, with an X that clears the selection.
+        self.file_card = FileCard()
+        self.file_card.removed.connect(self.clear_video)
+        video_layout.addWidget(self.file_card)
         self.video_info = QLabel("")
         self.video_info.setWordWrap(True)
         # A stable minimum: an empty-text word-wrap label has a 0 height hint,
@@ -472,6 +648,24 @@ class MainWindow(QMainWindow):
 
         self._set_initial_size(saved)
         self._refresh_buttons()
+        # Update 9 task 3.1: restore the last details open/closed state.
+        if bool(saved.get("details_open", False)):
+            self.progress_group.log.set_open(True)
+        self._set_details_persist(saved.get("details_open", False))
+        self.progress_group.log.openChanged.connect(self._persist_details)
+
+    def _persist_details(self, open_: bool) -> None:
+        """Remember the details area state across runs (Update 9 task 3.1)."""
+        try:
+            s = settings.load()
+            if s.get("details_open", False) != open_:
+                s["details_open"] = bool(open_)
+                settings.save(s)
+        except OSError:
+            pass
+
+    def _set_details_persist(self, value) -> None:  # marks init wiring done
+        self._details_persist_value = bool(value)
 
     def _set_initial_size(self, saved: dict) -> None:
         """About 90% of the available height with sensible maximums, or the
@@ -535,6 +729,9 @@ class MainWindow(QMainWindow):
             self.set_video(Path(path))
 
     def set_video(self, path: Path) -> None:
+        if self._busy:
+            # AGU9 2.3: dropping a file onto the window while busy is ignored.
+            return
         from dubtool import audio_utils
 
         if not path.is_file():
@@ -549,13 +746,17 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, i18n.tr("video.header"), i18n.tr("video.no_stream"))
             return
         self.video_path = path
+        # Update 9 task 2: the card replaces the drop zone once a video is
+        # chosen; the details line below keeps duration/resolution/etc.
+        self.drop_zone.hide()
+        self.file_card.show_file(path.name, str(path))
         duration = float(info.get("duration") or 0.0)  # seconds (one helper unit)
         if duration > 30 * 60:
             QMessageBox.information(self, i18n.tr("video.header"), i18n.tr("video.warn_long"))
         rate_text = str(info.get("r_frame_rate") or "0/1")
         num, _, den = rate_text.partition("/")
         try:
-            fps = float(num) / max(1.0, float(den or "1"))
+            fps = float(num) / max(1.0, float(den or 1))
         except ValueError:
             fps = 0.0
         parts = [
@@ -568,6 +769,20 @@ class MainWindow(QMainWindow):
         self.video_info.setText(" · ".join(p for p in parts if p))
         self.statusBar().showMessage("" if audio_utils.has_audio_stream(path) else i18n.tr("audio.no_stream_warn"))
         self._load_saved_brief(path)
+        self._validate_output()
+        self._refresh_buttons()
+
+    def clear_video(self) -> None:
+        """Update 9 task 2: the card's X deselects the video — back to the
+        drop zone, Generate disabled, info reset, description cleared."""
+        if self._busy:
+            return
+        self.video_path = None
+        self.file_card.hide()
+        self.drop_zone.show()
+        self.video_info.clear()
+        self.brief_edit.clear()
+        self.statusBar().clearMessage()
         self._validate_output()
         self._refresh_buttons()
 
@@ -613,9 +828,40 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ generate
     def _refresh_buttons(self) -> None:
-        ready = bool(self.video_path and self.output_dir and not self.service.running)
+        ready = bool(
+            self.video_path and self.output_dir
+            and not self.service.running and not self._busy
+        )
         self.fast_btn.setEnabled(ready)
         self.accurate_btn.setEnabled(ready)
+
+    # --------------------------------------------------- busy state (AGU9 2)
+    def _busy_widgets(self) -> list:
+        """AGU9 2.1 disable-list: drop zone + card X, output folder button,
+        the whole options group (its own checkbox included — disabling the
+        group reaches every control inside), and both generate buttons.
+        The cancel/details/About/diagnostics controls are NOT in this list.
+        The enumerate test in tests/test_app_ui.py sweeps the window for
+        widgets forgotten here."""
+        out = [self.drop_zone, self.output_btn, self.options,
+               self.fast_btn, self.accurate_btn]
+        if getattr(self, "file_card", None) is not None:
+            out.append(self.file_card)
+        return out
+
+    def set_busy(self, busy: bool) -> None:
+        """AGU9 2.1: the one busy state. Called when a run starts and
+        every way it can end (success, error, cancel, close-while-cancel)."""
+        self._busy = bool(busy)
+        for w in self._busy_widgets():
+            w.setEnabled(not self._busy)
+        # AGU9 2.1: the description becomes read-only (never hidden).
+        if getattr(self, "brief_edit", None) is not None:
+            self.brief_edit.setReadOnly(self._busy)
+        self._refresh_buttons()
+
+    def is_busy(self) -> bool:
+        return bool(getattr(self, "_busy", False))
 
     def start_run(self, mode: str, force: bool = False) -> None:
         if not secrets.has_key():
@@ -638,8 +884,7 @@ class MainWindow(QMainWindow):
             save_video_brief(self.video_path, options.description)
         self.progress_group._last_mode = mode
         self.progress_group.show_running()
-        self.fast_btn.setEnabled(False)
-        self.accurate_btn.setEnabled(False)
+        self.set_busy(True)
         from dubtool.app.ui.fillers_dialog import DialogBridge, FillersDialog, OverloadDialog
 
         bridge = DialogBridge(self)  # lives on the GUI thread
@@ -700,6 +945,7 @@ class MainWindow(QMainWindow):
             self.progress_group.log.append(i18n.tr("progress.heavy_cpu_note", stage=i18n.tr(stage)))
 
     def _on_finished(self, result: api.DubResult) -> None:
+        self.set_busy(False)          # AGU9 2.1: also after success/error/cancel
         self.progress_group.on_finished(result)
         self._refresh_buttons()
         self._validate_output()
@@ -712,6 +958,9 @@ class MainWindow(QMainWindow):
             if answer == QMessageBox.StandardButton.Yes:
                 self.start_run(self.progress_group._last_mode, force=True)
         elif not result.ok and result.code != "cancelled":
+            # Update 9 task 3.1: a run ending in error opens the details
+            # panel automatically.
+            self.progress_group.log.set_open(True)
             self._show_error(result)
 
     def _show_error(self, result: api.DubResult) -> None:
@@ -731,7 +980,18 @@ class MainWindow(QMainWindow):
             # AGU8 2.4: the dedicated error gets exactly Resume (keeps every
             # finished clip) and Open settings (voice / backup voice); never
             # the generic message or generic buttons for this case.
-            dialog.setText(errors.message_for_code("tts_unavailable"))
+            # AGU9 10.7: with a large measured clock offset, one hint line
+            # rides along (a possibility, not a cause).
+            tts_msg = errors.message_for_code("tts_unavailable")
+            try:
+                from dubtool import netcheck as _netcheck
+
+                off = _netcheck.large_offset()
+                if off is not None:
+                    tts_msg += "\n" + i18n.tr("error.clock_hint", n=int(round(abs(off))))
+            except Exception:
+                pass
+            dialog.setText(tts_msg)
             resume_btn = dialog.addButton(
                 i18n.tr("error.button.resume"), QMessageBox.ButtonRole.AcceptRole
             )
@@ -762,7 +1022,13 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ menu
     def open_settings(self) -> None:
-        dialog = SettingsDialog(self)
+        # Update 9 task 2.2: during a run the dialog opens read-only with a
+        # banner, and re-enables itself if the run ends while it is open.
+        dialog = SettingsDialog(
+            self,
+            read_only=self._busy,
+            busy_provider=None if not self._busy else self.is_busy,
+        )
         dialog.exec()
         self._update_mode_tips()
 
@@ -776,15 +1042,18 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, i18n.tr("app.export_diagnostics"), str(out))
 
     def show_about(self) -> None:
+        # Update 9 task 4: version (1.0.<update>), build id, the author,
+        # and the licenses pointer. The old FFmpeg line is gone.
+        from dubtool import branding
         from dubtool.app.main import _build_info_line, app_version
 
         build_line = _build_info_line()  # the BUILD_INFO.txt next to the exe
         QMessageBox.information(
             self,
             i18n.tr("app.about"),
-            f"{i18n.tr('about.version')}: {app_version()}\n"
+            f"DubTool\n{i18n.tr('about.version')}: {app_version()}\n"
             + (build_line + "\n" if build_line else "")
-            + f"{i18n.tr('about.ffmpeg')}: {_ffmpeg_version()}\n"
+            + f"{i18n.tr('about.author')}: {branding.AUTHOR}\n"
             + i18n.tr("about.license"),
         )
 

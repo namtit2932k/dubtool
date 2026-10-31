@@ -214,7 +214,7 @@ def _transcribe(model, job, config) -> None:
             # contract stays untouched).
             kwargs["word_timestamps"] = True
         raw_segments, info = model.transcribe(str(job.audio_path), **kwargs)
-        segments, words = _collect(raw_segments)
+        segments, words = _collect(raw_segments, _asr_progress_cb(info.duration))
     except TypeError as exc:
         if want_words and "word_timestamps" in str(exc):
             log.warning(
@@ -223,7 +223,7 @@ def _transcribe(model, job, config) -> None:
             )
             kwargs.pop("word_timestamps", None)
             raw_segments, info = model.transcribe(str(job.audio_path), **kwargs)
-            segments, words = _collect(raw_segments)
+            segments, words = _collect(raw_segments, _asr_progress_cb(info.duration))
         else:
             raise
     if not segments:
@@ -249,19 +249,47 @@ def _transcribe(model, job, config) -> None:
     )
 
 
-def _collect(raw_segments) -> tuple[list[dict], list[dict | Any] | list]:
+def _collect(raw_segments, progress_cb=None) -> tuple[list[dict], list[dict] | None]:
     segments: list[dict] = []
     words: list[dict] = []
     for s in raw_segments:
         if not (s.text and s.text.strip()):
             continue
         segments.append({"start": float(s.start), "end": float(s.end), "text": s.text.strip()})
+        if progress_cb is not None:
+            progress_cb(float(s.end))
         ws = getattr(s, "words", None)
         for w in ws or []:
             token = (getattr(w, "word", "") or "").strip()
             if token:
                 words.append({"w": token, "start": float(w.start), "end": float(w.end)})
     return segments, words
+
+
+def _asr_progress_cb(total_s: float):
+    """Update 9 task 3.3: percent-of-audio ASR heartbeat, emitted with the
+    progress-details channel as the segments stream in (throttled by whole
+    percent; silent when nothing is bound)."""
+    total = max(0.0, float(total_s or 0.0))
+    last_pct = -1
+
+    def cb(se: float) -> None:
+        nonlocal last_pct
+        if total <= 0:
+            return
+        pct = min(100, int(se / total * 100))
+        if pct == last_pct:
+            return
+        last_pct = pct
+        try:
+            from dubtool import heartbeat
+            from dubtool.app import i18n
+
+            heartbeat.emit(i18n.tr("hb.asr_progress", n=pct))
+        except Exception:
+            pass
+
+    return cb
 
 
 def _fw_version() -> str:

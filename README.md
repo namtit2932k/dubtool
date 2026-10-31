@@ -11,7 +11,7 @@ modes: *Fast* and *Accurate*.
 
 > Only dub videos you own or have permission to modify.
 
-![Main window](screenshots/03_ready.png)
+![Main window with a video imported — the file card replaces the drop zone](docs/images/ready.png)
 
 ## How it works
 
@@ -99,14 +99,23 @@ python -m dubtool.app.main --headless-run video.mp4 outdir/ --mode fast
 
 - Drop a video, pick an output folder, press **Tạo nhanh** (fast) or
   **Tạo chính xác** (accurate) — or follow the staged progress with cancel,
-  resume, and start-over.
+  resume, and start-over. While a run is in progress the options and
+  Settings are locked read-only; the **Chi tiết tiến trình** (progress
+  details) panel shows what is happening right now, with a live log.
+- A video that was chosen shows as a compact **file card** with an **X** to
+  deselect. When the run finishes, the panel offers Open folder, Play, and
+  Open translation.
 - The Gemini key is stored in **Windows Credential Manager** (keyring), never
   in `settings.json`, logs, or the job folder.
 - Audio/video never leaves the machine except: English transcript text → Google
   (translation), Vietnamese text → Microsoft's speech service (edge-tts,
   unofficial interface) for the voice.
 
-![Running](screenshots/04_running.png)
+![Running — the progress details panel with the live header and liveness line](docs/images/running.png)
+
+![Finished — Open folder, Play, and Open translation in one place](docs/images/finished.png)
+
+![Settings — API keys are managed with masked rows in the keyring](docs/images/settings_api_keys.png)
 
 ## Configuration
 

@@ -65,6 +65,25 @@ def _job_running(job: Path) -> bool:
     return bool(stages) and any(v == "running" for v in stages.values())
 
 
+def job_stats(jobs_dir: Path) -> tuple[int, int, float]:
+    """(count, total-size bytes, oldest mtime) for the Settings working-files
+    group (Update 9 task 6). Symlinks are skipped; missing dir -> (0, 0, 0)."""
+    count = 0
+    total = 0
+    oldest = 0.0
+    if not jobs_dir.is_dir():
+        return 0, 0, 0.0
+    for entry in jobs_dir.iterdir():
+        if entry.is_symlink() or not entry.is_dir():
+            continue
+        count += 1
+        total += tree_size(entry)
+        mt = _mtime(entry)
+        if mt and (oldest == 0.0 or mt < oldest):
+            oldest = mt
+    return count, total, oldest
+
+
 def _mtime(p: Path) -> float:
     try:
         return p.stat().st_mtime
@@ -72,14 +91,35 @@ def _mtime(p: Path) -> float:
         return 0.0
 
 
+def prune_plan(jobs_dir: Path, *, days: int, running_job_id: str | None = None,
+               now: float | None = None, all_jobs: bool = False) -> tuple[list[Path], int]:
+    """Dry run of prune_jobs: which folders it *would* delete and how many
+    bytes that frees (Update 9 task 6 — the confirmation dialog shows these
+    numbers before anything is removed). Same selection rules, no deletion."""
+    return _prunable(jobs_dir, days=days, running_job_id=running_job_id,
+                     now=now, all_jobs=all_jobs, delete=False)
+
+
 def prune_jobs(jobs_dir: Path, *, days: int, running_job_id: str | None = None,
-               now: float | None = None) -> tuple[list[Path], int]:
+               now: float | None = None, all_jobs: bool = False) -> tuple[list[Path], int]:
     """Delete old finished job folders; return (deleted, reclaimed bytes).
 
     "Finished" here means: not running, older than both the age limit and
     the 3-day resumability window. Ageing uses the folder's own mtime
     (the latest write to that job), never state.json contents.
-    """
+
+    `all_jobs=True` (Update 9 task 6, the "delete everything" choice in the
+    confirmation dialog) skips BOTH age checks but still keeps any job whose
+    state.json shows a running stage. The running-job check itself stays —
+    an active run can never lose its files from here."""
+    return _prunable(jobs_dir, days=days, running_job_id=running_job_id,
+                     now=now, all_jobs=all_jobs, delete=True)
+
+
+def _prunable(jobs_dir: Path, *, days: int, running_job_id: str | None,
+              now: float | None, all_jobs: bool,
+              delete: bool) -> tuple[list[Path], int]:
+    """Shared selection for prune_plan (delete=False) and prune_jobs."""
     now = time.time() if now is None else now
     cutoff = now - max(1, int(days)) * 86400
     resume_cutoff = now - RESUME_KEEP_DAYS * 86400
@@ -94,13 +134,18 @@ def prune_jobs(jobs_dir: Path, *, days: int, running_job_id: str | None = None,
             age = _mtime(job)
         except OSError:
             continue
-        if age >= resume_cutoff:
-            continue          # could still be a resumable run from the last 3 days
-        if age >= cutoff:
-            continue          # inside the kept-days window
+        if not all_jobs:
+            if age >= resume_cutoff:
+                continue      # could still be a resumable run from the last 3 days
+            if age >= cutoff:
+                continue      # inside the kept-days window
         if _job_running(job):
             continue          # never delete the job that is running
         size = tree_size(job)
+        if not delete:
+            deleted.append(job)
+            reclaimed += size
+            continue
         try:
             _rmtree_nofollow(job)
         except OSError:

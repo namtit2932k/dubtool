@@ -16,7 +16,13 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
 
-$version = "1.0.0"
+# AGU9 5.2: the update number comes from packaging/update_number.txt and the
+# version is `1.0.<N>` — nobody has to remember it any more.
+$updateLine = (Get-Content (Join-Path $root "packaging\update_number.txt") -Raw).Trim()
+if (-not ($updateLine -match '^\d+$')) { throw "packaging/update_number.txt must contain just the update number, got '$updateLine'" }
+$update = $updateLine
+$version = "1.0.$update"
+$buildId = "Update $update ($git)"
 $distDir = Join-Path $root "dist"
 $appDir = Join-Path $distDir "DubTool"
 $venvDir = Join-Path $root ".venv-build"
@@ -123,19 +129,25 @@ try {
     $git = "no-repo"
     $gitOut = & git -C $root rev-parse --short HEAD 2>$null
     if ($LASTEXITCODE -eq 0 -and $gitOut) { $git = ([string]$gitOut).Trim() }
+    $buildId = "Update $update ($git)"
     $buildLines = @(
-        "update: 8",
+        "update: $update",
+        "version: $version",
         "git: $git",
         "built (UTC): $stamp",
         "sha256: $sha",
-        "build id: Update 8 ($git)"
+        "build id: $buildId"
     )
     Set-Content -Path (Join-Path $tmpAppDir "BUILD_INFO.txt") -Value $buildLines -Encoding UTF8
 
-    # 5. Verify the bundled ffmpeg/font landed
+    # 5. Verify the bundled ffmpeg/font landed. ffprobe.exe is deliberately
+    #    NOT shipped since AGU9 task 8 (probing runs in-process via PyAV).
     Write-Host "== [5/6] structure check"
-    foreach ($p in @("_internal\vendor\ffmpeg.exe", "_internal\vendor\ffprobe.exe", "DubTool.exe")) {
+    foreach ($p in @("_internal\vendor\ffmpeg.exe", "DubTool.exe")) {
         if (-not (Test-Path (Join-Path $tmpAppDir $p))) { throw "missing $p in the build" }
+    }
+    if (Test-Path (Join-Path $tmpAppDir "_internal\vendor\ffprobe.exe")) {
+        throw "ffprobe.exe must not be in the build (AGU9 task 8)"
     }
 
     # Promote: replace dist/DubTool only now.
@@ -160,8 +172,9 @@ try {
         Write-Host "deleting build/ (-KeepBuild to keep it)"
         if (Test-Path (Join-Path $root "build")) { Remove-Item -Recurse -Force (Join-Path $root "build") }
     }
-    Write-Host "built: $appDir"
-    Write-Host "zip:   $zip"
+    Write-Host "built: $((Resolve-Path $appDir).Path)"
+    Write-Host "zip:   $((Resolve-Path $zip).Path)"
+    Write-Host "run this exe: $((Join-Path $appDir 'DubTool.exe'))"
 
     # 7. Screenshots from the *fresh* exe (AGU7 task 5): a new folder named
     # after the build id, older folders deleted, then the screenshots test
@@ -169,7 +182,7 @@ try {
     # tests gate on purpose: the PNGs must prove the exe that was just
     # promoted, not a previous one.
     Write-Host "== [7/6] screenshots from the fresh exe"
-    $buildIdFull = "Update 8 ($git)"
+    $buildIdFull = "Update $update ($git)"
     $slug = ($buildIdFull.ToLower() -replace " ", "_") -replace "[()]", ""
     $shotsRoot = Join-Path $root "screenshots"
     $shotDir = Join-Path $shotsRoot $slug
@@ -184,6 +197,15 @@ try {
     Write-Host "shots:  $shotDir"
     & $py -m pytest tests/test_screenshots.py -q
     if ($LASTEXITCODE -ne 0) { throw "screenshot set check failed" }
+
+    # 8. README images (B update 9 task 7): copy the chosen states from the
+    # fresh screenshot folder into the tracked docs/images with stable
+    # names, then verify every README link resolves to a tracked file.
+    Write-Host "== [7/6] README images from the fresh set"
+    & $py (Join-Path $root "scripts\update_readme_images.py") $shotDir
+    if ($LASTEXITCODE -ne 0) { throw "README image copy failed" }
+    & $py (Join-Path $root "scripts\check_readme_links.py")
+    if ($LASTEXITCODE -ne 0) { throw "README link check failed" }
 }
 finally {
     Pop-Location

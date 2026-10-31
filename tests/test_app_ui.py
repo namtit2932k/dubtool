@@ -540,3 +540,235 @@ def test_layout_min_size_no_overlap(qtbot, window):
             assert w.width() >= hint.width() - 1, type(w).__name__
             assert w.height() >= hint.height() - 1, type(w).__name__
     assert checked > 10
+
+
+# ------------------------------------------------- update 9 task 6: jobs UI --
+
+
+def _fake_message_box():
+    """Stand-in for QMessageBox inside settings_dialog: records texts and
+    lets a test pick which button _clean_now sees as clicked."""
+    clicks = {"which": None}   # "older" | "all" | None-before-exec
+    infos = []
+
+    class _RoleObj:
+        pass
+
+    class FakeBox:
+        ButtonRole = _RoleObj()
+        ButtonRole.ActionRole = _RoleObj()
+        ButtonRole.RejectRole = _RoleObj()
+        Icon = _RoleObj()
+        Icon.Question = "question"
+        last: object = None
+
+        def __init__(self, parent=None):
+            self.text_value = ""
+            self.added = []            # [(text, role, btn)]
+            FakeBox.last = self
+
+        def setIcon(self, icon):
+            pass
+
+        def setWindowTitle(self, title):
+            self.title = title
+
+        def setText(self, text):
+            self.text_value = text
+
+        def addButton(self, text, role):
+            btn = _RoleObj()
+            btn.text = text
+            self.added.append((text, role, btn))
+            return btn
+
+        def exec(self):
+            which = clicks["which"]
+            self.clicked = which
+
+        def clickedButton(self):
+            which = self.clicked
+            for text, role, btn in self.added:
+                if which == "older" and btn is self.added[0][2]:
+                    return btn
+                if which == "all" and btn is self.added[1][2]:
+                    return btn
+            return None
+
+        @staticmethod
+        def information(parent, title, text):
+            infos.append(text)
+
+        @staticmethod
+        def warning(parent, title, text):
+            infos.append(text)
+
+    FakeBox.clicks = clicks
+    FakeBox.infos = infos
+    return FakeBox
+
+
+def _make_job(jobs: Path, name: str, age_days: float, *, running=False) -> Path:
+    import json
+    import os
+    import time
+
+    p = jobs / name
+    p.mkdir(parents=True)
+    (p / "state.json").write_text(json.dumps(
+        {"stages": {"s7": "running"} if running else {"s7": "done"}}
+    ), encoding="utf-8")
+    (p / "payload.bin").write_bytes(b"x" * 2048)
+    t = time.time() - age_days * 86400
+    os.utime(p, (t, t))
+    os.utime(p / "state.json", (t, t))
+    return p
+
+
+def test_working_files_group_texts_and_stats(qtbot, dialog, tmp_path):
+    """The Advanced tab group: title, plain explanation, path, Open-folder
+    button, size+count line, and the days-setting explanation."""
+    from PySide6.QtWidgets import QGroupBox
+
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    _make_job(jobs, "old111", age_days=20)
+    _make_job(jobs, "new222", age_days=2)
+
+    titles = [g.title() for g in dialog.findChildren(QGroupBox)]
+    assert i18n.tr("adv.working_files_title") in titles
+    group_texts = "\n".join(
+        w.text() for w in dialog.findChildren(QLabel) if w.text()
+    )
+    info = i18n.tr("adv.working_files_info")
+    assert info in group_texts
+    assert "vi" in info.lower() or "video" in info.lower()  # plain-language check
+    assert dialog.open_jobs_btn.text() == i18n.tr("adv.open_jobs_dir")
+
+    dialog.jobs_edit.setText(str(jobs))
+    dialog._refresh_jobs_stats()
+    stats = dialog.jobs_stats_label.text()
+    assert "2" in stats           # two runs stored
+    assert "KB" in stats          # 2048-byte payloads render as KB
+    hint = dialog.jobs_days_hint_label.text()
+    assert hint == i18n.tr("adv.jobs_days_hint")
+
+
+def test_keep_intermediate_tooltip(qtbot, window):
+    """The Options checkbox explains the consequence of turning it off."""
+    opts = window.options
+    assert opts.keep_check.toolTip() == i18n.tr("options.keep_hint")
+    assert "continu" in opts.keep_check.toolTip().lower() or "ti\u1ebfp t\u1ee5c" in opts.keep_check.toolTip()
+
+
+def test_clean_now_confirmation_numbers(qtbot, dialog, tmp_path, monkeypatch):
+    """The confirmation lists exactly what the default button deletes:
+    count, total size, the oldest date — and the never-delete disclaimer."""
+    from dubtool.app import housekeeping as hk
+    from dubtool.app import paths as app_paths
+    from dubtool.app.ui import settings_dialog as sd
+
+    monkeypatch.setattr(app_paths, "models_dir", lambda: tmp_path / "models")
+
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    old1 = _make_job(jobs, "old111", age_days=40)
+    _make_job(jobs, "old222", age_days=30)
+    _make_job(jobs, "new333", age_days=1)
+    running = _make_job(jobs, "run444", age_days=40, running=True)
+
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+    (outdir / "video.mp4").write_bytes(b"out")
+    (outdir / "translation.docx").write_text("out")
+
+    FakeBox = _fake_message_box()
+    FakeBox.clicks["which"] = None          # cancel: nothing deleted
+    monkeypatch.setattr(sd, "QMessageBox", FakeBox)
+
+    dialog.jobs_edit.setText(str(jobs))
+    dialog._clean_now()
+    box = FakeBox.last
+    plan, plan_size = hk.prune_plan(jobs, days=14)
+    texts = [text for text, role, btn in box.added]
+    assert len(box.added) == 3                       # older / all / cancel
+    assert i18n.tr("adv.choice_older", n=14) in texts
+    assert i18n.tr("adv.choice_all") in texts
+    assert i18n.tr("progress.cancel") in texts
+    # with the cancel path only ONE dialog (the confirm) is shown; numbers:
+    import datetime as _dt
+    oldest_date = _dt.datetime.fromtimestamp(old1.stat().st_mtime).strftime("%Y-%m-%d")
+    assert str(count := len(plan)) in box.text_value
+    assert count == 2                                # only old finished ones
+    assert hk.human(plan_size) in box.text_value
+    assert oldest_date in box.text_value
+    assert "\u0111ang ch\u1ea1y" in box.text_value or "running" in box.text_value
+    assert old1.exists() and running.exists()
+    assert (outdir / "video.mp4").exists()
+    assert (outdir / "translation.docx").exists()
+
+
+def test_clean_now_delete_all_keeps_running_and_output(qtbot, dialog, tmp_path, monkeypatch):
+    """Choosing 'delete all temporary files' still keeps the running run and
+    never touches the output folder; the report shows the real count."""
+    from dubtool.app import paths as app_paths
+    from dubtool.app.ui import settings_dialog as sd
+
+    monkeypatch.setattr(app_paths, "models_dir", lambda: tmp_path / "models")
+
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    old = _make_job(jobs, "old111", age_days=99)
+    fresh = _make_job(jobs, "new222", age_days=0.5)
+    running = _make_job(jobs, "run333", age_days=99, running=True)
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+    (outdir / "video.mp4").write_bytes(b"out")
+
+    FakeBox = _fake_message_box()
+    FakeBox.clicks["which"] = "all"
+    monkeypatch.setattr(sd, "QMessageBox", FakeBox)
+
+    dialog.jobs_edit.setText(str(jobs))
+    dialog._clean_now()
+    assert not old.exists()
+    assert not fresh.exists()
+    assert running.exists()
+    assert (outdir / "video.mp4").exists()
+    report = FakeBox.infos[-1]
+    assert "2" in report   # deleted 2 runs, not 3
+
+
+def test_clean_now_older_choice_deletes_only_old(qtbot, dialog, tmp_path, monkeypatch):
+    from dubtool.app import paths as app_paths
+    from dubtool.app.ui import settings_dialog as sd
+
+    monkeypatch.setattr(app_paths, "models_dir", lambda: tmp_path / "models")
+
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    _make_job(jobs, "old111", age_days=40)
+    _make_job(jobs, "new222", age_days=2)
+
+    FakeBox = _fake_message_box()
+    FakeBox.clicks["which"] = "older"
+    monkeypatch.setattr(sd, "QMessageBox", FakeBox)
+
+    dialog.jobs_edit.setText(str(jobs))
+    dialog._clean_now()
+    assert not (jobs / "old111").exists()
+    assert (jobs / "new222").exists()
+
+
+def test_clean_now_nothing_stored_shows_notice(qtbot, dialog, tmp_path, monkeypatch):
+    from dubtool.app import paths as app_paths
+    from dubtool.app.ui import settings_dialog as sd
+
+    monkeypatch.setattr(app_paths, "models_dir", lambda: tmp_path / "models")
+    FakeBox = _fake_message_box()
+    monkeypatch.setattr(sd, "QMessageBox", FakeBox)
+
+    dialog.jobs_edit.setText(str(tmp_path / "vacant"))
+    dialog._clean_now()
+    assert FakeBox.infos and FakeBox.infos[0] == i18n.tr("adv.nothing_to_delete")
+    assert FakeBox.last is None

@@ -1,4 +1,4 @@
-"""Reusable widgets: drop zone, stage list, log view (AGU4 6.2).
+"""Reusable widgets: drop zone, file card, stage list, details log view.
 
 No user-facing string literals here — all text comes from i18n.tr().
 """
@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -51,6 +52,75 @@ class DropZone(QLabel):
         self.clicked.emit()
 
 
+class ElidedLabel(QLabel):
+    """A QLabel that paints its text elided in the middle.
+
+    The full string is never set via setText (that would grow the layout
+    minimum); the paintEvent elides against the *current* width, so the
+    label can never push the X button of the file card out of view even
+    at the narrowest window size.
+    """
+
+    def __init__(self, full_text: str = "", parent=None):
+        super().__init__(parent)
+        self._full = ""
+        self.setElidedText(full_text)
+
+    def setElidedText(self, full_text: str) -> None:  # noqa: N802
+        self._full = full_text
+        self.setToolTip(full_text)
+        self.update()
+
+    def text(self) -> str:  # noqa: N802
+        return self._full
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        from PySide6.QtGui import QPainter
+
+        painter = QPainter(self)
+        fm = self.fontMetrics()
+        elided = fm.elidedText(
+            self._full, Qt.TextElideMode.ElideMiddle, max(0, self.width() - 4)
+        )
+        painter.drawText(
+            self.contentsRect(),
+            self.alignment() | Qt.TextFlag.TextSingleLine,
+            elided,
+        )
+
+
+class FileCard(QWidget):
+    """Selected-video card (Update 9 task 2): file name (elided middle,
+    full path in the tooltip), an X button to deselect. Shown instead of
+    the drop zone once a video is imported. X is disabled while busy
+    (the main window's set_busy drives it)."""
+
+    removed = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("file_card")
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.name_label = ElidedLabel()
+        self.x_btn = QPushButton("✕")
+        self.x_btn.setObjectName("file_card_x")
+        self.x_btn.setToolTip(i18n.tr("video.remove"))
+        self.x_btn.setFixedWidth(24)
+        self.x_btn.clicked.connect(self.removed.emit)
+        row.addWidget(self.name_label, 1)
+        row.addWidget(self.x_btn, 0)
+        self.hide()
+
+    def show_file(self, name: str, tooltip: str) -> None:
+        self.name_label.setElidedText(name)
+        self.name_label.setToolTip(tooltip)
+        self.show()
+
+    def setVisible_keeping(self) -> None:  # keep PySide happy: unused
+        pass
+
+
 class StageList(QListWidget):
     """The seven pipeline stages with state icons (AGU4 7.6)."""
 
@@ -90,18 +160,21 @@ class StageList(QListWidget):
 
 
 class LogView(QWidget):
-    """Truly collapsible log tail (AGU4 7.6, AGENT_UPDATE_5.md task 4):
-    a toggle button with an arrow, collapsed by default, expanding to a
-    fixed height with auto-scroll while lines arrive."""
+    """Collapsible activity log (Update 9 task 3 "progress details").
 
-    EXPANDED_HEIGHT = 140
+    The old unlabeled ▸/▾ toggle is now a clearly labeled flat button
+    ("Chi tiết tiến trình ▸ / ▾"). Collapsed by default; the parent
+    panel supplies header/liveness lines as sibling labels."""
+
+    EXPANDED_HEIGHT = 170
+    openChanged = Signal(bool)
 
     def __init__(self):
         super().__init__()
         self._expanded = False
-        self.toggle = QPushButton("▸")
+        self.toggle = QPushButton(i18n.tr("progress.details"))
+        self.toggle.setObjectName("details_toggle")
         self.toggle.setFlat(True)
-        self.toggle.setFixedWidth(28)
         self.toggle.clicked.connect(self._toggle)
         self.text = QPlainTextEdit()
         self.text.setReadOnly(True)
@@ -117,9 +190,26 @@ class LogView(QWidget):
         layout.addWidget(self.text)
 
     def _toggle(self) -> None:
-        self._expanded = not self._expanded
-        self.toggle.setText("▾" if self._expanded else "▸")
+        self.set_open(not self._expanded)
+
+    def set_open(self, open_: bool) -> None:
+        """Open or close the details area; emits openChanged so the main
+        window can persist the choice (Update 9 task 3.1)."""
+        self._expanded = bool(open_)
+        self.toggle.setText(
+            i18n.tr("progress.details") + (" ▾" if self._expanded else " ▸")
+        )
         self.text.setVisible(self._expanded)
+        self.openChanged.emit(self._expanded)
+
+    def is_open(self) -> bool:
+        return self._expanded
+
+    def toggle_text(self) -> str:
+        return self.toggle.text()
+
+    def log_text(self) -> str:
+        return self.text.toPlainText()
 
     def _auto_scroll(self) -> None:
         sb = self.text.verticalScrollBar()

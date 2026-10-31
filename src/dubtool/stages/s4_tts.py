@@ -180,6 +180,11 @@ def _measure_clock_offset_once(state: dict) -> None:
             log.info("s4: clock offset could not be measured (no response Date header)")
         else:
             log.info("s4: system clock offset vs %s: %+.2f s (diagnostic only)", hosts[0], offset)
+            netcheck.record_offset(hosts[0], offset)
+            # AGU9 10.7: a big offset keeps surfacing (dialog + diagnostics);
+            # here it stays a one-line possibility, never a cause claim.
+            if abs(offset) > 30.0:
+                log.info("s4: clock is about %+.0f s off vs the server — consider syncing Windows time", offset)
     except Exception as exc:
         log.info("s4: clock offset measurement failed: %s", exc)
 

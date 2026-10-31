@@ -70,16 +70,21 @@ def set_current_stage(stage: str) -> Any:
 
 
 # ------------------------------------------------------------------ flags
-def _windows_flags(low_priority: bool) -> tuple[int, Any]:
+def _windows_flags(low_priority: bool, gui: bool = False) -> tuple[int, Any]:
+    """Creation flags + STARTUPINFO for a child. GUI children (Update 9,
+    task 5) must NOT get SW_HIDE / CREATE_NO_WINDOW: the helper's console
+    fix sets Explorer's own window hidden, so the folder never appears.
+    GUI children keep every antialiasing/foreground behavior of the shell."""
     flags = 0
     sui = None
-    if _IS_WIN:
+    if _IS_WIN and not gui:
         flags |= CREATE_NO_WINDOW
-        if low_priority:
-            flags |= BELOW_NORMAL_PRIORITY_CLASS
         sui = subprocess.STARTUPINFO()
         sui.dwFlags |= _STARTF_USESHOWWINDOW
         sui.wShowWindow = _SW_HIDE
+    if _IS_WIN:
+        if low_priority:
+            flags |= BELOW_NORMAL_PRIORITY_CLASS
     return flags, sui
 
 
@@ -99,11 +104,15 @@ def _posix_nice(low_priority: bool) -> Any:
 
 
 def popen(cmd: list[str], *, cwd=None, capture: bool = True,
-          low_priority: bool = False, **kw) -> subprocess.Popen:
-    """Windows-safe Popen: hidden window, DEVNULL stdin (AGU6 task 1)."""
+          low_priority: bool = False, gui: bool = False, **kw) -> subprocess.Popen:
+    """Windows-safe Popen: hidden window, DEVNULL stdin (AGU6 task 1).
+
+    `gui=True` launches a GUI program (explorer, …) WITHOUT the hidden-window
+    startupinfo, so its own window actually appears (Update 9 task 5); the
+    DEVNULL stdin stays because a windowed parent has no stdin either way."""
     if isinstance(cmd, (str, bytes)):
         raise TypeError("proc.popen/run take a list of args, never a shell string")
-    flags, sui = _windows_flags(low_priority)
+    flags, sui = _windows_flags(low_priority, gui)
     kwargs: dict[str, Any] = {
         "stdin": subprocess.DEVNULL,
         "stdout": kw.pop("stdout", subprocess.PIPE if capture else None),
@@ -157,19 +166,23 @@ def _kill_tree(pid: int) -> None:
 
 def run(cmd: list[str], *, cwd=None, capture: bool = True, timeout: float | None = None,
         check: bool = False, low_priority: bool = False, cancel=None,
+        gui: bool = False, input: str | bytes | None = None,
         **kw) -> subprocess.CompletedProcess:
     """`subprocess.run` with the AGU6 flags and optional cancellation.
 
+    `input` is forwarded to communicate() like subprocess.run's own argument
+    (Update 9: scripts/inventory.py feeds `git cat-file --batch-check` from
+    stdin through this helper).
     With a `cancel` event the child is polled every 0.2 s and killed (with
     its tree) when the event is set; the pipeline's StageCancelled is raised
     so the job stays resumable.
     """
     if cancel is None and timeout is None:
-        proc = popen(cmd, cwd=cwd, capture=capture, low_priority=low_priority, **kw)
-        out, err = proc.communicate()
+        proc = popen(cmd, cwd=cwd, capture=capture, low_priority=low_priority, gui=gui, **kw)
+        out, err = proc.communicate(input=input)
         completed = subprocess.CompletedProcess(cmd, proc.returncode, out, err)
     elif cancel is not None:
-        proc = popen(cmd, cwd=cwd, capture=capture, low_priority=low_priority, **kw)
+        proc = popen(cmd, cwd=cwd, capture=capture, low_priority=low_priority, gui=gui, **kw)
         out = err = None
         cancel_seen = False
         while True:
@@ -201,7 +214,7 @@ def run(cmd: list[str], *, cwd=None, capture: bool = True, timeout: float | None
     else:
         # timeout only: Popen + bounded communicate so TimeoutExpired is the
         # same error type subprocess.run raises.
-        proc = popen(cmd, cwd=cwd, capture=capture, low_priority=low_priority, **kw)
+        proc = popen(cmd, cwd=cwd, capture=capture, low_priority=low_priority, gui=gui, **kw)
         try:
             out, err = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:

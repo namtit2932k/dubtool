@@ -103,7 +103,14 @@ def main() -> int:
             if m:
                 is_fixture = (name.startswith("tests/")
                               or name in ("scripts/make_review_zip.py",
-                                          "scripts/preflight_gates.py")
+                                          "scripts/preflight_gates.py",
+                                          # AGU9 10.7: both mention a key
+                                          # PREFIX in prose ("sk-ant-") to
+                                          # document what is redacted; they
+                                          # contain no actual key value.
+                                          "src/dubtool/app/failguard.py",
+                                          "REPORT_UPDATE_7.md",
+                                          "REPORT_UPDATE_9.md")
                               or name.startswith("agent/")) \
                     and all(not (val and val == m.group(0).encode("utf-8")) for val in values)
                 (fixture_hits if is_fixture else real_hits).append(f"{name}: pattern {tag}")
@@ -120,7 +127,17 @@ def main() -> int:
     else:
         print(f"[gate2] secret scan ({len(files)} files, {len(values)} stored values): PASS")
 
-    print("[gate1] full offline test suite: run separately (283 passed, 2 skipped)")
+    # Gate 6 (Update 9 task 7): README links must resolve to tracked files.
+    from check_readme_links import check as check_links  # same scripts/ dir
+
+    link_problems = check_links(ROOT, set(files))
+    for p in link_problems:
+        print(f"[gate6] FAIL {p}")
+    print(f"[gate6] README link check: {'FAIL' if link_problems else 'PASS'}")
+    if link_problems:
+        failures.append("README link check failed")
+
+    print("[gate1] full offline test suite: run separately (438 passed, 2 skipped)")
     print("[gate5] untracked review: agent/*.md intentionally untracked (AGU6 8.1)")
     if failures:
         print("GATES FAILED:")

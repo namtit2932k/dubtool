@@ -31,6 +31,7 @@ DEFAULTS: dict = {
     "video_encode_preset": "veryfast",  # veryfast | faster | medium (AGU6 4.2)
     "jobs_max_days": 14,         # prune old job folders after N days (AGU6 6.7)
     "translate_priority": "balanced",  # balanced | faithful | timing (AGU8 6.3)
+    "asr_punctuation_prompt": False,   # AGU9 10.4: optional punctuation initial_prompt
 }
 
 
@@ -97,6 +98,8 @@ def validate(settings: dict) -> list[str]:
         problems.append("video_encode_preset must be veryfast|faster|medium")
     if str(settings.get("translate_priority", "balanced")).lower() not in ("balanced", "faithful", "timing"):
         problems.append("translate_priority must be balanced|faithful|timing")
+    if not isinstance(settings.get("asr_punctuation_prompt"), bool):
+        problems.append("asr_punctuation_prompt must be true or false")
     days = settings.get("jobs_max_days", 14)
     if not isinstance(days, int) or not (1 <= days <= 365):
         problems.append("jobs_max_days must be an integer between 1 and 365")

@@ -95,6 +95,54 @@ def test_tree_size_and_human(tmp_path):
     assert hk.human(2048) == "2.0 KB"
 
 
+# -------- Update 9 task 6: all_jobs mode, dry-run plan, job_stats ----------
+
+
+def test_prune_all_jobs_skips_age_but_not_running(tmp_path):
+    """'Delete all temporary files' ignores the age limits but still keeps
+    every running job."""
+    jobs = build(tmp_path)
+    old = make_job(jobs, "old111", age_days=40)
+    fresh = make_job(jobs, "new222", age_days=0.5)
+    running = make_job(jobs, "run333", age_days=40, running=True)
+    deleted, _ = hk.prune_jobs(jobs, days=14, now=NOW, all_jobs=True)
+    assert sorted(p.name for p in deleted) == ["new222", "old111"]
+    assert not old.exists() and not fresh.exists()
+    assert running.exists()
+
+
+def test_prune_plan_matches_prune_jobs_without_deleting(tmp_path):
+    """The confirmation dialog shows what the default button deletes; the
+    dry run must list the same folders and never remove anything."""
+    jobs = build(tmp_path)
+    j = make_job(jobs, "aaa111", age_days=20)
+    make_job(jobs, "bbb222", age_days=5)
+    make_job(jobs, "ddd444", age_days=30, running=True)
+    plan, size = hk.prune_plan(tmp_path / "jobs", days=14, now=NOW)
+    assert [p.name for p in plan] == ["aaa111"]
+    assert size == hk.tree_size(j)
+    assert j.exists()  # plan never deletes
+    deleted, rec = hk.prune_jobs(tmp_path / "jobs", days=14, now=NOW)
+    assert [p.name for p in deleted] == [p.name for p in plan]
+    assert rec == size
+
+
+def test_job_stats_counts_size_and_oldest(tmp_path):
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    old = make_job(jobs, "old111", age_days=20)
+    make_job(jobs, "new222", age_days=2)
+    (jobs / "stray.txt").write_text("files never count")
+    count, size, oldest = hk.job_stats(jobs)
+    assert count == 2
+    assert size >= hk.tree_size(old)
+    assert abs(oldest - (NOW - 20 * 86400)) < 60.0
+
+
+def test_job_stats_missing_dir(tmp_path):
+    assert hk.job_stats(tmp_path / "na") == (0, 0, 0.0)
+
+
 def test_validation_allows_jobs_days_setting():
     from dubtool.app import settings as s
 

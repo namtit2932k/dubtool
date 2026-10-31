@@ -15,10 +15,15 @@ off the UI thread, and Reset to the shipped defaults. The key hint
 from __future__ import annotations
 
 import logging
+import os
 import re
+import sys
 import threading
+from datetime import datetime
+from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -32,6 +37,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -39,6 +45,12 @@ from PySide6.QtWidgets import (
 
 from dubtool.app import i18n, modes, secrets, settings
 from dubtool.app.key_test import run_key_test
+
+# Editable widget types the read-only sweep disables (Update 9 task 2.2).
+_READONLY_TYPES = (QComboBox, QCheckBox, QLineEdit, QSpinBox, QPlainTextEdit, QListWidget)
+# Buttons that stay enabled while read-only: the key-network checks do not
+# affect a running pipeline; Close aborts the dialog without applying.
+_READ_ONLY_OK_BUTTONS = ("test_all_btn", "test_one_btn", "close_btn")
 
 
 def _asr_progress() -> dict:
@@ -162,7 +174,8 @@ class _AddKeysDialog(QDialog):
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, parent=None, on_key_saved=None):
+    def __init__(self, parent=None, on_key_saved=None, read_only=False,
+                 busy_provider=None):
         super().__init__(parent)
         self.setWindowTitle(i18n.tr("app.settings"))
         # No explicit global minimum width: the dialog's window minimum is
@@ -175,6 +188,17 @@ class SettingsDialog(QDialog):
         self._custom_kept: dict[str, str] = {}  # saved custom ids per mode
 
         layout = QVBoxLayout(self)
+        # Update 9 task 2.2: the read-only banner during a running job.
+        self.read_only_banner = QLabel(i18n.tr("settings.read_only_banner"))
+        self.read_only_banner.setObjectName("read_only_banner")
+        self.read_only_banner.setWordWrap(True)
+        self.read_only_banner.setStyleSheet(
+            "background: #f3d98a; color: #40300a; padding: 6px; border-radius: 4px;"
+        )
+        self.read_only_banner.setVisible(bool(read_only))
+        layout.addWidget(self.read_only_banner)
+        self._read_only_flag = bool(read_only)
+        self._busy_provider = busy_provider
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
         self.tabs.addTab(self._build_keys_tab(), i18n.tr("settings.tab_keys"))
@@ -185,17 +209,52 @@ class SettingsDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
         ok = QPushButton("OK")
+        ok.setObjectName("ok_btn")
         ok.setDefault(True)
         cancel = QPushButton("Cancel")
+        cancel.setObjectName("close_btn")
         ok.clicked.connect(self.accept)
         cancel.clicked.connect(self.reject)
         btn_row.addWidget(ok)
         btn_row.addWidget(cancel)
         layout.addLayout(btn_row)
+        self._ok_btn = ok
+
+        self._apply_read_only()
+        # Update 9 task 2.2: re-check while open — a run ending re-enables
+        # the controls without the user having to reopen the dialog.
+        self._ro_timer = QTimer(self)
+        self._ro_timer.setInterval(400)
+        self._ro_timer.timeout.connect(self._poll_read_only)
+        self._ro_timer.start()
 
         self._refresh_rows()
         self._load()
         self._on_key_saved = on_key_saved
+
+    # ------------------------------------------------- read-only (AGU9 2.2)
+    def _apply_read_only(self) -> None:
+        ro = self._read_only_flag
+        self.read_only_banner.setVisible(ro)
+        for tc in _READONLY_TYPES:
+            for w in self.findChildren(tc):
+                w.setEnabled(not ro)
+        for b in self.findChildren(QPushButton):
+            # Allowlist: key network checks (no effect on a running run)
+            # and the Close button. OK would apply changes — it stays off.
+            allow = b.objectName() in _READ_ONLY_OK_BUTTONS
+            b.setEnabled(not ro or allow)
+
+    def _poll_read_only(self) -> None:
+        if self._busy_provider is None:
+            return
+        try:
+            busy = bool(self._busy_provider())
+        except Exception:
+            return
+        if busy != self._read_only_flag:
+            self._read_only_flag = busy
+            self._apply_read_only()
 
     def _reject(self) -> None:
         self.reject()
@@ -302,15 +361,19 @@ class SettingsDialog(QDialog):
         self._update_buttons()
 
     def _update_buttons(self) -> None:
-        """AGENT_UPDATE_7.md 2.2 button states, from the live selection."""
+        """AGENT_UPDATE_7.md 2.2 button states, from the live selection.
+        While read-only (Update 9 task 2.2) every control stays disabled."""
+        ro = getattr(self, "_read_only_flag", False)
         rows = self.key_list.count()
         selected = self.key_list.currentRow()
-        self.add_btn.setEnabled(True)  # always enabled
+        self.add_btn.setEnabled(not ro)  # was: always enabled
         has_sel = 0 <= selected < rows
-        self.remove_btn.setEnabled(has_sel)
+        self.remove_btn.setEnabled(has_sel and not ro)
+        # Update 9 task 2.2: the key network tests stay enabled read-only
+        # (they only read the stored key and never touch the run).
         self.test_one_btn.setEnabled(has_sel and not self._testing_rows)
-        self.up_btn.setEnabled(has_sel and selected > 0)
-        self.down_btn.setEnabled(has_sel and selected < rows - 1)
+        self.up_btn.setEnabled(has_sel and selected > 0 and not ro)
+        self.down_btn.setEnabled(has_sel and selected < rows - 1 and not ro)
         self.test_all_btn.setEnabled(rows > 0 and not self._testing_rows)
 
     def _show_store_error(self, exc: Exception) -> None:
@@ -615,6 +678,11 @@ class SettingsDialog(QDialog):
         self.cpu_combo.addItem(i18n.tr("settings.cpu_balanced"), "balanced")
         self.cpu_combo.addItem(i18n.tr("settings.cpu_maximum"), "maximum")
         form.addRow(i18n.tr("settings.cpu_usage"), self.cpu_combo)
+        # AGU9 10.4: the punctuation-hint checkbox — present, not decided.
+        # Default stays off; the tooltip states the measured trade-off.
+        self.asr_prompt_check = QCheckBox(i18n.tr("settings.asr_prompt"))
+        self.asr_prompt_check.setToolTip(i18n.tr("settings.asr_prompt_tooltip"))
+        form.addRow(i18n.tr("settings.asr_prompt_label"), self.asr_prompt_check)
         return page
 
     # --------------------------------------------------------- advanced tab
@@ -631,36 +699,144 @@ class SettingsDialog(QDialog):
         self.preset_combo.addItem("faster", "faster")
         self.preset_combo.addItem("medium", "medium")
         form.addRow(i18n.tr("settings.encode_preset"), self.preset_combo)
-        # AGU6 6.7: keep old job folders for at most N days + a manual button.
-        from PySide6.QtWidgets import QPushButton, QSpinBox
+        # Update 9 task 6: the jobs folder and the cleanup button live in a
+        # titled group with the plain explanation, the path, size, run count,
+        # open-folder, the days spinner with its one-line hint, and cleanup.
+        from PySide6.QtWidgets import QGroupBox, QPushButton, QSpinBox, QVBoxLayout
+
+        group = QGroupBox(i18n.tr("adv.working_files_title"), self)
+        gv = QVBoxLayout(group)
+        info = QLabel(i18n.tr("adv.working_files_info"), group)
+        info.setWordWrap(True)
+        gv.addWidget(info)
+        self.jobs_stats_label = QLabel("", group)
+        self.jobs_stats_label.setWordWrap(True)
+        gv.addWidget(self.jobs_stats_label)
+        self.open_jobs_btn = QPushButton(i18n.tr("adv.open_jobs_dir"), group)
+        self.open_jobs_btn.clicked.connect(self._open_jobs_dir)
+        gv.addWidget(self.open_jobs_btn)
+        form.addRow(group)
 
         self.jobs_days_spin = QSpinBox()
         self.jobs_days_spin.setRange(1, 365)
         form.addRow(i18n.tr("settings.jobs_days"), self.jobs_days_spin)
+        days_hint = QLabel(i18n.tr("adv.jobs_days_hint"), page)
+        days_hint.setWordWrap(True)
+        form.addRow("", days_hint)
+        self.jobs_days_hint_label = days_hint
         self.clean_now_btn = QPushButton(i18n.tr("settings.clean_now"))
         self.clean_now_btn.clicked.connect(self._clean_now)
         form.addRow("", self.clean_now_btn)
         return page
 
+    def _jobs_root(self):
+        """The jobs folder from the dialog's current edit value, or the default."""
+        from dubtool.app.paths import jobs_dir as _jobs_dir
+
+        text = self.jobs_edit.text().strip()
+        return Path(text) if text else _jobs_dir()
+
+    def _refresh_jobs_stats(self) -> None:
+        """Update the size/run-count line (first called in _load; also after
+        a manual jobs-dir edit is applied)."""
+        from dubtool.app import housekeeping
+
+        count, size, _oldest = housekeeping.job_stats(self._jobs_root())
+        self.jobs_stats_label.setText(i18n.tr(
+            "adv.jobs_stats", count=count, size=housekeeping.human(size)
+        ))
+
+    def _open_jobs_dir(self) -> None:
+        """Open the jobs root with the fixed (non-hidden) open path —
+        os.startfile on Windows, xdg-open through proc(gui=True) elsewhere."""
+        import sys
+
+        target = self._jobs_root()
+        if not target.is_dir():
+            try:
+                target.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                QMessageBox.warning(self, i18n.tr("settings.clean_now_title"),
+                                    i18n.tr("progress.folder_missing"))
+                return
+        if sys.platform.startswith("win"):
+            os.startfile(str(target))  # type: ignore[attr-defined]
+        else:
+            from dubtool import proc
+
+            proc.run(["xdg-open", str(target)], capture=False, gui=True)
+
     # --------------------------------------------------------------- state
     def _clean_now(self) -> None:
-        """AGU6 6.7: show the jobs/models folder sizes, then prune."""
+        """Update 9 task 6: first a confirmation listing what will be deleted
+        (run count, total size, oldest date) and what never is; the user
+        then chooses 'older than N days' (default) or 'delete all temporary
+        files' (except the running run). The running-job check in
+        housekeeping.prune_jobs stays in every path."""
         from dubtool.app import housekeeping
-        from dubtool.app.paths import jobs_dir as _jobs_dir, models_dir
+        from dubtool.app.paths import models_dir
 
-        jd, md = _jobs_dir(), models_dir()
-        jobs_size = housekeeping.tree_size(jd)
+        jd = self._jobs_root()
+        md = models_dir()
+        stored_count, stored_size, stored_oldest = housekeeping.job_stats(jd)
         models_size = housekeeping.tree_size(md)
+        if stored_count == 0:
+            QMessageBox.information(
+                self, i18n.tr("settings.clean_now_title"),
+                i18n.tr("adv.nothing_to_delete"),
+            )
+            return
         days = int(self.jobs_days_spin.value())
-        # prune_jobs refuses running jobs (state.json) and anything modified
-        # in the last 3 days, so a live run can never be deleted here.
-        deleted, reclaimed = housekeeping.prune_jobs(jd, days=days)
-        text = i18n.tr("settings.clean_now_report")
-        text = text.replace("{jobs_size}", housekeeping.human(jobs_size))
-        text = text.replace("{models_size}", housekeeping.human(models_size))
-        text = text.replace("{n}", str(len(deleted)))
-        text = text.replace("{size}", housekeeping.human(reclaimed))
-        QMessageBox.information(self, i18n.tr("settings.clean_now_title"), text)
+        # The numbers in the text are what the default button deletes:
+        # a dry run of prune_jobs (Update 9 task 6 — the confirmation
+        # must list what will be deleted, not the whole inventory). The
+        # oldest date shown is the oldest run that the default pass removes.
+        plan, plan_size = housekeeping.prune_plan(jd, days=days)
+        plan_oldest = min((housekeeping._mtime(p) for p in plan), default=stored_oldest)
+        oldest_text = (
+            datetime.fromtimestamp(plan_oldest).strftime("%Y-%m-%d")
+            if plan_oldest else "?"
+        )
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(i18n.tr("settings.clean_now_title"))
+        box.setText(i18n.tr(
+            "adv.confirm_text",
+            count=len(plan), size=housekeeping.human(plan_size),
+            oldest=oldest_text,
+        ))
+        older_btn = box.addButton(
+            i18n.tr("adv.choice_older", n=days),
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        all_btn = box.addButton(
+            i18n.tr("adv.choice_all"),
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        box.addButton(i18n.tr("progress.cancel"), QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is older_btn:
+            deleted, reclaimed = housekeeping.prune_jobs(jd, days=days)
+        elif clicked is all_btn:
+            deleted, reclaimed = housekeeping.prune_jobs(jd, days=0, all_jobs=True)
+        else:
+            return  # cancelled
+        if not deleted:
+            QMessageBox.information(
+                self, i18n.tr("settings.clean_now_title"),
+                i18n.tr("adv.nothing_to_delete"),
+            )
+        else:
+            QMessageBox.information(
+                self, i18n.tr("settings.clean_now_title"),
+                i18n.tr(
+                    "adv.clean_done", n=len(deleted),
+                    size=housekeeping.human(reclaimed),
+                    models_size=housekeeping.human(models_size),
+                ),
+            )
+        self._refresh_jobs_stats()
 
     def _load(self) -> None:
         s = settings.load()
@@ -670,10 +846,12 @@ class SettingsDialog(QDialog):
         self.device_combo.setCurrentIndex(max(0, self.device_combo.findData(s["whisper_device"])))
         self.priority_combo.setCurrentIndex(max(0, self.priority_combo.findData(s.get("translate_priority", "balanced"))))
         self.cpu_combo.setCurrentIndex(max(0, self.cpu_combo.findData(s.get("cpu_usage", "balanced"))))
+        self.asr_prompt_check.setChecked(bool(s.get("asr_punctuation_prompt", False)))
         self.preset_combo.setCurrentIndex(max(0, self.preset_combo.findData(s.get("video_encode_preset", "veryfast"))))
         self.jobs_days_spin.setValue(int(s.get("jobs_max_days", 14) or 14))
         self.jobs_edit.setText(s.get("jobs_dir") or "")
         self.output_edit.setText(s.get("default_output_dir") or "")
+        self._refresh_jobs_stats()
 
     def apply_changes(self) -> dict | None:
         s = settings.load()
@@ -683,6 +861,7 @@ class SettingsDialog(QDialog):
         s["whisper_device"] = self.device_combo.currentData() or s["whisper_device"]
         s["translate_priority"] = self.priority_combo.currentData() or "balanced"
         s["cpu_usage"] = self.cpu_combo.currentData() or "balanced"
+        s["asr_punctuation_prompt"] = bool(self.asr_prompt_check.isChecked())
         s["video_encode_preset"] = self.preset_combo.currentData() or "veryfast"
         s["jobs_max_days"] = int(self.jobs_days_spin.value())
         s["jobs_dir"] = self.jobs_edit.text().strip()
@@ -705,5 +884,9 @@ class SettingsDialog(QDialog):
         return s
 
     def accept(self) -> None:  # noqa: D102
+        # Update 9 task 2.2: a read-only dialog must never apply changes
+        # (the OK button is disabled anyway; this is the second gate).
+        if self._read_only_flag:
+            return
         if self.apply_changes() is not None:
             super().accept()

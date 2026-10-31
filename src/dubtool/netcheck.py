@@ -105,6 +105,26 @@ def clock_offset(host: str, timeout_s: float = 10.0) -> float | None:
     return _dt.datetime.now(_dt.timezone.utc).timestamp() - server.timestamp()
 
 
+# AGU9 10.7: the last measured offset is remembered so the TTS-unavailable
+# dialog and the diagnostics can add the clock hint. The key is the host it
+# came from; the value is seconds (local minus server).
+RECORDED_OFFSETS: dict[str, float] = {}
+
+
+def record_offset(host: str, seconds: float) -> None:
+    if isinstance(seconds, (int, float)):
+        RECORDED_OFFSETS[host] = float(seconds)
+
+
+def large_offset() -> float | None:
+    """The most negative-or-positive offset ever recorded this session with
+    magnitude over 30 s (None when every measurement is inside 30 s)."""
+    for value in RECORDED_OFFSETS.values():
+        if abs(value) > 30.0:
+            return value
+    return None
+
+
 def format_table(rows: list[dict], elapsed_s: float | None = None) -> str:
     header = f"Kết nối mạng (DNS + TLS){f' ({elapsed_s:.1f}s)' if elapsed_s is not None else ''}:"
     lines = [

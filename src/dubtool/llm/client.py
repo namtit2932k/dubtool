@@ -27,6 +27,7 @@ from dubtool.llm.base import (
     OverloadFallbackFast,
     TimeoutLLMError,
 )
+from dubtool import heartbeat
 from dubtool.llm import budget as budget_mod
 from dubtool.llm import parsing
 from dubtool.llm import prompts
@@ -43,6 +44,26 @@ MAX_VALIDATION_ATTEMPTS = 2   # AGU8 3.1: reply-invalid (parse) attempts only
 BACKOFF_BASE_S = 2.0
 RATE_LIMIT_BASE_WAIT_S = 30.0
 DEFAULT_SERVER_BACKOFF_S = [10.0, 30.0, 90.0]
+
+
+def _waiting_text(elapsed: int) -> str:
+    """Update 9 task 3.3: the waiting line while a model call is
+    outstanding — resolved against the active UI language at emission."""
+    try:
+        from dubtool.app import i18n
+
+        return i18n.tr("hb.model_wait", n=int(elapsed))
+    except Exception:
+        return f"waiting for the model ({elapsed} s)"
+
+
+def _backoff_text(seconds: int) -> str:
+    try:
+        from dubtool.app import i18n
+
+        return i18n.tr("hb.model_backoff", n=int(seconds))
+    except Exception:
+        return f"model busy — retrying in {seconds} s"
 
 
 class LLMClient:
@@ -168,28 +189,24 @@ class LLMClient:
             try:
                 self._consume_budget()
                 self._request_started_log("complete")
-                result = self._call_logged(
-                    self.provider.complete,
-                    system, user, json_mode=json_mode, max_tokens=max_tokens,
-                )
+                with heartbeat.waiting(_waiting_text):
+                    result = self._call_logged(
+                        self.provider.complete,
+                        system, user, json_mode=json_mode, max_tokens=max_tokens,
+                    )
                 self.total_calls += 1
                 self.consecutive_server_errors = 0
                 if result.input_tokens is not None:
                     self.total_input_tokens += result.input_tokens
                 if result.output_tokens is not None:
                     self.total_output_tokens += result.output_tokens
+                self.key_switches = getattr(self.provider, "switches", 0)
                 log.info(
-                    "llm %s/%s call %d (%s%s): in=%s out=%s tokens — replied in %.1f s (total in=%s out=%s)",
-                    self.provider.name,
-                    self.provider.model,
-                    self.total_calls,
-                    self.request_label or "",
-                    f", {self.last_request_elapsed_s:.1f}s reply" if self.last_request_elapsed_s else "",
-                    result.input_tokens,
-                    result.output_tokens,
-                    self.last_request_elapsed_s or 0.0,
-                    self.total_input_tokens,
-                    self.total_output_tokens,
+                    "llm %s/%s call %d (%s, replied in %.1f s): in=%s out=%s tokens (total in=%s out=%s)",
+                    self.provider.name, self.provider.model, self.total_calls,
+                    self.request_label or "complete", self.last_request_elapsed_s or 0.0,
+                    result.input_tokens, result.output_tokens,
+                    self.total_input_tokens, self.total_output_tokens,
                 )
                 return result.text
             except ServerErrorLLMError as exc:
@@ -206,7 +223,9 @@ class LLMClient:
                 )
                 self._handle_overload()  # raises OverloadFallbackFast per policy
                 if attempt < MAX_RETRIES:
-                    time.sleep(self._server_backoff_s(attempt))
+                    heartbeat.sleeping(
+                        self._server_backoff_s(attempt), _backoff_text, self.cancel
+                    )
             except RateLimitError as exc:
                 last_error = exc
                 self.consecutive_server_errors = 0
@@ -223,7 +242,7 @@ class LLMClient:
                     except Exception:
                         log.exception("on_rate_limit callback failed")
                 if attempt < MAX_RETRIES:
-                    time.sleep(wait)
+                    heartbeat.sleeping(wait, _backoff_text, self.cancel)
             except InternalLLMError:
                 # AGENT_UPDATE_7.md 4.3: deterministic — fails immediately,
                 # never retried, never reported as a connection problem.
@@ -236,7 +255,7 @@ class LLMClient:
                     self.provider.name, attempt, MAX_RETRIES, exc,
                 )
                 if attempt < MAX_RETRIES:
-                    time.sleep(BACKOFF_BASE_S * attempt)
+                    heartbeat.sleeping(BACKOFF_BASE_S * attempt, _backoff_text, self.cancel)
         if isinstance(last_error, RateLimitError):
             raise LLMError(
                 f"giving up after {MAX_RETRIES} attempts: {last_error.provider} rate "
@@ -254,29 +273,25 @@ class LLMClient:
             try:
                 self._consume_budget()
                 self._request_started_log("complete")
-                result = self._call_logged(
-                    self.provider.complete,
-                    system, user, json_mode=json_mode, max_tokens=max_tokens,
-                )
+                with heartbeat.waiting(_waiting_text):
+                    result = self._call_logged(
+                        self.provider.complete,
+                        system, user, json_mode=json_mode, max_tokens=max_tokens,
+                    )
                 self.total_calls += 1
                 self.consecutive_server_errors = 0
                 if result.input_tokens is not None:
                     self.total_input_tokens += result.input_tokens
                 if result.output_tokens is not None:
                     self.total_output_tokens += result.output_tokens
-                log.info(
-                    "llm %s/%s call %d (%s replied in %.1f s): in=%s out=%s tokens (total in=%s out=%s)",
-                    self.provider.name,
-                    self.provider.model,
-                    self.total_calls,
-                    self.request_label or "complete",
-                    self.last_request_elapsed_s or 0.0,
-                    result.input_tokens,
-                    result.output_tokens,
-                    self.total_input_tokens,
-                    self.total_output_tokens,
-                )
                 self.key_switches = getattr(self.provider, "switches", 0)
+                log.info(
+                    "llm %s/%s call %d (%s, replied in %.1f s): in=%s out=%s tokens (total in=%s out=%s)",
+                    self.provider.name, self.provider.model, self.total_calls,
+                    self.request_label or "complete", self.last_request_elapsed_s or 0.0,
+                    result.input_tokens, result.output_tokens,
+                    self.total_input_tokens, self.total_output_tokens,
+                )
                 return result.text
             except ServerErrorLLMError as exc:
                 # AGU8 3.2/3.4: model-wide server errors — NO key rotation in
@@ -293,7 +308,9 @@ class LLMClient:
                 )
                 self._handle_overload()  # raises OverloadFallbackFast per policy
                 if attempts < MAX_RETRIES:
-                    time.sleep(self._server_backoff_s(attempts))
+                    heartbeat.sleeping(
+                        self._server_backoff_s(attempts), _backoff_text, self.cancel
+                    )
             except RateLimitError as exc:
                 attempts += 1
                 last_error = exc
@@ -349,7 +366,7 @@ class LLMClient:
                 if attempts < MAX_RETRIES:
                     if self.cancel is not None and self.cancel.is_set():
                         break
-                    time.sleep(BACKOFF_BASE_S * attempts)
+                    heartbeat.sleeping(BACKOFF_BASE_S * attempts, _backoff_text, self.cancel)
             except KeyExhaustedError:
                 # acquire() found every key unavailable right now: this is
                 # not a failure of a request — wait until the earliest

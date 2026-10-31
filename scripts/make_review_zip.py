@@ -41,7 +41,8 @@ ALLOWLIST_TOP_LEVEL_FILES = [
     "README_BUILD.md",
     "REVIEW_NOTES.md",
 ]
-ALLOWLIST_DIRS = ["src", "tests", "scripts", "packaging"]
+ALLOWLIST_DIRS = ["src", "tests", "scripts", "packaging",
+                  "eval"]  # AGU9 10.3: the eval-translation file travels too
 
 SOURCE_SUFFIXES = (".py", ".yaml", ".yml", ".md", ".toml", ".json", ".cfg", ".txt")
 NEVER_SUFFIXES = (".mp4", ".mov", ".mkv", ".wav", ".mp3", ".m4a", ".zip", ".pt", ".model")

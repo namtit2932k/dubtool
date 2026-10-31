@@ -262,7 +262,10 @@ def run_dub(
     user); `overload_dialog` is the AGU8 3.4 callback answering 'wait' or
     'fallback_fast' when Gemini is overloaded, called only when the policy
     is 'ask'."""
+    from dubtool import heartbeat
+
     budget: Any = None  # bound below, inside the try (exception paths read it)
+    hb_token: object = None  # heartbeat binding (reset in finally)
     try:
         video, output_dir = Path(video), Path(output_dir)
         if not video.is_file():
@@ -312,6 +315,14 @@ def run_dub(
         prio = str(user_settings.get("translate_priority", "balanced") or "balanced").lower()
         if prio in ("faithful", "timing"):
             overrides["translate"]["priority"] = prio
+        # AGU9 10.4: optional punctuation hint for stage 2 — present, not
+        # decided; the default stays off (Update 8 measured 41.0% -> 52.5%
+        # sentence-final segments on test2 with no extra time).
+        if bool(user_settings.get("asr_punctuation_prompt", False)):
+            overrides.setdefault("asr", {})["initial_prompt"] = (
+                "Xin chào viewers, hôm nay chúng ta sẽ cùng tìm hiểu về một chủ đề khá là thú vị. "
+                "Cảm ơn mọi người đã theo dõi hết đoạn này, chúc mọi người một ngày tốt lành!"
+            )
         if options.whisper_model:
             overrides["whisper_model"] = options.whisper_model
         if options.whisper_device:
@@ -367,6 +378,20 @@ def run_dub(
 
         budget = llm_budget.from_config(cfg)
         budget_token = llm_budget.bind(budget)
+        # Update 9 task 3.3: bind the heartbeat emitter — while a stage
+        # waits (model call outstanding, retry backoff, rate-limit
+        # cooldown) the details panel keeps receiving progress lines
+        # instead of going quiet.
+        stage_now: dict[str, str] = {"stage": "s1"}
+
+        def _hb(kind: str, message: str) -> None:
+            if kind == "progress":
+                progress(ProgressEvent(
+                    stage=stage_now["stage"], state="progress",
+                    message=message,
+                ))
+
+        hb_token = heartbeat.bind(_hb)
         requests_per_stage: dict[str, int] = {}
         jobs_root = Path(jobs_dir) if jobs_dir else _default_jobs_dir()
         jobs_root.mkdir(parents=True, exist_ok=True)
@@ -403,6 +428,7 @@ def run_dub(
                 progress(ProgressEvent(stage=stage, state="skipped"))
                 continue
             progress(ProgressEvent(stage=stage, state="start"))
+            stage_now["stage"] = stage
             started = time.monotonic()
             stage_requests_before = budget.used  # AGU6 5.2 per-stage accounting
             bridge = _LogBridge(job.log_path, progress, stage)
@@ -549,6 +575,8 @@ def run_dub(
             code="error", error=str(exc), detail=repr(exc),
             llm_requests=getattr(budget, "used", 0),
         )
+    finally:
+        heartbeat.reset(hb_token)
 
 
 def _user_settings() -> dict:

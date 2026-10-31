@@ -11,8 +11,20 @@ test suite (skip with `-SkipTests`), builds with PyInstaller using
 `packaging/dubtool.spec`, checks the bundle structure, and writes:
 
 - `dist/DubTool/` — the application (one-directory build)
-- `dist/DubTool-1.0.0-win64.zip` — the release zip
+- `dist/DubTool-<version>-win64.zip` — the release zip
 - `dist/DubTool/THIRD_PARTY.md` and `dist/DubTool/README_BUILD.md`
+
+## Version rule (AGENT_UPDATE_9.md 5.2)
+
+The version is `1.0.<N>` where **N is the number of the update being
+delivered**. `packaging/update_number.txt` contains that single number;
+the build script reads it, derives the full version, and prints the version
+and build id at the end. The one true source is `src/dubtool/__init__.py:
+__version__` (the exe's version resource is generated from it by the spec);
+the About box, `--version`, `BUILD_INFO.txt`, the zip name and the
+diagnostics all show the same value. When delivering update N+1: set
+`__version__ = "1.0.<N+1>"` in `src/dubtool/__init__.py` and write `<N+1>`
+into `packaging/update_number.txt` — nothing else needs changing.
 
 ## What the build bundles
 
@@ -46,7 +58,8 @@ Everything goes through the spec (`packaging/dubtool.spec`):
    is only visible in a run of `DubTool.exe --selftest` from `cmd.exe` (the
    console window-less exe still writes stdout output when launched from an
    existing console).
-5. A version resource (`packaging/version.txt`) and a generated icon
+5. A version resource generated from `src/dubtool/__init__.py:
+   __version__` (see the rule above) and a generated icon
    (`packaging/icon.png`) are embedded into `DubTool.exe`.
 
 ## FFmpeg verification

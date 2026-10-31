@@ -44,16 +44,28 @@ def apply_state(win, state: str) -> None:
     win.video_info.clear()
     win.output_warn.clear()
     win.progress_group.reset_for_check()
-    win._refresh_buttons()
+    # Update 9 task 2/1: the card replaces the drop zone when a video is
+    # selected; the busy state locks the editable widgets while running.
+    win.file_card.hide()
+    win.drop_zone.show()
+    win._busy = False
+    win.brief_edit.setReadOnly(False)
     if state == "video":
         win.video_path = _probe_file()
         win.video_info.setText("test.mp4 · 1.0 min")
+        win.drop_zone.hide()
+        win.file_card.show_file(win.video_path.name, str(win.video_path))
         win.output_dir = Path.cwd()
         win._validate_output()
         win._refresh_buttons()
     elif state == "running":
         win.output_dir = Path.cwd()
         win.output_edit.setText(str(win.output_dir))
+        win._refresh_buttons()
+        win._busy = True
+        for w in win._busy_widgets():
+            w.setEnabled(False)
+        win.brief_edit.setReadOnly(True)
         win._refresh_buttons()
         win.progress_group.show_running()
         events = [
@@ -66,23 +78,23 @@ def apply_state(win, state: str) -> None:
         ]
         for stage, st, done, total, msg in events:
             win.progress_group.on_progress(stage, st, done, total, msg, 12.0)
-    elif state == "finished":
+    elif state in ("finished", "error"):
+        # The busy widgets are re-enabled: the run ended.
+        for w in win._busy_widgets():
+            w.setEnabled(True)
         win.output_dir = Path.cwd()
         win.output_edit.setText(str(win.output_dir))
         win._refresh_buttons()
         win.progress_group.show_running()
-        # out_readable present: the success row includes the "M\u1edf b\u1ea3n d\u1ecbch"
-        # button (AGENT_UPDATE_7.md task 5 required finished state).
-        win.progress_group.on_finished(
-            DubResult(ok=True, code="ok", out_video=Path("out/ok.mp4"),
-                      out_readable=Path("out/ok_vi_translation.docx"))
-        )
-    elif state == "error":
-        win.output_dir = Path.cwd()
-        win.output_edit.setText(str(win.output_dir))
-        win._refresh_buttons()
-        win.progress_group.show_running()
-        win.progress_group.on_finished(DubResult(ok=False, code="quota"))
+        if state == "finished":
+            # out_readable present: the success row includes the
+            # "M\u1edf b\u1ea3n d\u1ecbch" button (AGENT_UPDATE_7.md task 5).
+            win.progress_group.on_finished(
+                DubResult(ok=True, code="ok", out_video=Path("out/ok.mp4"),
+                          out_readable=Path("out/ok_vi_translation.docx"))
+            )
+        else:
+            win.progress_group.on_finished(DubResult(ok=False, code="quota"))
 
 
 def _new_window():

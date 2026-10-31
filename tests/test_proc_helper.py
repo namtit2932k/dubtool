@@ -79,7 +79,8 @@ def _popen_capture(monkeypatch):
             captured["kwargs"] = kwargs
             self.returncode = 0
 
-        def communicate(self, timeout=None):
+        def communicate(self, timeout=None, input=None):
+            # Update 9: proc.run forwards `input` (git cat-file batch feed).
             return "out", "err"
 
         def poll(self):
