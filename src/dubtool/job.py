@@ -78,9 +78,31 @@ def compute_hash_with_meta(path: Path) -> str:
     return sha.hexdigest()[:10]
 
 
-# Upstream artifacts per stage (AGENT_UPDATE_5.md task 5.1); globs allowed.
-# The caller hashes the file list's (name, size, mtime) plus the config
-# values that can change that stage's output (model, voice, mix, subtitles).
+class SourceChanged(RuntimeError):
+    """The no-copy input video (AGU10 5.1) is missing or has changed —
+    the run must stop instead of silently resuming with the wrong file.
+    The message is the localized user-facing text."""
+
+
+# AGU10 5.1: the exact localized message for a changed/missing original.
+_CHANGED_MSG_VI = "Video gốc đã thay đổi hoặc bị di chuyển — hãy chọn lại video"
+
+
+def video_fingerprint(path: Path) -> str:
+    """SHA-256 of the first 1 MB + the last 1 MB + the size (AGU10 5.1):
+    a cheap identity for a multi-GB file that still catches edits at
+    either end."""
+    size = path.stat().st_size
+    sha = hashlib.sha256()
+    with open(path, "rb") as fh:
+        mib = 1024 * 1024
+        sha.update(fh.read(mib))
+        if size > mib:
+            fh.seek(size - mib)
+            sha.update(fh.read(mib))
+    sha.update(str(size).encode("ascii"))
+    return sha.hexdigest()
+
 
 def next_job_id(video: Path) -> str:
     return f"{video.stem}-{compute_hash_with_meta(video)}"
@@ -156,12 +178,36 @@ class Job:
 
     # ------------------------------------------------------------ lifecycle
     @classmethod
-    def create(cls, video: Path, jobs_root: Path, source_name: str | None = None) -> "Job":
-        """Create jobs/<id>/ with input.<ext>; idempotent across re-runs."""
+    def create(cls, video: Path, jobs_root: Path, source_name: str | None = None,
+               copy_input: bool = False) -> "Job":
+        """Create jobs/<id>/ without copying the input video (AGU10 5.1):
+        the original's path, size, mtime and fingerprint are recorded in
+        state.json and stage 1 reads the original in place. Historical
+        behavior is restored with copy_input=True (config jobs.copy_input)
+        and legacy job folders holding input.mp4 keep working.
+        Idempotent across re-runs.
+        """
         source_name = source_name or ("input" + video.suffix)
         job_dir = jobs_root / next_job_id(video)
         job_dir.mkdir(parents=True, exist_ok=True)
-        return cls(job_dir, source_name)
+        job = cls(job_dir, source_name)
+        if "original" not in job.state:
+            if copy_input:
+                job.copy_input(video)
+            job.record_original(video)
+            job.save()
+        return job
+
+    def record_original(self, video: Path) -> None:
+        """Record the no-copy input identity (AGU10 5.1) so resolve_input
+        can detect a changed/missing file instead of resuming silently."""
+        st = video.stat()
+        self.state["original"] = {
+            "path": str(Path(os.path.abspath(str(video)))),
+            "size": st.st_size,
+            "mtime": int(st.st_mtime),
+            "fingerprint": video_fingerprint(video),
+        }
     def _load_state(self) -> dict:
 
         default = {
@@ -229,11 +275,43 @@ class Job:
         self.fitted_dir.mkdir(parents=True, exist_ok=True)
 
     def copy_input(self, video_file: Path) -> None:
-        """Copy user's video in as <source> atomically (crash-safe rename)."""
+        """Copy user's video in as <source> atomically (crash-safe rename) —
+        only when config jobs.copy_input is true (AGU10 5.1)."""
         self.ensure_dirs()
         tmp = self.dir / (self.source + ".part")
         shutil.copy2(str(video_file), str(tmp))
         os.replace(tmp, self.input_video)
+
+    def resolve_input(self) -> Path:
+        """The real input video for stage 1 (AGU10 5.1).
+
+        With the no-copy default the original file is read in place and
+        validated (path, size, mtime, fingerprint) — a moved, deleted,
+        edited or replaced video raises SourceChanged with the localized
+        message instead of resuming silently with the wrong file. A job
+        folder that still carries input.mp4 (legacy or copy_input) wins
+        and is used as today.
+        """
+        legacy = self.input_video
+        if legacy.exists():
+            return legacy
+        orig = (self.state.get("original") or {}) if isinstance(self.state, dict) else {}
+        path_s = str(orig.get("path") or "")
+        if not path_s:
+            raise SourceChanged(_CHANGED_MSG_VI + " (no recorded original path)")
+        p = Path(path_s)
+        if not p.is_file():
+            raise SourceChanged(_CHANGED_MSG_VI + f" [{path_s}]")
+        try:
+            st = p.stat()
+        except OSError as exc:
+            raise SourceChanged(_CHANGED_MSG_VI + f" ({exc})") from exc
+        if st.st_size != int(orig.get("size") or -1) or int(st.st_mtime) != int(orig.get("mtime") or -1):
+            raise SourceChanged(_CHANGED_MSG_VI + f" [{path_s}]")
+        fp = video_fingerprint(p)
+        if fp != str(orig.get("fingerprint") or ""):
+            raise SourceChanged(_CHANGED_MSG_VI + f" [{path_s}]")
+        return p
 
 
 _STAGE_UPSTREAM = {
@@ -297,6 +375,13 @@ def stage_inputs_hash(job: "Job", cfg, stage: str) -> str:
                 except OSError:
                     continue
                 feed([p.name, st.st_size, int(st.st_mtime)])
+    if stage == "s1":
+        # AGU10 5.1: with jobs.copy_input=false the original is not in the
+        # job dir; its recorded identity is the s1 upstream instead, so a
+        # changed source invalidates s1 (and every later stage via stamps).
+        orig = (job.state.get("original") or {}) if isinstance(job.state, dict) else {}
+        if orig:
+            feed(["original", orig.get("size"), orig.get("mtime"), orig.get("fingerprint")])
     feed(_cfg_part(cfg, stage))
     recorded = job.state.get("inputs") or {}
     idx = STAGE_ORDER.index(stage)
@@ -310,3 +395,87 @@ def load_job(job_id: str, jobs_root: Path | None = None) -> Job:
     if not job_dir.exists() or not (job_dir / "state.json").exists():
         raise RuntimeError(f"Job not found: {job_id} (no {job_dir}/state.json)")
     return Job(job_dir)
+
+
+# AGU10 5.2, level "Giữ bản dịch và nhật ký": exactly the small files that
+# survive a successful run. Everything else (tts/, fitted/, vi.wav,
+# audio.wav, mixes/encode temporaries, copied input, final/nosubs mp4s) —
+# plus any file not listed here as filed under "bulky" — is deleted.
+_LIGHT_KEEP_FILES = {
+    "state.json", "transcript.json", "translated.json", "units.json",
+    "schedule.json", "words.json", "quality_report.json",
+    "tts_failures.json", "durations.json", "brief.txt", "profile.csv",
+    "pipeline.log", "pipeline.err.log",
+}
+_LIGHT_KEEP_SUFFIXES = (".srt",)
+_LIGHT_KEEP_CONTAINS = ("_translation.",)
+
+
+def prune_light(job_dir: Path) -> int:
+    """Keep the small translation files and logs, delete the bulky ones
+    (AGENT_UPDATE_10.md 5.2, level 'light'). Returns deleted bytes. Failed
+    or cancelled runs never reach this — it is only called on success."""
+    deleted = 0
+    for child in list(job_dir.iterdir()):
+        if child.is_symlink():
+            continue
+        if child.is_file():
+            keep = (
+                child.name in _LIGHT_KEEP_FILES
+                or child.suffix.lower() in _LIGHT_KEEP_SUFFIXES
+                or any(m in child.name for m in _LIGHT_KEEP_CONTAINS)
+            )
+            if not keep:
+                try:
+                    deleted += child.stat().st_size
+                    child.unlink()
+                except OSError:
+                    pass
+        elif child.is_dir():
+            if child.name == "logs":
+                continue  # AGU10 5.2: 'light' keeps the logs too
+            size = tree_size_local(child)
+            try:
+                shutil.rmtree(child)
+            except OSError:
+                continue
+            deleted += size
+    return deleted
+
+
+def prune_none(job_dir: Path) -> None:
+    """AGU10 5.2 level 'Xóa hết' / AGU4 7.4: keep only the log (and a legacy
+    logs/ subfolder), delete everything else including state.json so the
+    folder counts as finished for housekeeping. Only called on success."""
+    for child in list(job_dir.iterdir()):
+        if child.is_symlink():
+            continue
+        if child.is_dir() and child.name != "logs":
+            shutil.rmtree(child, ignore_errors=True)
+        elif child.name != "pipeline.log":
+            try:
+                child.unlink()
+            except OSError:
+                pass
+    try:
+        (job_dir / "state.json").unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def tree_size_local(p: Path) -> int:
+    """Size of a file/dir tree without following symlinks."""
+    if p.is_symlink():
+        return 0
+    if p.is_file():
+        try:
+            return p.stat().st_size
+        except OSError:
+            return 0
+    total = 0
+    for entry in os.scandir(p):
+        try:
+            total += tree_size_local(Path(entry.path))
+        except OSError:
+            continue
+    return total

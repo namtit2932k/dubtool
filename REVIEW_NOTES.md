@@ -1,108 +1,118 @@
 # REVIEW_NOTES.md
 
-## Session: AGENT_UPDATE_9.md work — verified facts only
+## Session: AGENT_UPDATE_10.md work — verified facts only
 
 Working rule (same as previous updates): every section below contains
 either a **measured result** from this session (the command or probe
-that produced it is state named in it) or an explicit
-"not measured / reason". Per-task full rows live in
-`REPORT_UPDATE_9.md`; this file is the reviewer's cheat sheet.
+that produced it is stated in it) or an explicit "not measured /
+reason". Full rows live in `REPORT_UPDATE_10.md`; this file is the
+reviewer's cheat sheet.
 
-> NOTE (writing time): an earlier session's notes contained fabricated
-> module names and were rewritten. Nothing below describes a module
-> without it existing in the working tree now.
+## 1. What exists in this repo for AGU10 (verified present)
 
-## 1. What exists in this repo for AGU9 (verified present)
-
-- Busy state: `MainWindow.set_busy()` in
-  `src/dubtool/app/ui/main_window.py` (the only place deciding it;
-  disable list stated in code).
-- File card: `FileCard` in `src/dubtool/app/ui/widgets.py` shown by
-  `MainWindow.set_video` instead of the drop zone; ✕ wired to
-  `MainWindow.clear_video`.
-- Progress-details panel: labeled toggle in `LogView` (same file);
-  header + liveness + redacted-copy + open-log-folder in the
-  progress widget inside `main_window.py` (`_redact`,
-  `_copy_details`, `_tick_liveness`).
-- Version: `dubtool.__version__ = "1.0.9"` (single source),
-  `packaging/update_number.txt` = 9, dynamic pyproject version,
-  exe version resource from `packaging/dubtool.spec`,
-  `AUTHOR = "sickyturtlez"` in `src/dubtool/branding.py`.
-- Open-folder fix: `os.startfile` for folder opens and
-  `proc.run(..., gui=True)` for the file-reveal case in `main_window.py`
-  / `proc.py`.
-- Working-files group in Settings → Advanced (settings_dialog.py), text
-  and count/size lines.
-- README images: `docs/images/{ready,running,finished,
-  settings_api_keys}.png`, tracked; `scripts/update_readme_images.py`
-  wired into `packaging/build_exe.ps1` step 7/6;
-  `scripts/check_readme_links.py` gate.
-- Package lighter: no `ffprobe.exe` shipped (spec lists vendor/
-  file-by-file so the filter really matches; build refuses a build that
-  contains it), Qt Quick/Qml/Pdf/VirtualKeyboard binaries dropped.
-- ASR/TTS/LLM heartbeats: `heartbeat.py` + callers in
-  `stages/s2_transcribe.py`, `stages/s4_tts.py`, `llm/client.py`.
+- Build root: `src/dubtool/workspace.py` —
+  `DUBTOOL_BUILD_ROOT` env or default `<project parent>_build`; a
+  build root inside the project folder raises. Getters:
+  `build_root()`, `venv_dir()`, `dist_dir()`, `vendor_dir()`,
+  `jobs_dir()`, `models_dir()`, `hf_cache()`, `sample_output()`,
+  `screenshots_dir()`, `logs_dir()`, `tmp_dir()`.
+- Migration: `scripts/migrate_workspace.py` (dry run by default;
+  `--apply` moves dist/jobs/vendor/models/.venv-build/logs and
+  recreates the two venvs at the build root).
+- Shared caches from source runs: `app/paths.py` `models_dir()` /
+  `jobs_dir()` prefer `<build root>/models` and `<build root>/jobs`
+  when they exist (fallback to the legacy in-project folders until the
+  user migrates).
+- Retention levels: `keep_level: none|light|full` in
+  `app/settings.py` DEFAULTS + legacy `keep_intermediate` migration
+  (false → none, true → light); applied in `api.py` `run_dub()`
+  prune path. Old boolean setting is never written back.
+- Git guards: `scripts/git_guard.py` (staged file > 5 MB blocked at
+  commit; `ALLOW_BIG_FILE=1` override; pre-push 50 MB gate),
+  `scripts/install_git_hooks.py`, tested in `tests/test_git_guard.py`.
+- Disk report: `scripts/disk_report.py` (+ reusable
+  `src/dubtool/disk_report.py`) — per-folder counts, duplicate-DB
+  check, undocumented-entry check against `docs/WORKSPACE.md`, and
+  the "Disk budget" line; never reads `.env*` contents.
+- `docs/WORKSPACE.md`: every generated folder, what creates it, what
+  needs it, how to regenerate, safe-to-delete.
+- `mix_original_with_dub()` now references the ORIGINAL VIDEO by the
+  absolute path the stage passes it (no-copy default), fixing the
+  `jobs.copy_input: false` regression found during verification.
 
 ## 2. Aggregate offline suite (final state, one run)
 
 `python -m pytest tests -q --ignore=tests/test_screenshots.py` →
-**438 passed, 2 skipped in 55.04 s**. Skips are the environmental
-symlink-privilege skips in `test_cleanup.py` / `test_housekeeping.py`
-(WinError 1314), not coverage skips. `tests/test_screenshots.py` → 3
-passed against the fresh screenshot set.
+**492 passed, 2 skipped in 66.22 s**. Skips are the environmental
+symlink-privilege skips, not coverage skips.
 
 ## 3. Build in dist (identity verified this session)
 
-`dist/DubTool/DubTool.exe` — version 1.0.9, build id
-`Update 9 (262f9eb)`, sha256 `109ce4790991f76e5949c56e4cb49e122a8d04db7
-291689a8c54fb7000e898b1` (BUILD_INFO.txt + `--version` output). Zip
-`dist/DubTool-1.0.9-win64.zip` = 186.9 MB; unpacked folder 470.1 MB
-(367 files). Fresh-exe gates: `--selftest overall: PASS`, `--gui-smoke
-PASS (9 steps)`, `--layout-check total violations: 0`. Screenshot set:
-`screenshots/update_9_262f9eb/` + `INDEX.txt`, keys masked.
+`<build root>/dist/DubTool/DubTool.exe` — version **1.0.10**, build id
+`Update 10 (ad373d8)`; zip `DubTool-1.0.10-win64.zip` = 187 MB
+(sha256 `fe98c8cf…d74721`, full in the report). Unpacked dist 470 MB.
+Fresh-exe gates on the sanitized environment: `--selftest overall:
+PASS`; sanitized headless runs code=ok. Screenshot set
+`<build root>/screenshots/update_10_ad373d8/` + `INDEX.txt`.
 
-## 4. Package size table (measure → prune → measure)
+## 4. Retention levels — real test2 runs (the exe, sanitized APPDATA)
 
-Before → after, unpacked 693.9 → **470.1 MB**, zip 267.9 → **186.9 MB**.
-Groups after: FFmpeg (ffmpeg.exe only) 121.4 · other 149.8 · ASR runtime
-104.6 · PyAV/Python 63.2 · Qt DLLs 31.1 (MB). opengl32sw.dll (19.7 MB)
-kept on purpose (GL fallback). ffprobe.exe: 121.2 MB shadow — the
-interim build accidentally shipped it because the spec copied `vendor/`
-directory wholesale; fixed in the spec and now enforced by the build
-script.
+| level | job folder after run | kept |
+| --- | --- | --- |
+| none | **16 KB** | pipeline.log + state.json only |
+| light | **133 KB** | all JSONs + logs, clips/tts/fitted deleted |
+| full | **229.7 MB** | everything incl. fitted (10.8 MB), tts (1.2 MB), output.nosubs.mp4 (78.8 MB) |
 
-## 5. Update-8 close-out numbers (all measured this session)
+`jobs.copy_input: false` (new default): the job folder has no video
+copy — the table above. With `copy_input: true` the folder additionally
+holds the input video copy (test2.mp4 = 79.0 MB), i.e. full+copy ≈
+308.7 MB. `mix_original_with_dub` reads the input by its absolute path
+(regression test `tests/test_mix_input_ref.py`).
 
-- Real run `test2` (Fast, no faults): job `2904cb1f5cc6` →
-  `sample/output/e2e_test2_v9/…vi.mp4` + docx (21 table rows).
-- Punctuation: 1 window, **0 accepted / 1 rejected** in all runs —
-  model dropped the token "against" inside a repeated phrase; strict
-  validation refused both replays; original kept (before/after shares
-  equal this session).
-- Fillers: 0 tokens above threshold (no dialog).
-- Completeness: balanced `4 flagged, 3/4 fixed, 1 kept flagged`;
-  faithful `2 flagged, 1/2 fixed`. Kept-flagged row saved in
-  `quality_report.json` in each retained job.
-- Fidelity presets (retained runs): faithful fit
-  `ok=32/shortened=1/stretched=2`, schedule 4 shifted / max 0.08 s /
-  total 0.27 s; balanced fit `ok=29, stretched=5`, schedule 6 shifted /
-  max 0.15 s / total 0.48 s.
-- `eval/20261031-094228.md` — 34 units × 3 variants, 2 requests used.
-- `.git`: 534.11 MiB loose objects with two unreferenced blobs (447 MB,
-  104 MB MP4-shaped) → `git gc --prune=now` → **724.67 KiB in one
-  pack**, 371 objects, nothing reachable removed, **no push** (no
-  remote configured; no rewrite ever needed).
+## 5. Verification evidence (all run this session)
 
-## 6. Cleanup (this session)
+- `scripts/migrate_workspace.py` dry run: **3.5 GB** would move out of
+  the project (dist 657 MB, jobs 918.4 MB, .venv-build 963.7 MB,
+  sample\output 608.5 MB, vendor 244.6 MB, models 86.8 MB, logs…).
+- `scripts/disk_report.py`: project 4930.2 MB, build root 2126.2 MB;
+  budget line + top-10 in the report.
+- Clone check: `git clone --no-hardlinks` → 2.7 MB, 194 files, **no
+  file > 5 MB**.
+- Pre-commit hook test: staged a 6 MB text file → `pre-commit: BLOCK -
+  larger than 5 MB: tmp_hooktest.txt (5.72 MB)`, commit refused;
+  unstaged and deleted.
+- Quiet key scan over `<build root>` (dist, logs, tmp): only
+  sha256/base64 strings, crypto binaries, and the `fixture-fake-key`
+  test constants. No real key found.
+- Shared caches proof: the three sanitized runs used
+  `HF_HOME=<build root>/hf-cache` + `DUBTOOL_MODELS_DIR=<build root>/
+  models-cache`; no model re-download in any run (run 1 downloaded
+  nothing; the Whisper small model came from the shared cache).
 
-Dry run then `--apply --categories caches` → **deleted 5 224 items,
-35.8 MB reclaimed** (`cleanup.log`). Project total 6.1 GB; open
-questions for the user unchanged: `.venv-build` (997.4 MB),
-`sample/` (1.0 GB), `vendor/` (244.6 MB), `models/` (86.8 MB).
+## 6. Bugs found during verification (fixed this session)
 
-## 7. What is NOT in this file
+1. `run_headless` ignored the saved `keep_level` (always the default
+   `light`), so the first `none`/`full` verification runs measured the
+   wrong level. Fixed in `app/main.py`: the settings file decides the
+   level, as the GUI does. The `none`/`full` rows above are from the
+   fixed exe; the `light` row is from the (default-equal) earlier run.
+2. With `jobs.copy_input: false`, stage 6's ffmpeg opened the input by
+   bare filename (worked only when the video was copied into the job
+   folder). Fixed in `audio_utils.py` + regression test.
 
-The full command/output provenance and the per-user-request
-verification rows live in `REPORT_UPDATE_9.md` when it is present in
-the review zip. The GitHub line and the review-zip path are in the
-report and the closing message of this session.
+## 7. Sizes before → after (build environment)
+
+| item | before | after |
+| --- | --- | --- |
+| project folder | 4930.2 MB | unchanged (user must run migration) |
+| build venv | 963.7 MB (`.venv-build` in project) | **634 MB** (`<build root>/venv-build`) |
+| dist/DubTool | 657 MB (project) | **470 MB** (`<build root>/dist`) |
+| zip | 187 MB | 187 MB |
+| build-root hf-cache | — | 464 MB (shared, once) |
+| build-root tmp after runs | — | 544 MB (sanitized run homes; safe to delete) |
+
+## 8. What is NOT in this file
+
+Full provenance and the GitHub line live in `REPORT_UPDATE_10.md`.
+Not verified (cannot be automated): how the app feels on the user's
+display, dub sound, translation quality, antivirus behavior.

@@ -70,6 +70,17 @@ FILLERS_DEFAULTS: dict = {
     "pause_s": 0.25,
 }
 
+# AGENT_UPDATE_10.md task 5: job-folder behavior.
+JOBS_DEFAULTS: dict = {
+    "copy_input": False,   # true restores copying the video into the job dir
+    "max_total_mb": 3000,  # housekeeping trims the jobs folder below this
+}
+
+# AGENT_UPDATE_10.md task 7.2: disk budget for the project folder.
+WORKSPACE_DEFAULTS: dict = {
+    "project_max_mb": 1500,
+}
+
 # AGENT_UPDATE_8 task 5.2: readable-file uncertainty markers.
 READABLE_DEFAULTS: dict = {
     "mark_uncertain": False,
@@ -151,6 +162,8 @@ def _nested_defaults() -> dict:
         "punctuate": _deep_copy(PUNCTUATE_DEFAULTS),
         "fillers": _deep_copy(FILLERS_DEFAULTS),
         "readable": _deep_copy(READABLE_DEFAULTS),
+        "jobs": _deep_copy(JOBS_DEFAULTS),
+        "workspace": _deep_copy(WORKSPACE_DEFAULTS),
     }
 
 
@@ -276,6 +289,8 @@ class Config:
     punctuate: dict = field(default_factory=lambda: _deep_copy(PUNCTUATE_DEFAULTS))
     fillers: dict = field(default_factory=lambda: _deep_copy(FILLERS_DEFAULTS))
     readable: dict = field(default_factory=lambda: _deep_copy(READABLE_DEFAULTS))
+    jobs: dict = field(default_factory=lambda: _deep_copy(JOBS_DEFAULTS))
+    workspace: dict = field(default_factory=lambda: _deep_copy(WORKSPACE_DEFAULTS))
 
     def provider_config(self, provider_id: str | None = None) -> dict:
         pid = (provider_id or self.llm_provider).lower()
@@ -343,4 +358,6 @@ def load(root: Path, overrides: dict | None = None) -> Config:
     cfg.punctuate = data["punctuate"]
     cfg.fillers = data["fillers"]
     cfg.readable = data["readable"]
+    cfg.jobs = data["jobs"]
+    cfg.workspace = data["workspace"]
     return cfg

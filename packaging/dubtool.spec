@@ -11,6 +11,9 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules, coll
 ROOT = Path(SPECPATH).resolve().parent  # repo root
 sys.path.insert(0, str(ROOT / "src"))
 
+# AGU10 task 1: the spec reads generated paths from the build root module.
+from dubtool import workspace as _ws  # noqa: E402
+
 # AGU9 5.2: single version source. The exe's version resource is GENERATED
 # here from `dubtool.__version__` (1.0.<update number>) — packaging/version.txt
 # is no longer read, so one bump updates every artifact at once.
@@ -51,7 +54,7 @@ _vinfo = _vi.VSVersionInfo(
         _vi.VarFileInfo([_vi.VarStruct("Translation", [1033, 1200])]),
     ],
 )
-_tmp_spec_dir = Path(os.environ.get("DUBTOOL_SPEC_TMP", ROOT / "build"))
+_tmp_spec_dir = Path(os.environ.get("DUBTOOL_SPEC_TMP") or _ws.build_dir())
 _tmp_spec_dir.mkdir(parents=True, exist_ok=True)
 _txt_version = _tmp_spec_dir / "version-info.txt"
 _txt_version.write_text(str(_vinfo), encoding="utf-8")
@@ -64,7 +67,7 @@ datas = [
 # PyInstaller copies directory entries wholesale, so the per-file
 # ffprobe.exe filter below never matched and the 121 MB ffprobe build
 # stayed in the shipped folder of the 262f9eb build.
-for _src in (ROOT / "vendor").iterdir():
+for _src in _ws.vendor_dir().iterdir():
     if _src.name.lower() == "ffprobe.exe":
         continue
     if _src.is_file():

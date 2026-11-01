@@ -724,6 +724,11 @@ class SettingsDialog(QDialog):
         days_hint.setWordWrap(True)
         form.addRow("", days_hint)
         self.jobs_days_hint_label = days_hint
+        # AGU10 5.3: trim the jobs folder when it exceeds the cap.
+        self.jobs_total_mb_spin = QSpinBox()
+        self.jobs_total_mb_spin.setRange(200, 200000)
+        self.jobs_total_mb_spin.setSuffix(" MB")
+        form.addRow(i18n.tr("settings.jobs_total_mb"), self.jobs_total_mb_spin)
         self.clean_now_btn = QPushButton(i18n.tr("settings.clean_now"))
         self.clean_now_btn.clicked.connect(self._clean_now)
         form.addRow("", self.clean_now_btn)
@@ -849,6 +854,7 @@ class SettingsDialog(QDialog):
         self.asr_prompt_check.setChecked(bool(s.get("asr_punctuation_prompt", False)))
         self.preset_combo.setCurrentIndex(max(0, self.preset_combo.findData(s.get("video_encode_preset", "veryfast"))))
         self.jobs_days_spin.setValue(int(s.get("jobs_max_days", 14) or 14))
+        self.jobs_total_mb_spin.setValue(int(s.get("jobs_max_total_mb", 3000) or 3000))
         self.jobs_edit.setText(s.get("jobs_dir") or "")
         self.output_edit.setText(s.get("default_output_dir") or "")
         self._refresh_jobs_stats()
@@ -864,6 +870,7 @@ class SettingsDialog(QDialog):
         s["asr_punctuation_prompt"] = bool(self.asr_prompt_check.isChecked())
         s["video_encode_preset"] = self.preset_combo.currentData() or "veryfast"
         s["jobs_max_days"] = int(self.jobs_days_spin.value())
+        s["jobs_max_total_mb"] = int(self.jobs_total_mb_spin.value())
         s["jobs_dir"] = self.jobs_edit.text().strip()
         s["default_output_dir"] = self.output_edit.text().strip()
         s.pop("default_output", None)  # old key is never written (AGU8 7.3)

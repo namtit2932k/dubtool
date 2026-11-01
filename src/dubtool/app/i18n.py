@@ -27,6 +27,18 @@ STRINGS: dict[str, dict[str, str]] = {
         "options.srt": "Lưu thêm tệp .srt cạnh video xuất",
         "options.gain": "Âm lượng gốc",
         "options.voice": "Giọng đọc lồng tiếng",
+        "options.keep_label": "Tệp tạm sau khi xong",
+        "options.keep_none": "Xóa hết",
+        "options.keep_light": "Giữ bản dịch và nhật ký",
+        "options.keep_full": "Giữ tất cả",
+        "options.keep_hint": (
+            "Xóa hết: xóa cả thư mục job khi xong. Giữ bản dịch và nhật ký: "
+            "giữ state.json, transcript, bản dịch, units, schedule, words, "
+            "chất lượng, .srt, file đọc được và các log, xóa toàn bộ tệp nặng "
+            "(tts/, fitted/, vi.wav, audio.wav, tạm gộp/encode). Giữ tất cả: "
+            "không xóa gì. Lượt chạy THẤT BẠI hoặc bị hủy luôn giữ mọi tệp "
+            "để có thể tiếp tục."
+        ),
         "options.keep": "Giữ các tệp trung gian",
         "mode.fast": "Tạo nhanh",
         "mode.accurate": "Tạo chính xác",
@@ -75,6 +87,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "hb.asr_progress": "Đang nhận dạng giọng nói… {n}%",
         "settings.read_only_banner": "Đang chạy — chưa thể thay đổi cài đặt. Chỉ đọc.",
         "settings.jobs_days": "Giữ job tối đa (ngày)",
+        "settings.jobs_total_mb": "Giới hạn tổng dung lượng job (MB)",
         "adv.working_files_title": "Tệp tạm của các lần dịch",
         "adv.working_files_info": (
             "Mỗi lần dịch, DubTool lưu các tệp tạm (âm thanh, bản dịch, giọng "
@@ -94,10 +107,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "adv.choice_all": "Xóa tất cả tệp tạm (trừ lần đang chạy)",
         "adv.clean_done": "Đã xóa {n} lần dịch, giải phóng {size}.\nModel cache: {models_size} (không bao giờ tự xoá).",
         "adv.nothing_to_delete": "Không có lần dịch nào đủ điều kiện xóa.",
-        "options.keep_hint": (
-            "Nếu tắt, tệp tạm của lần dịch được xóa ngay khi hoàn tất; "
-            "bạn sẽ không thể tiếp tục hoặc tái sử dụng chúng."
-        ),
         "settings.clean_now": "Dọn dẹp ngay",
         "settings.clean_now_title": "Dọn dẹp job cũ",
         "settings.clean_now_report": (
@@ -254,6 +263,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "options.srt": "Also save an .srt file next to the output",
         "options.gain": "Original audio level",
         "options.voice": "Dub voice",
+        "options.keep_label": "Trim files after a finished run",
+        "options.keep_none": "Delete everything",
+        "options.keep_light": "Keep translation and logs",
+        "options.keep_full": "Keep everything",
         "options.keep": "Keep intermediate files",
         "mode.fast": "Generate Fast",
         "mode.accurate": "Generate Accurate",
@@ -302,6 +315,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "hb.asr_progress": "Transcribing speech… {n}%",
         "settings.read_only_banner": "A run is in progress — settings are read-only.",
         "settings.jobs_days": "Keep jobs for at most (days)",
+        "settings.jobs_total_mb": "Total job folder size cap (MB)",
         "adv.working_files_title": "Working files of past runs",
         "adv.working_files_info": (
             "For every dub, DubTool keeps temporary files (audio, translation, "
@@ -322,8 +336,13 @@ STRINGS: dict[str, dict[str, str]] = {
         "adv.clean_done": "Deleted {n} run(s), freed {size}.\nModel cache: {models_size} (never deleted automatically).",
         "adv.nothing_to_delete": "No run qualifies for deletion.",
         "options.keep_hint": (
-            "If off, the run's temporary files are deleted when it completes; "
-            "you will not be able to resume or reuse them."
+            "Delete everything: the whole job folder goes when a run ends. "
+            "Keep translation and logs: keeps state.json, transcript, "
+            "translation, units, schedule, words, quality, the .srt, the "
+            "readable file and the logs, deletes every bulky file (tts/, "
+            "fitted/, vi.wav, audio.wav, mix/encode temporaries). Keep "
+            "everything: nothing is deleted. A FAILED or cancelled run "
+            "always keeps all files so it can be resumed."
         ),
         "settings.clean_now": "Clean up now",
         "settings.clean_now_title": "Clean up old jobs",

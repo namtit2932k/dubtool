@@ -157,10 +157,19 @@ class OptionsWidget(QGroupBox):
         self.burn_check.setChecked(s["burn_subtitles"])
         self.srt_check = QCheckBox(i18n.tr("options.srt"))
         self.srt_check.setChecked(s["save_srt"])
-        self.keep_check = QCheckBox(i18n.tr("options.keep"))
-        self.keep_check.setChecked(s["keep_intermediate"])
-        # Update 9 task 6: one-line consequence of turning this off.
-        self.keep_check.setToolTip(i18n.tr("options.keep_hint"))
+        # AGU10 5.2: the old 'Giữ các tệp trung gian' checkbox became a
+        # three-choice dropdown.
+        self.keep_combo = QComboBox()
+        self.keep_combo.addItem(i18n.tr("options.keep_none"), "none")
+        self.keep_combo.addItem(i18n.tr("options.keep_light"), "light")
+        self.keep_combo.addItem(i18n.tr("options.keep_full"), "full")
+        level = str(s.get("keep_level") or "light")
+        if level not in ("none", "light", "full"):
+            level = "light"
+        self.keep_combo.setCurrentIndex(max(0, self.keep_combo.findData(level)))
+        # One-line consequence of turning this off (Update 9 task 6),
+        # extended with what each choice keeps and the failed-run rule.
+        self.keep_combo.setToolTip(i18n.tr("options.keep_hint"))
         # AGENT_UPDATE_7.md task 4: the customer-readable translation that
         # ships next to every exported video (default on, docx or txt).
         self.readable_check = QCheckBox(i18n.tr("options.readable"))
@@ -181,7 +190,8 @@ class OptionsWidget(QGroupBox):
         self.voice_combo.setCurrentText(s["voice"])
         grid.addWidget(self.burn_check, 0, 0, 1, 3)
         grid.addWidget(self.srt_check, 1, 0, 1, 3)
-        grid.addWidget(self.keep_check, 2, 0, 1, 3)
+        grid.addWidget(QLabel(i18n.tr("options.keep_label")), 2, 0)
+        grid.addWidget(self.keep_combo, 2, 1, 1, 2)
         grid.addWidget(self.readable_check, 3, 0)
         grid.addWidget(self.readable_format_combo, 3, 1, 1, 2)
         grid.addWidget(QLabel(i18n.tr("options.gain")), 4, 0)
@@ -199,7 +209,7 @@ class OptionsWidget(QGroupBox):
             save_srt=self.srt_check.isChecked(),
             original_gain_db=float(self.gain_slider.value()),
             voice=self.voice_combo.currentText(),
-            keep_intermediate=self.keep_check.isChecked(),
+            keep_level=str(self.keep_combo.currentData() or "light"),
             export_readable=self.readable_check.isChecked(),
             readable_format=str(self.readable_format_combo.currentData() or "docx"),
             description=(normalize_brief(brief) or None),
@@ -534,6 +544,13 @@ class MainWindow(QMainWindow):
 
             housekeeping.prune_jobs(
                 self._jobs_dir(), days=int(saved.get("jobs_max_days", 14) or 14)
+            )
+            # AGU10 5.3: the size cap deletes the oldest finished jobs
+            # until the jobs folder is under jobs.max_total_mb. Same
+            # never-fatal contract as prune_jobs.
+            housekeeping.trim_to_budget(
+                self._jobs_dir(),
+                max_total_mb=int(saved.get("jobs_max_total_mb", 3000) or 3000),
             )
         except Exception:
             pass

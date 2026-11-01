@@ -111,7 +111,9 @@ def pick_cues(cues: list[dict], count: int) -> list[dict]:
 def main() -> int:
     job_id = sys.argv[1] if len(sys.argv) > 1 else "test1-e5df32ffda"
     n_cues = int(sys.argv[2]) if len(sys.argv) > 2 else 6
-    job = Path("jobs") / job_id
+    from dubtool import workspace
+
+    job = workspace.jobs_dir() / job_id
     config = load_config(Path("."))
     cfg = config.subtitles
 

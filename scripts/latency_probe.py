@@ -40,7 +40,9 @@ def main() -> None:
         count = int(args[args.index("--units") + 1])
     load_env(Path.cwd())
 
-    job = Path("jobs") / job_id
+    from dubtool import workspace
+
+    job = workspace.jobs_dir() / job_id
     transcript = read_json(job / "transcript.json")
     units = build_units(
         transcript,

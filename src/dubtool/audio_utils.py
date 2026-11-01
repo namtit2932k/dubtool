@@ -603,9 +603,17 @@ def mix_original_with_dub(
     """
     script_path = working_dir / "mix_script.txt"
     script_path.write_text(graph, encoding="utf-8")
+    # AGU10 5.1: with jobs.copy_input=false the background lives OUTSIDE the
+    # job dir (jobs/ c20… found this in the packaged verification run); a
+    # bare .name only resolved when the input was copied into working_dir.
+    # Absolute paths are safe in a proc.run arg list (no shell splitting).
+    background_ref = (
+        background.name if background.parent.resolve() == Path(working_dir).resolve()
+        else str(background.resolve())
+    )
     cmd = [
         ffmpeg_bin(), "-y",
-        "-i", background.name,
+        "-i", background_ref,
         "-i", dub.name,
         "-filter_complex_script", "mix_script.txt",
         "-map", "0:v", "-c:v", "copy",

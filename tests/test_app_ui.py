@@ -654,11 +654,44 @@ def test_working_files_group_texts_and_stats(qtbot, dialog, tmp_path):
     assert hint == i18n.tr("adv.jobs_days_hint")
 
 
-def test_keep_intermediate_tooltip(qtbot, window):
-    """The Options checkbox explains the consequence of turning it off."""
-    opts = window.options
-    assert opts.keep_check.toolTip() == i18n.tr("options.keep_hint")
-    assert "continu" in opts.keep_check.toolTip().lower() or "ti\u1ebfp t\u1ee5c" in opts.keep_check.toolTip()
+def test_keep_level_dropdown_replaces_checkbox(qtbot, window):
+    """AGU10 5.2: the old 'Giữ các tệp trung gian' checkbox became a
+    three-choice dropdown; the saved level selects the item and to_options
+    carries it into DubOptions."""
+    opts_panel = window.options
+    assert not hasattr(opts_panel, "keep_check"), "the checkbox must be gone"
+    combo = opts_panel.keep_combo
+    assert [combo.itemData(i) for i in range(combo.count())] == ["none", "light", "full"]
+    assert combo.toolTip() == i18n.tr("options.keep_hint")
+    assert combo.currentData() in ("none", "light", "full")
+    opts = opts_panel.to_options("fast", "")
+    assert opts.keep_level == combo.currentData()
+    # the localized labels: the defaults keep the Vietnamese wording
+    i18n.set_language("vi")
+    assert combo.itemText(0) == "Xóa hết"
+    assert combo.itemText(2) == "Giữ tất cả"
+
+
+def test_keep_level_dropdown_disabled_while_busy(qtbot, window):
+    """AGU10 5.2 + AGU9 task 1: the mnemonic choice cannot change while a
+    run is in progress (the options group is on the busy disable-list)."""
+    # The group starts unchecked (collapsed); an unchecked checkable
+    # QGroupBox keeps its children disabled by design, so expand it first.
+    window.options.setChecked(True)
+    window.set_busy(True)
+    assert window.options.keep_combo.isEnabled() is False
+    window.set_busy(False)
+    assert window.options.keep_combo.isEnabled() is True
+    assert not window.options.isChecked() or window.options.keep_combo.isEnabled()
+
+
+def test_settings_jobs_size_cap_spin(qtbot, dialog):
+    """AGU10 5.3: the Advanced working-files group carries the total-size
+    cap setting (jobs_max_total_mb) and it round-trips."""
+    assert dialog.jobs_total_mb_spin.value() >= 200
+    dialog.jobs_total_mb_spin.setValue(2500)
+    saved = dialog.apply_changes() or {}
+    assert saved.get("jobs_max_total_mb") == 2500
 
 
 def test_clean_now_confirmation_numbers(qtbot, dialog, tmp_path, monkeypatch):

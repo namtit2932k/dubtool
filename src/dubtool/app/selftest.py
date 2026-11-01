@@ -199,6 +199,22 @@ def check_imports(modules: tuple[str, ...]) -> dict:
     return {"ok": not missing, "detail": "all import" if not missing else "missing: " + ", ".join(missing)}
 
 
+def _imported_pyside_modules() -> list[str]:
+    """Qt modules actually in sys.modules (AGU10 task 2.4), sorted."""
+    return sorted(
+        name.split(".", 1)[1]
+        for name in list(sys.modules)
+        if name.startswith("PySide6.Qt") and name.count(".") == 1
+    )
+
+def qt_modules_line() -> str:
+    """'qt modules: QtWi... — one line for the self-test output."""
+    mods = _imported_pyside_modules()
+    if not mods:
+        return "qt modules: none imported yet"
+    return "qt modules: " + ", ".join(mods)
+
+
 def check_qt_offscreen() -> dict:
     try:
         import os
@@ -378,6 +394,8 @@ def run_selftest(json_path: Path | None = None) -> int:
     print("-" * len(header))
     for name, r in results.items():
         print(f"{name:<20} {'PASS' if r['ok'] else 'FAIL':<6} {r['detail']}")
+    # AGU10 task 2.4: prove which Qt modules the app actually imports.
+    print(qt_modules_line())
     print(f"\noverall: {'PASS' if ok else 'FAIL'}")
     if json_path:
         Path(json_path).parent.mkdir(parents=True, exist_ok=True)

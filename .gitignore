@@ -76,3 +76,17 @@ translated*.json
 .vscode/
 build_log.txt
 build_layout_smoke.log
+
+# AGU10 task 6.1: generated tooling output and heavy assets — keep every
+# entry above. tests/fixtures is still allowed for the small fixture .bin.
+.freebuff/
+inventory/
+hf-cache/
+tmp/
+build_log*
+exe_build*
+cleanup_dryrun.txt
+*.onnx
+*.bin
+!tests/fixtures/*.onnx
+!tests/fixtures/*.bin

@@ -37,7 +37,7 @@ class DubOptions:
     save_srt: bool = False
     original_gain_db: float = -14.0
     voice: str = "vi-VN-HoaiMyNeural"
-    keep_intermediate: bool = False
+    keep_level: str = "light"          # none | light | full (AGU10 5.2)
     description: str | None = None     # video brief text (user-supplied)
     translate_concurrency: int | None = None
     output_name_base: str | None = None
@@ -216,19 +216,27 @@ def _is_model_not_found(exc: BaseException) -> bool:
     )
 
 
-def _open_or_create_job(job_id: str, jobs_root: Path, video: Path) -> "Job":
+def _open_or_create_job(job_id: str, jobs_root: Path, video: Path,
+                        copy_input: bool = False) -> "Job":
     from dubtool.job import Job
 
     source_name = "input" + video.suffix
     job_dir = jobs_root / job_id
-    if job_dir.exists():
-        job = Job(job_dir, source_name)
-    else:
+    if not job_dir.exists():
         job_dir.mkdir(parents=True, exist_ok=True)
-        job = Job(job_dir, source_name)
+    job = Job(job_dir, source_name)
     job.ensure_dirs()
-    if not job.input_video.exists() or job.input_video.stat().st_size != video.stat().st_size:
-        job.copy_input(video)
+    if copy_input:
+        # Historical copy_into-the-job-dir behavior (config jobs.copy_input:
+        # true) — copy only when the stored copy is missing or resized.
+        if not job.input_video.exists() or job.input_video.stat().st_size != video.stat().st_size:
+            job.copy_input(video)
+            job.record_original(video)
+    elif "original" not in job.state:
+        # Legacy jobs keep using their input.mp4 (or their already recorded
+        # original) — never re-record, or a changed file would be silently
+        # accepted (AGU10 5.1; validation happens in resolve_input).
+        job.record_original(video)
     job.save()
     return job
 
@@ -396,7 +404,10 @@ def run_dub(
         jobs_root = Path(jobs_dir) if jobs_dir else _default_jobs_dir()
         jobs_root.mkdir(parents=True, exist_ok=True)
         job_id = _stable_job_id(video, options)
-        job = _open_or_create_job(job_id, jobs_root, video)
+        # AGU10 5.1: no copy of the input video by default (config
+        # jobs.copy_input restores the historical copy).
+        job = _open_or_create_job(job_id, jobs_root, video,
+                                  copy_input=bool((cfg.jobs or {}).get("copy_input", False)))
         _apply_description(job, options)
 
         from dubtool.stages import s1_extract_audio, s2_transcribe
@@ -542,20 +553,18 @@ def run_dub(
             os.replace(tmp_srt, srt_target)
             out_srt = srt_target
 
-        if not options.keep_intermediate:
+        keep_level = str(getattr(options, "keep_level", "light") or "light").lower()
+        if keep_level == "none":
             # Keep only the log (AGU4 7.4): delete everything else.
-            for child in list(job.dir.iterdir()):
-                if child.is_dir() and child.name != "logs":
-                    shutil.rmtree(child, ignore_errors=True)
-                elif child.name != "pipeline.log":
-                    try:
-                        child.unlink()
-                    except OSError:
-                        pass
-            try:
-                job.state_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+            from dubtool.job import prune_none
+
+            prune_none(job.dir)
+        elif keep_level == "light":
+            # AGU10 5.2 'Giữ bản dịch và nhật ký': keep the small
+            # translation files and logs, delete the bulky ones.
+            from dubtool.job import prune_light
+
+            prune_light(job.dir)
 
         job.save()
         result = DubResult(

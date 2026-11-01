@@ -390,6 +390,15 @@ def _rmtree_nofollow(dirpath: Path) -> None:
 
 
 # --------------------------------------------------------------------- CLI
+def default_log() -> Path:
+    """Where cleanup.log goes now: <build root>/logs/ (AGU10 1.5 + 7.3) —
+    never the project root."""
+    from dubtool.workspace import logs_dir  # noqa: PLC0415
+
+    return logs_dir() / "cleanup.log"
+
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -405,7 +414,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="delete all regenerable categories with --apply")
     parser.add_argument("--jobs-days", type=int, default=14)
     parser.add_argument("--top", type=int, default=30)
-    parser.add_argument("--log", default=str(root / "cleanup.log"))
+    # AGU10 1.5 + 7.3: never write the log into the project root — the
+    # default lives in <build root>/logs/ (workspace.logs_dir).
+    parser.add_argument("--log", default=str(default_log()))
     args = parser.parse_args(argv)
 
     check_root(root)

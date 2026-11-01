@@ -199,8 +199,9 @@ def test_details_shell_visible_when_open(window, qtbot):
 
 def test_version_single_source():
     """AGU9 5.2: one version constant, `1.0.<update>`; every consumer
-    derives from it (pyproject reads dubtool.__version__ dynamically)."""
-    assert __version__ == "1.0.9"
+    derives from it (pyproject reads dubtool.__version__ dynamically).
+    AGU10: the literal is gone — the update-number file is the only place
+    the number lives, so this survived the 1.0.10 bump unchanged."""
     update_number = (
         Path(__file__).resolve().parents[1] / "packaging" / "update_number.txt"
     ).read_text(encoding="utf-8").strip()

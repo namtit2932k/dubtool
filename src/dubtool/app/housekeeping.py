@@ -155,6 +155,85 @@ def _prunable(jobs_dir: Path, *, days: int, running_job_id: str | None,
     return deleted, reclaimed
 
 
+def _job_finished(job: Path) -> bool:
+    """True for a completed run: no state.json (folder already cleaned by
+    the 'Xóa hết' retention level -> only the log remains) or every stage
+    finished. Anything else may be resumable."""
+    state = job / "state.json"
+    if not state.exists():
+        return True  # everything-including-state deleted after success
+    try:
+        st = json.loads(state.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    stages = st.get("stages") if isinstance(st, dict) else None
+    if not isinstance(stages, dict) or not stages:
+        return False
+    return all(v == "done" for v in stages.values())
+
+
+def trim_to_budget(jobs_dir: Path, *, max_total_mb: int,
+                   running_job_id: str | None = None,
+                   now: float | None = None) -> tuple[list[Path], int]:
+    """AGU10 5.3: when the jobs folder exceeds jobs.max_total_mb, delete
+    the OLDEST finished jobs first until it is under the cap.
+
+    Never deleted: the running job, any running-stage job, and a resumable
+    (unfinished) job younger than the 3-day window — a finished job's age
+    is irrelevant; an unfinished job is only dropped after 3 days.
+    Dry-run with trim_plan(). Returns (deleted, reclaimed bytes)."""
+    deleted, reclaimed = trim_plan(
+        jobs_dir, max_total_mb=max_total_mb, running_job_id=running_job_id, now=now
+    )
+    for p in deleted:
+        try:
+            _rmtree_nofollow(p)
+        except OSError:
+            continue
+    return deleted, reclaimed
+
+
+def trim_plan(jobs_dir: Path, *, max_total_mb: int,
+              running_job_id: str | None = None,
+              now: float | None = None) -> tuple[list[Path], int]:
+    """Dry run of trim_to_budget: the jobs it would delete and the
+    reclaimed bytes."""
+    now = time.time() if now is None else now
+    resume_cutoff = now - RESUME_KEEP_DAYS * 86400
+    cap = max(0, int(max_total_mb)) * 1024 * 1024
+    if not jobs_dir.is_dir():
+        return [], 0
+    candidates: list[tuple[float, Path, int]] = []
+    total = 0
+    for job in [p for p in jobs_dir.iterdir() if p.is_dir() and not p.is_symlink()]:
+        if running_job_id and job.name == running_job_id:
+            continue
+        if _job_running(job):
+            continue
+        age = _mtime(job)
+        total += tree_size(job)
+        finished = _job_finished(job)
+        if not finished and age >= resume_cutoff:
+            continue  # resumable within the 3-day window, whatever its size
+        candidates.append((age, job, int(finished) == 0))
+    if total <= cap:
+        return [], 0
+    # oldest first; unfinished (older than 3 days) last among equal ages
+    candidates.sort(key=lambda t: (t[2], t[0]))
+    out: list[Path] = []
+    for _age, job, _unfinished in candidates:
+        size = tree_size(job)
+        out.append(job)
+        total -= size
+        if total <= cap:
+            break
+    if total > cap:
+        out.clear()  # cannot get under the cap without breaking the rules
+        return [], 0
+    reclaimed = sum(tree_size(p) for p in out)
+    return out, reclaimed
+
+
 def _rmtree_nofollow(dirpath: Path) -> None:
     for entry in os.scandir(dirpath):
         try:

@@ -39,7 +39,10 @@ def run(job, config, force: bool = False, cancel=None) -> None:
         log.info("s6: output.nosubs.mp4 already exists, skipping")
         return
 
-    if not audio_utils.has_audio_stream(job.input_video):
+    # AGU10 5.1: the original video is read in place (no-copy default).
+    src_video = job.resolve_input()
+
+    if not audio_utils.has_audio_stream(src_video):
         return run_dub_only(job, config, cancel=cancel)
 
     entries = [e for e in read_json(job.translated_path) if e.get("vi")]
@@ -54,7 +57,7 @@ def run(job, config, force: bool = False, cancel=None) -> None:
     if not clip_items:
         raise RuntimeError("no fitted clips found — run stage s5 first")
 
-    video_duration = media_cache.duration(job.input_video)
+    video_duration = media_cache.duration(src_video)
     durations = {
         seg_id: media_cache.duration(job.fitted_dir / f"{seg_id}.wav")
         for seg_id, _start in clip_items
@@ -75,7 +78,7 @@ def run(job, config, force: bool = False, cancel=None) -> None:
     mix = config.mix
 
     # Build vi.wav to match the original audio's sample rate and channels.
-    orig_rate, orig_channels = audio_utils.probe_audio_format(job.input_video)
+    orig_rate, orig_channels = audio_utils.probe_audio_format(src_video)
     bed_dir = job.dir
     silence = bed_dir / "_silence.wav"
     audio_utils.make_silence(
@@ -92,7 +95,7 @@ def run(job, config, force: bool = False, cancel=None) -> None:
     )
     audio_utils.mix_original_with_dub(
         working_dir=job.dir,
-        background=job.input_video,
+        background=src_video,
         dub=job.vi_audio_path,
         out=out,
         graph=graph,
@@ -107,8 +110,9 @@ def run(job, config, force: bool = False, cancel=None) -> None:
 
 
 def run_dub_only(job, config, cancel=None) -> None:
-    """Fallback for input.mp4 with no audio stream (AGENT_UPDATE_2.md 2.3)."""
+    """Fallback for videos with no audio stream (AGENT_UPDATE_2.md 2.3)."""
     log.info("s6: input has no audio stream — dub-only mix written")
-    video_duration = audio_utils.probe_duration(job.input_video)
+    src_video = job.resolve_input()
+    video_duration = audio_utils.probe_duration(src_video)
     audio_utils.make_silence(video_duration, job.vi_audio_path, sample_rate=44100)
-    audio_utils.mux(job.input_video, job.vi_audio_path, job.output_nosubs_path, cancel=cancel)
+    audio_utils.mux(src_video, job.vi_audio_path, job.output_nosubs_path, cancel=cancel)

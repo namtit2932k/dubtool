@@ -29,7 +29,11 @@ def bundle_root() -> Path:
 
 
 def vendor_dir() -> Path:
-    return bundle_root() / "vendor"
+    """Third-party binaries: the build root's vendor/ (Update 10 task 1)
+    with the legacy in-project vendor/ as fallback during migration."""
+    from dubtool import workspace
+
+    return workspace.vendor_dir()
 
 
 def ffmpeg_dir() -> Path:
@@ -61,8 +65,17 @@ def jobs_dir() -> Path:
     if override:
         return Path(override)
     if not is_frozen():
-        # source checkout keeps jobs next to the project
-        return bundle_root() / "jobs"
+        # AGENT_UPDATE_10.md task 1: jobs live in the build root from now
+        # on; the legacy in-project jobs/ keeps working until moved.
+        from dubtool import workspace
+
+        b = workspace.build_root(False) / "jobs"
+        if b.exists():
+            return b
+        legacy = bundle_root() / "jobs"
+        if legacy.exists():
+            return legacy
+        return workspace.jobs_dir()
     return app_data_root() / "jobs"
 
 
@@ -70,6 +83,18 @@ def models_dir() -> Path:
     override = os.environ.get("DUBTOOL_MODELS_DIR")
     if override:
         return Path(override)
+    if not is_frozen():
+        # AGENT_UPDATE_10.md task 1/3.1: source runs share one model cache
+        # in the build root (never re-downloaded per HOME).
+        from dubtool import workspace
+
+        b = workspace.build_root(False) / "models"
+        if b.exists():
+            return b
+        legacy = bundle_root() / "models"
+        if legacy.exists():
+            return legacy
+        return workspace.models_dir()
     return app_data_root() / "models"
 
 

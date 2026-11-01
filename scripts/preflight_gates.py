@@ -31,7 +31,9 @@ PATTERNS = [
 ]
 
 FORBIDDEN_PREFIXES = ("jobs/", "sample/", "dist/", "build/", "vendor/",
-                      "models/", ".venv/", ".venv-build/")
+                      "models/", ".venv/", ".venv-build/",
+                      # AGU10 task 6.2: same prefix list the hook enforces.
+                      ".freebuff/", "hf-cache/", "tmp/", "inventory/")
 
 
 def tracked_files() -> list[str]:
@@ -137,7 +139,7 @@ def main() -> int:
     if link_problems:
         failures.append("README link check failed")
 
-    print("[gate1] full offline test suite: run separately (438 passed, 2 skipped)")
+    print("[gate1] full offline test suite: run separately (last full run: 490 passed, 2 skipped)")
     print("[gate5] untracked review: agent/*.md intentionally untracked (AGU6 8.1)")
     if failures:
         print("GATES FAILED:")

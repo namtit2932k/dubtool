@@ -16,9 +16,9 @@ def run(job, config, force: bool = False, cancel=None) -> None:
         return
 
     audio_utils.require_ffmpeg()
-    src = job.input_video
-    if not src.exists():
-        raise RuntimeError(f"input video missing: {src}")
+    # AGU10 5.1: with jobs.copy_input=false the original is read in place;
+    # a missing/changed file raises SourceChanged (localized message).
+    src = job.resolve_input()
 
     if audio_utils.probe_audio_streams(src) == 0:
         raise RuntimeError(

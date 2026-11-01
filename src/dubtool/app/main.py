@@ -15,8 +15,9 @@ from __future__ import annotations
 import argparse
 import os
 import logging
+import shutil
 import sys
-import tempfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -244,6 +245,30 @@ def _write_screenshots_index(out_dir: Path, scale: float) -> None:
     (out_dir / "INDEX.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _prepare_sanitized_home(run_id: str) -> Path:
+    """AGU10 task 3: a sanitized home for a verification run.
+
+    Shared model caches (task 3.1) are set FIRST, while APPDATA still
+    points at the real location — the frozen exe resolves the build root
+    as app data — so HF_HOME / HF_HUB_CACHE point at one shared hf-cache
+    and DUBTOOL_MODELS_DIR at the shared models folder instead of each
+    temp home re-downloading the 483 MB Whisper model. Only then are
+    APPDATA/LOCALAPPDATA moved to <build root>/tmp/sanitized/<run id>
+    (task 3.2): never under the project, never a leftover in %TEMP%.
+    Returns the sanitized home for cleanup.
+    """
+    from dubtool import workspace
+
+    hf = workspace.hf_cache_dir()
+    os.environ.setdefault("HF_HOME", str(hf))
+    os.environ.setdefault("HF_HUB_CACHE", str(hf / "hub"))
+    os.environ.setdefault("DUBTOOL_MODELS_DIR", str(workspace.models_dir()))
+    home = workspace.sanitized_tmp_dir(f"{run_id}-{uuid.uuid4().hex[:8]}")
+    for var in ("APPDATA", "LOCALAPPDATA"):
+        os.environ[var] = str(home)
+    return home
+
+
 def run_gui_smoke() -> int:
     """AGENT_UPDATE_7.md section 8: the real widgets driven with real events
     while every side effect is faked (credential store, key test, pipeline).
@@ -261,7 +286,6 @@ def run_gui_smoke() -> int:
          and Generate buttons; the success state shows "Mở bản dịch" and
          both the video and the readable file exist.
     """
-    import tempfile
     import threading
     import time
 
@@ -362,7 +386,10 @@ def run_gui_smoke() -> int:
     api.run_dub = fake_run_dub
 
     # ------------------------------------------------------------ video
-    smoke_dir = Path(tempfile.mkdtemp(prefix="dubtool-smoke-media-"))
+    # AGU10 task 3: smoke media lives inside the sanitized home (never a
+    # %TEMP%/dubtool-* leftover); the whole home goes when the run ends.
+    smoke_dir = Path(os.environ["LOCALAPPDATA"]) / "media"
+    smoke_dir.mkdir(parents=True, exist_ok=True)
     outdir = smoke_dir / "out"
     outdir.mkdir()
 
@@ -531,11 +558,9 @@ def run_gui_smoke() -> int:
         print(f"{name:<48} {'PASS' if ok else 'FAIL':<6} {detail}")
     ok_all = all(ok for _n, ok, _d in results)
     print(f"\ngui-smoke: {'PASS' if ok_all else 'FAIL'} ({len(results)} steps)")
-    print(f"temp workspace: {smoke_dir} (deleted on exit unless a step failed)")
+    print(f"temp workspace: {smoke_dir} (removed on success with the sanitized home)")
     if ok_all:
-        import shutil
-
-        shutil.rmtree(smoke_dir, ignore_errors=True)
+        shutil.rmtree(Path(os.environ["LOCALAPPDATA"]), ignore_errors=True)
     try:
         window.close()
     except Exception:
@@ -550,10 +575,17 @@ def run_headless(video: Path, outdir: Path, mode: str, profile: bool = False) ->
     import threading
 
     from dubtool import api
-    from dubtool.app import secrets
+    from dubtool.app import secrets, settings
     from dubtool.api import DubOptions
 
-    options = DubOptions(mode=mode)
+    # AGU10 5.2: the headless verification run mirrors the GUI run path —
+    # the retention level comes from the saved settings (the GUI passes it
+    # per run; without this every headless run measured "light").
+    saved = settings.load()
+    options = DubOptions(
+        mode=mode,
+        keep_level=str(saved.get("keep_level") or "light"),
+    )
     current_stage = {"name": ""}
 
     def show(event) -> None:
@@ -640,11 +672,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if run_layout_check(args.scale) == 0 else 1
     if args.gui_smoke:
         # Isolate before any dubtool module has imported paths: a private
-        # temp app data for this run (AGU7 8, sanitized environment).
-        td = tempfile.mkdtemp(prefix="dubtool-gui-smoke-appdata-")
-        for var in ("APPDATA", "LOCALAPPDATA"):
-            os.environ[var] = td
-        return run_gui_smoke()
+        # sanitized home for this run (AGU7 8). AGU10 task 3: the home
+        # lives under the build root's tmp/sanitized/<run id>/ (never the
+        # project, never a leftover in %TEMP%), and the shared model
+        # caches are set first so the 483 MB Whisper model is never
+        # re-downloaded per run.
+        home = _prepare_sanitized_home("gui-smoke")
+        code = run_gui_smoke()
+        if code == 0:
+            shutil.rmtree(home, ignore_errors=True)
+        return code
     if args.screenshots:
         return run_screenshots(Path(args.screenshots), args.scale)
     if args.headless_run:

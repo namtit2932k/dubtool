@@ -18,7 +18,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SCREENSHOTS = ROOT / "screenshots"
+sys.path.insert(0, str(ROOT / "src"))
+from dubtool import workspace  # noqa: E402
+
 IMAGES = ROOT / "docs" / "images"
 
 # state in the screenshot folder -> stable file name in docs/images/
@@ -35,13 +37,14 @@ MAX_BYTES = 300 * 1024
 
 
 def newest_folder() -> Path:
+    screenshots = workspace.screenshots_dir()
     candidates = sorted(
-        SCREENSHOTS.glob("update_*"),
+        screenshots.glob("update_*"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if not candidates:
-        raise SystemExit(f"no screenshots/update_* folder under {SCREENSHOTS}")
+        raise SystemExit(f"no screenshots/update_* folder under {screenshots}")
     return candidates[0]
 
 

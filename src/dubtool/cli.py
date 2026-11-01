@@ -275,10 +275,14 @@ def cmd_run(args) -> int:
     # Only the selected provider's key is required at startup.
     _require_provider(conf)
 
-    job = Job.create(video=video, jobs_root=jobs_root, source_name="input" + video.suffix)
+    job = Job.create(
+        video=video, jobs_root=jobs_root, source_name="input" + video.suffix,
+        # AGU10 5.1: no copy of the input video by default; config
+        # jobs.copy_input=true restores the historical copy.
+        copy_input=bool((conf.jobs or {}).get("copy_input", False)),
+    )
     _attach_job_log(job)
     job.ensure_dirs()
-    job.copy_input(video)
     _resolve_and_save_brief(args, job, input_video=video)
     job.save()
 
@@ -295,6 +299,17 @@ def cmd_run(args) -> int:
             mark_uncertain=bool((conf.readable or {}).get("mark_uncertain")),
         )
     print(f"Done. Output: {job.output_path} and {job.vi_audio_path}")
+    # AGU10 5.2: apply the retention level (--keep-level, default light)
+    # after a SUCCESSFUL run — a failed or cancelled run keeps everything.
+    level = str(getattr(args, "keep_level", "light") or "light").lower()
+    if level == "none":
+        from dubtool.job import prune_none
+
+        prune_none(job.dir)
+    elif level == "light":
+        from dubtool.job import prune_light
+
+        prune_light(job.dir)
     return 0
 
 
@@ -450,6 +465,11 @@ def cmd_clean(args) -> int:
 
 def cmd_doctor(args) -> int:
     _setup_logging(args.verbose)
+    if getattr(args, "disk", False):
+        from dubtool.disk_report import main as disk_main
+
+        disk_main()
+        return 0
     ok = True
     try:
         audio_utils.require_ffmpeg()
@@ -515,6 +535,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--whisper-model", default=None)
     run_p.add_argument("--out", default=None, help="copy the final dubbed video to this path")
     run_p.add_argument("--force", action="store_true", help="redo finished stages / overwrite --out")
+    run_p.add_argument("--keep-level", choices=("none", "light", "full"), default="light",
+                       help="what to keep in the job folder after success (AGU10 5.2)")
     run_p.add_argument("--mix-mode", choices=("static", "duck"), default=None)
     run_p.add_argument("--original-gain-db", type=float, default=None)
     run_p.add_argument("--dub-gain-db", type=float, default=None)
@@ -580,6 +602,8 @@ def build_parser() -> argparse.ArgumentParser:
     zip_p.set_defaults(func=cmd_review_zip)
 
     doctor_p = sub.add_parser("doctor", help="check prerequisites")
+    doctor_p.add_argument("--disk", action="store_true",
+                          help="print the read-only disk report (update 10 task 7)")
     doctor_p.set_defaults(func=cmd_doctor)
 
     clean_p = sub.add_parser(

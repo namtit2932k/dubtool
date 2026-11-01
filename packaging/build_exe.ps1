@@ -1,20 +1,42 @@
 # DubTool Windows build (AGU4 11, extended by AGENT_UPDATE_5.md section 8,
 # reworked for AGENT_UPDATE_6.md 6.4).
 # One command from the repo root:  powershell -File packaging/build_exe.ps1
-#  - .venv-build is recreated whenever the pinned requirements change (the
-#    SHA-256 of the pinned list is stored in .venv-build/.reqhash), so the
+#  - the build root is OUTSIDE the project (DUBTOOL_BUILD_ROOT or
+#    <project parent>\<project folder>_build): venv-build, build/, dist/,
+#    pip-cache, screenshots/ and the shared model caches all live there.
+#  - venv-build is recreated whenever the pinned requirements change (the
+#    SHA-256 of the pinned list is stored in venv-build/.reqhash), so the
 #    "clean build environment" claim is now real; otherwise it is reused.
 #  - PyInstaller builds into a temporary dist folder; dist/DubTool is only
 #    replaced after the build and checks succeed, so a failed build can
-#    never leave a half-built dist/.
-#  - build/ is deleted after success unless -KeepBuild is passed.
+#    never leave a half-built dist/. -ZipOnly deletes the unpacked folder
+#    after zipping.
+#  - the PyInstaller work dir is deleted after success unless -KeepBuild.
 #  - dist/ keeps only the newest DubTool folder and the newest zip.
 
-param([switch]$KeepBuild, [switch]$SkipTests)
+param([switch]$KeepBuild, [switch]$SkipTests, [switch]$ZipOnly)
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
+
+# AGU10 task 2: the build root lives OUTSIDE the project (env override,
+# default <project parent>\<project folder>_build). Nothing generated is
+# ever written into the project folder any more.
+$buildRootEnv = $env:DUBTOOL_BUILD_ROOT
+$projectDir = (Resolve-Path $root).Path
+if ([string]::IsNullOrWhiteSpace($buildRootEnv)) {
+  $buildRoot = Join-Path (Split-Path -Parent $projectDir) ((Split-Path -Leaf $projectDir) + "_build")
+} else {
+  $buildRoot = (Resolve-Path -LiteralPath $buildRootEnv).Path
+}
+if ($buildRoot -like ($projectDir + "\*") -or $buildRoot -eq $projectDir) {
+  throw "the build root must be OUTSIDE the project folder ($buildRoot)"
+}
+New-Item -ItemType Directory -Force -Path $buildRoot | Out-Null
+$logsDir = Join-Path $buildRoot "logs"
+New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
+Write-Host "build root: $buildRoot"
 
 # AGU9 5.2: the update number comes from packaging/update_number.txt and the
 # version is `1.0.<N>` — nobody has to remember it any more.
@@ -23,10 +45,15 @@ if (-not ($updateLine -match '^\d+$')) { throw "packaging/update_number.txt must
 $update = $updateLine
 $version = "1.0.$update"
 $buildId = "Update $update ($git)"
-$distDir = Join-Path $root "dist"
+# AGU10 task 2.2: one version source + one build root. The venv, the pip
+# cache, the PyInstaller work dir and dist/ all live in the build root;
+# nothing generated is ever written into the project folder again.
+$distDir = Join-Path $buildRoot "dist"
 $appDir = Join-Path $distDir "DubTool"
-$venvDir = Join-Path $root ".venv-build"
-$reqFileUnit = Join-Path $root ".venv-build-.req-units.tmp"
+$workDir = Join-Path $buildRoot "build"
+$pyCache = Join-Path $buildRoot "pip-cache"
+$venvDir = Join-Path $buildRoot "venv-build"
+$reqFileUnit = Join-Path $buildRoot ".req-units.tmp"
 
 # The pinned dependency set for the packaged app. Changing anything here
 # (including versions) invalidates .venv-build.
@@ -49,7 +76,10 @@ python-dotenv>=1.0
 python-docx>=1.1
 pydantic
 pyyaml
-PySide6>=6.6
+# AGU10 task 2: PySide6-Essentials instead of the full PySide6 wheel — the
+# app imports only QtCore/QtGui/QtWidgets/QtTest (verified by the import
+# scan, tests/test_build_env.py), none of which is an Addons module.
+PySide6-Essentials>=6.6
 keyring>=24
 colorama
 psutil
@@ -61,7 +91,15 @@ pytest-timeout
 "@.TrimEnd())
 
 try {
-    # 1. Build environment: fresh only when the pinned set changed
+    # AGU10 task 3.1: the shared model cache for every sanitized run —
+# a fresh temporary HOME must never re-download the 483 MB Whisper model.
+$hfCache = Join-Path $buildRoot "hf-cache"
+New-Item -ItemType Directory -Force -Path $hfCache | Out-Null
+$env:HF_HOME = $hfCache
+$env:HF_HUB_CACHE = (Join-Path $hfCache "hub")
+$modelsCache = Join-Path $buildRoot "models"
+New-Item -ItemType Directory -Force -Path $modelsCache | Out-Null
+$env:DUBTOOL_MODELS_DIR = $modelsCache
     Write-Host "== [1/6] build environment"
     $reqHash = ""
     $enc = [System.Text.Encoding]::UTF8
@@ -84,19 +122,19 @@ try {
     if (-not (Test-Path $venvDir)) {
         py -m venv $venvDir
         if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
-        $py = Join-Path $root ".venv-build\Scripts\python.exe"
-        & $py -m pip install --upgrade pip -q
+        $py = Join-Path $venvDir "Scripts\python.exe"
+        & $py -m pip install --upgrade pip -q --cache-dir $pyCache
         Write-Host "installing pinned runtime + build dependencies"
         $reqs = $Pinned -split "`r?`n" | Where-Object { $_ -and $_ -notmatch '^#' }   # comments are not pip requirements
-        & $py -m pip install -q @reqs
+        & $py -m pip install -q @reqs --cache-dir $pyCache
         if ($LASTEXITCODE -ne 0) { throw "dependency install failed" }
         Set-Content -Path $hashFile -Value $reqHash -NoNewline -Encoding UTF8
     }
-    $py = Join-Path $root ".venv-build\Scripts\python.exe"
+    $py = Join-Path $venvDir "Scripts\python.exe"
     # The tests import dubtool itself; the editable install is idempotent and
     # cheap when already present, so it runs on every build (a fresh or
     # reused venv) instead of only at venv creation.
-    & $py -m pip install -q -e . --no-deps
+    & $py -m pip install -q -e . --no-deps --cache-dir $pyCache
     if ($LASTEXITCODE -ne 0) { throw "editable project install failed" }
 
     # 2. Tests (offline)
@@ -110,9 +148,9 @@ try {
 
     # 3. PyInstaller into a temporary dist, promote only on success
     Write-Host "== [3/6] PyInstaller build (temp dist)"
-    $tmpDist = Join-Path $root ".venv-build-tmpdist"
+    $tmpDist = Join-Path $buildRoot "tmp-dist"
     if (Test-Path $tmpDist) { Remove-Item -Recurse -Force $tmpDist }
-    & $py -m PyInstaller packaging/dubtool.spec --noconfirm --distpath $tmpDist
+    & $py -m PyInstaller packaging/dubtool.spec --noconfirm --distpath $tmpDist --workpath $workDir
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed" }
     $tmpAppDir = Join-Path $tmpDist "DubTool"
 
@@ -150,8 +188,11 @@ try {
         throw "ffprobe.exe must not be in the build (AGU9 task 8)"
     }
 
-    # Promote: replace dist/DubTool only now.
+    # Promote: replace dist/DubTool only now. $distDir must EXIST first:
+    # Move-Item with a missing destination would RENAME tmp-dist\DubTool
+    # to dist\ and stray the whole app one level up (found in build 1.0.10).
     if (Test-Path $appDir) { Remove-Item -Recurse -Force $appDir }
+    New-Item -ItemType Directory -Force -Path $distDir | Out-Null
     if (Test-Path (Join-Path $tmpDist "DubTool")) {
         Move-Item (Join-Path $tmpDist "DubTool") $distDir
     }
@@ -162,15 +203,20 @@ try {
     $zip = Join-Path $distDir "DubTool-$version-win64.zip"
     if (Test-Path $zip) { Remove-Item $zip -Force }
     Compress-Archive -Path $appDir/* -DestinationPath $zip
+    # AGU10 task 5.6: -ZipOnly deletes the unpacked folder after zipping.
+    if ($ZipOnly) {
+        Remove-Item -Recurse -Force $appDir
+        Write-Host "-ZipOnly: unpacked DubTool/ deleted, keeping $zip"
+    }
     # Keep only the newest dist folder artifacts: remove other zips except
     # the one just written and any stray content that is not the app dir.
     Get-ChildItem $distDir |
-      Where-Object { $_.FullName -ne $appDir -and $_.FullName -ne $zip } |
+      Where-Object { $_.Name -ne "DubTool" -and $_.Name -ne (Split-Path -Leaf $zip) } |
       Remove-Item -Recurse -Force
 
     if (-not $KeepBuild) {
-        Write-Host "deleting build/ (-KeepBuild to keep it)"
-        if (Test-Path (Join-Path $root "build")) { Remove-Item -Recurse -Force (Join-Path $root "build") }
+        Write-Host "deleting the PyInstaller work dir (-KeepBuild to keep it)"
+        if (Test-Path $workDir) { Remove-Item -Recurse -Force $workDir }
     }
     Write-Host "built: $((Resolve-Path $appDir).Path)"
     Write-Host "zip:   $((Resolve-Path $zip).Path)"
@@ -184,7 +230,8 @@ try {
     Write-Host "== [7/6] screenshots from the fresh exe"
     $buildIdFull = "Update $update ($git)"
     $slug = ($buildIdFull.ToLower() -replace " ", "_") -replace "[()]", ""
-    $shotsRoot = Join-Path $root "screenshots"
+    $shotsRoot = Join-Path $buildRoot "screenshots"
+    New-Item -ItemType Directory -Force -Path $shotsRoot | Out-Null
     $shotDir = Join-Path $shotsRoot $slug
     if (Test-Path $shotDir) { Remove-Item -Recurse -Force $shotDir }
     # A GUI-subsystem exe does not block PS `&` — wait explicitly.

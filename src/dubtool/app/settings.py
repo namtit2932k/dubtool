@@ -20,7 +20,7 @@ DEFAULTS: dict = {
     "save_srt": False,
     "original_gain_db": -14.0,
     "voice": "vi-VN-HoaiMyNeural",
-    "keep_intermediate": False,
+    "keep_level": "light",       # none | light | full (AGU10 5.2)
     "default_output_dir": "",
     "jobs_dir": "",              # empty = app default
     "mode_models": {},           # {"fast": "<model id>", "accurate": "<model id>"}
@@ -30,6 +30,7 @@ DEFAULTS: dict = {
     "cpu_usage": "balanced",     # low | balanced | maximum (AGU6 4.2)
     "video_encode_preset": "veryfast",  # veryfast | faster | medium (AGU6 4.2)
     "jobs_max_days": 14,         # prune old job folders after N days (AGU6 6.7)
+    "jobs_max_total_mb": 3000,   # AGU10 5.3: trim the jobs folder below this
     "translate_priority": "balanced",  # balanced | faithful | timing (AGU8 6.3)
     "asr_punctuation_prompt": False,   # AGU9 10.4: optional punctuation initial_prompt
 }
@@ -56,6 +57,13 @@ def load(raw_path: Path | None = None) -> dict:
     if legacy_out and not str(merged.get("default_output_dir") or "").strip():
         merged["default_output_dir"] = legacy_out
     merged.pop("default_output", None)  # the old key is never written back
+    # AGU10 5.2: migrate the old intermediates boolean into keep_level.
+    # false (delete everything) -> "none"; true -> the new default
+    # "light" (keep the translation and the logs).
+    if "keep_level" not in (data or {}):
+        legacy_keep = bool(data.get("keep_intermediate"))
+        merged["keep_level"] = "light" if legacy_keep else "none"
+    merged.pop("keep_intermediate", None)  # the old key is never written back
     return merged
 
 
