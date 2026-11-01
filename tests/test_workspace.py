@@ -170,12 +170,14 @@ def test_migration_apply_on_a_fake_tree_moves_and_refuses_rewrites(
     assert (br / "logs" / "build_log_test.txt").exists()
     assert not (fake_project / "dist").exists()
 
-    # refuses to overwrite an existing non-empty destination
+    # skips a colliding item, never overwrites, and keeps processing
     (fake_project / "dist").mkdir()
     (fake_project / "dist" / "b.bin").write_bytes(b"y")
+    (br / "dist" / "newer.bin").write_bytes(b"z")  # build root owns a newer copy
     items2 = mod.plan(verbose=False)
-    with pytest.raises(RuntimeError, match="destination already exists"):
-        mod.apply_moves(items2)
+    assert mod.apply_moves(items2) == 0
+    assert (fake_project / "dist" / "b.bin").exists()      # skipped, not moved
+    assert (br / "dist" / "newer.bin").read_bytes() == b"z"  # nothing overwritten
 
 
 def test_migration_apply_refuses_outside_paths(tmp_path, monkeypatch, build_env):

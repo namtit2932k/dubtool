@@ -159,10 +159,13 @@ def apply_moves(items: list[tuple[Path, str, str, int]]) -> int:
         )
         target = workspace.build_root() / rel
         if target.exists() and any(target.iterdir()):
-            raise RuntimeError(
-                f"destination already exists and is not empty: {target} — "
-                f"nothing was overwritten (move {p} manually if you are sure)"
-            )
+            # AGU10: skip, never overwrite — the build root may already own
+            # a newer version (e.g. the fresh exe's screenshots); the
+            # remaining items must still be processed.
+            print(f"SKIP (destination not empty, nothing overwritten): "
+                  f"{p} -> {target} — move it manually if you are sure")
+            _log_line(Path(os.path.realpath(str(p))), "SKIPPED")
+            continue
         target.parent.mkdir(parents=True, exist_ok=True)
         if p.is_dir() and (p / "__pycache__").exists():
             pass  # fine, moves with the tree
