@@ -100,6 +100,19 @@ class OverloadFallbackFast(RuntimeError):
         self.from_model = from_model
 
 
+class SplitRequiredError(LLMError):
+    """AGENT_UPDATE_11.md 2.2: the chunk failed with a 504/503 or a client
+    timeout AND it is big enough to split, so translate_resilient halves
+    it immediately — the wrapper must never resend the identical big
+    request again. Raised by the shared client on the FIRST qualifying
+    failure (not after MAX_RETRIES whole-chunk resends). Carries the HTTP
+    status so callers can still classify the failure."""
+
+    def __init__(self, message: str, *, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
+
 # --- error classification by TYPE + cause chain (AGENT_UPDATE_7.md 4.3) ----
 # Update 6 searched the message text, which misfiled SDK validation errors
 # mentioning "timeout" as network failures. _walk() follows __cause__ and

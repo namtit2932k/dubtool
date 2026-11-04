@@ -1,4 +1,4 @@
-"""Stage heartbeats (Update 9 task 3.3).
+"""Stage heartbeats (Update 9 task 3.3; AGU11 2.4).
 
 The progress-details panel must never go quiet: while a stage waits on a
 retry cooldown, a rate-limited key pool or an outstanding model request it
@@ -15,6 +15,15 @@ Binding: `api.run_dub` binds one callback per stage on its worker thread
 so a nested/inside call needs no explicit stage wiring. Every callback is
 fire-and-safe: any exception inside a heartbeat is swallowed (progress
 reporting can never break a run).
+
+AGENT_UPDATE_11 2.4: the binding is now a plain module-level value instead
+of a ContextVar. The old storage kept the emitter only in the thread that
+called bind() — every ThreadPoolExecutor worker (translation chunks run
+with concurrency 3 in Accurate mode) saw the default None and the panel
+received nothing during model calls and their backoffs. That is the
+missing nine minutes of the user's 2026-11-01 run (13:26:10–13:35:18 in
+log.txt). The callback is still one per run: `bind` overwrites and
+`reset` clears it; api.run_dub resets in its finally block.
 """
 
 from __future__ import annotations
@@ -25,37 +34,33 @@ import time
 
 log = logging.getLogger("dubtool")
 
-try:
-    import contextvars
-
-    _cb = contextvars.ContextVar("dubtool-heartbeat", default=None)
-except ImportError:  # pragma: no cover
-    _cb = None
+_lock = threading.Lock()
+_cb = {"cb": None}  # plain shared storage: visible from every thread
 
 _KEY = "heartbeat_s"
 
 
 def bind(cb) -> object:
-    """Bind the per-stage emission callback; returns the reset token."""
-    if _cb is None:
-        return None
-    return _cb.set(cb)
+    """Bind the per-run emission callback (overwrites any previous one);
+    returns a reset token for `reset()`."""
+    with _lock:
+        _cb["cb"] = cb
+    return object()
 
 
 def reset(token) -> None:
-    if _cb is not None and token is not None:
-        try:
-            _cb.reset(token)
-        except ValueError:
-            pass
+    """Clear the binding (matches the docstring in heartbeat 1.0)."""
+    if token is not None:
+        with _lock:
+            _cb["cb"] = None
 
 
 def active() -> bool:
-    return _cb is not None and _cb.get() is not None
+    return _cb["cb"] is not None
 
 
 def interval() -> float:
-    """""Heartbeat period from settings (`heartbeat_s`, default 10 s)."""
+    """"Heartbeat period from settings (`heartbeat_s`, default 10 s)."""
     try:
         from dubtool.app import settings as settings_mod
 
@@ -66,9 +71,8 @@ def interval() -> float:
 
 def emit(message: str) -> None:
     """Send one progress line to the panel (never raises)."""
-    if _cb is None:
-        return
-    cb = _cb.get()
+    with _lock:
+        cb = _cb["cb"]
     if cb is None:
         return
     try:
@@ -77,19 +81,24 @@ def emit(message: str) -> None:
         log.debug("heartbeat emission failed", exc_info=True)
 
 
-def sleeping(seconds: float, text=None, cancel=None) -> None:
+def sleeping(seconds: float, text=None, cancel=None) -> float:
     """Sleep `seconds`, emitting a progress line roughly every interval.
 
     `text(remaining_s)` produces the message for the current remaining
     time (e.g. "Model đang quá tải, thử lại sau N giây"). The cancel event
-    short-circuits: the wait ends as soon as cancel is set."""
+    short-circuits: the wait ends as soon as cancel is set.
+
+    AGENT_UPDATE_11 7.1: returns the actual slept seconds so the llm/tts
+    layers can feed the stage budget with the real waiting time.
+    """
     seconds = max(0.0, float(seconds))
+    started = time.monotonic()
     if not active():
         # No panel to update (tests, CLI runs): one plain sleep so patched
         # time.sleep in tests sees the full duration exactly once.
         if cancel is None or not cancel.is_set():
             time.sleep(seconds)
-        return
+        return time.monotonic() - started
     step = max(1.0, float(interval()))
     deadline = time.monotonic() + max(0.0, float(seconds))
     emit_step = min(step, max(0.2, max(0.0, float(seconds))))
@@ -97,7 +106,7 @@ def sleeping(seconds: float, text=None, cancel=None) -> None:
     while True:
         remaining = deadline - time.monotonic()
         if not remaining > 0 or (cancel is not None and cancel.is_set()):
-            return
+            return time.monotonic() - started
         now = time.monotonic()
         if text is not None and now - last_emit >= emit_step - 1e-6:
             try:
@@ -113,7 +122,8 @@ class waiting:
     """Context manager: emits `text(elapsed_s)` lines every interval while
     the body runs (Update 9 task 3.3 — model calls, encodes without a
     percent). Nested `waiting` blocks in the same thread collapse; only
-    the outermost one emits. No-op when no callback is bound."""
+    the outermost one emits. No-op when no callback is bound. AGU11 2.4:
+    the emission thread is global across the worker threads."""
 
     _depth = 0
     _guard = threading.Lock()
@@ -128,12 +138,15 @@ class waiting:
 
     def __enter__(self):
         if not active():
-            return self
-        self._cb = _cb.get()  # captured: the timer thread has no contextvars
+            with _lock:
+                self._cb = _cb["cb"]
+        else:
+            with _lock:
+                self._cb = _cb["cb"]
         with waiting._guard:
             waiting._depth += 1
             self._outermost = waiting._depth == 1
-        if self._outermost:
+        if self._outermost and self._cb is not None:
             self._thread = threading.Thread(
                 target=self._loop, daemon=True, name="dubtool-heartbeat"
             )

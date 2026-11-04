@@ -380,6 +380,30 @@ def build_report(project: Path, budget_mb: int, build_root: Path | None = None,
     for label, size, files in outside:
         lines.append(f"  {label}  {_mb(size)}  {files} file(s)")
 
+    # AGENT_UPDATE_11 items 1/8: the read-only legacy folders and what the
+    # .freebuff folder actually is (sanitized-run homes of old verification
+    # runs, not agent session data; no verification writes there anymore).
+    lines.append("")
+    lines.append("== legacy folders and .freebuff (AGENT_UPDATE_11 items 1/8) ==")
+    try:
+        from dubtool.app.paths import legacy_jobs_dir, legacy_models_dir
+
+        legacy = legacy_jobs_dir()
+        if legacy is not None:
+            lines.append(f"  legacy in-project jobs/: {_mb(sum(f.stat().st_size for f in legacy.rglob('*') if f.is_file()))} — READ-ONLY, new jobs go to the build root")
+        legacy_models = legacy_models_dir()
+        if legacy_models is not None:
+            lines.append(f"  legacy in-project models/: {_mb(sum(f.stat().st_size for f in legacy_models.rglob('*') if f.is_file()))} — READ-ONLY, the shared cache lives in the build root")
+    except Exception:
+        pass
+    freebuff_dir = project / ".freebuff"
+    if freebuff_dir.exists():
+        try:
+            size = sum(f.stat().st_size for f in freebuff_dir.rglob("*") if f.is_file())
+        except Exception:
+            size = 0
+        lines.append(f"  .freebuff/: {_mb(size)} — sanitized-run HOME folders of past verification runs (duplicate model downloads likely). It is not agent session data; since AGENT_UPDATE_11 item 3 no verification run writes here — sanitized homes go to <build root>/tmp/ and are removed when the run ends.")
+
     lines.append("")
     lines.append("== git facts (task 6.4; cleanup commands are quoted in the report only) ==")
     for label, value in git_facts(project):

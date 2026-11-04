@@ -159,6 +159,23 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     dialog.grab().save(str(out_dir / "dialog_error.png"))
     dialog.hide()
 
+    # AGU11 dialogs (spec 5.5): the overload policy dialog and the TTS
+    # budget dialog, offscreen, without any dialog callbacks attached.
+    from dubtool.app.ui.fillers_dialog import OverloadDialog, TtsBudgetDialog
+
+    overload = OverloadDialog("gemini-2.5-flash", waited_s=240)
+    overload.show()
+    app.processEvents()
+    overload.adjustSize()
+    overload.grab().save(str(out_dir / "dialog_overload.png"))
+    overload.accept()
+    tts_budget = TtsBudgetDialog(13, "09:37", False)
+    tts_budget.show()
+    app.processEvents()
+    tts_budget.adjustSize()
+    tts_budget.grab().save(str(out_dir / "dialog_tts_budget.png"))
+    tts_budget.accept()
+
     # Tabbed Settings dialog: whole dialog + each tab. The keys tab shows
     # the AGU7 required look: 3 MASKED fake keys, one selected, one row with
     # the quota badge — via an in-memory fake store, nothing real is saved.
@@ -364,7 +381,8 @@ def run_gui_smoke() -> int:
 
     def fake_run_dub(video, outdir, options, secrets=None, progress=None,
                      cancel=None, jobs_dir=None, force=False, extra_overrides=None,
-                     overload_dialog=None, fillers_dialog=None):
+                     overload_dialog=None, fillers_dialog=None,
+                     tts_budget_dialog=None):  # AGU11 3.4 dialog travels too
         run_calls.append(options.mode)
         for name in ("s1_extract_audio", "s2_transcribe", "s3_translate",
                      "s4_tts", "s5_fit_duration", "s6_mix", "s7_subtitles"):
@@ -678,8 +696,23 @@ def main(argv: list[str] | None = None) -> int:
         # caches are set first so the 483 MB Whisper model is never
         # re-downloaded per run.
         home = _prepare_sanitized_home("gui-smoke")
-        code = run_gui_smoke()
-        if code == 0:
+        code = 1
+        try:
+            code = run_gui_smoke()
+        finally:
+            # AGENT_UPDATE_11 item 3: a sanitized home is removed when the
+            # run ends — always, success or failure — but the run's app
+            # logs are copied to the build root's logs/ first.
+            if code != 0:
+                import shutil as _sh
+
+                app_logs = Path(home) / "DubTool" / "logs"
+                if app_logs.is_dir():
+                    from dubtool import workspace
+
+                    keep = workspace.logs_dir() / "sanitized-failures"
+                    keep.mkdir(parents=True, exist_ok=True)
+                    _sh.copytree(app_logs, keep / home.name, dirs_exist_ok=True)
             shutil.rmtree(home, ignore_errors=True)
         return code
     if args.screenshots:

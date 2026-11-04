@@ -1,4 +1,4 @@
-"""Backup-voice support (AGENT_UPDATE_8.md 2.3).
+"""Backup-voice support (AGENT_UPDATE_8.md 2.3; AGENT_UPDATE_11 3.5).
 
 `BackupTTS(primary, secondary)` wraps the existing TTSProvider interface: it
 tries the primary provider first and only falls back to `secondary` when the
@@ -6,14 +6,13 @@ primary raises TTSFailure. Every fallback use must be counted by the caller
 (count_fallback) and reported in the run summary — a different voice on a few
 segments is only acceptable because the alternative is a failed job.
 
-Current evaluation (see REPORT_UPDATE_8.md):
-- windows_sapi: NOT implemented — this machine has no Vietnamese SAPI voice
-  (only David/Zira en-US and Hedda de-DE are installed), so per the update
-  spec the provider is reported and skipped.
-- piper: implemented behind `PiperTTSProvider`, which is only usable when the
-  `piper` package and a configured voice model are present (config
-  tts.piper_voice); nothing is bundled without license verification and the
-  user's explicit choice (AGU8 2.3).
+Backup options (AGU11 3.5 — the Settings UI lists what actually exists):
+- windows_sapi: the voices installed for .NET System.Speech, driven through
+  PowerShell (this machine has only en-US/de-DE voices, so the run reports
+  precisely what is missing instead of pretending).
+- piper: `PiperTTSProvider`, only usable when the `piper` package and a
+  configured voice model are present (config tts.piper_voice); nothing is
+  bundled without license verification and the user's explicit choice.
 """
 
 from __future__ import annotations
@@ -94,6 +93,111 @@ class PiperTTSProvider:
         except Exception as exc:
             raise TTSFailure(f"piper synthesis failed: {exc}") from exc
 
+    @staticmethod
+    def detect_piper_voices() -> list[str]:
+        """AGU11 3.5 scan for installed .onnx voice models at the common
+        locations (no download, no assumed licence)."""
+        import os
+
+        roots: list[Path] = []
+        for env in ("LOCALAPPDATA", "APPDATA"):
+            base = os.environ.get(env)
+            if base:
+                roots.append(Path(base) / "piper")
+                roots.append(Path(base) / "piper-tts")
+        roots.append(Path.cwd() / "piper")
+        found: set[str] = set()
+        for root in roots:
+            if not root.is_dir():
+                continue
+            for path in root.rglob("*.onnx"):
+                if path.is_file():
+                    found.add(str(path))
+        return sorted(found)
+
+
+def _powershell(script: str) -> str:
+    from dubtool import proc
+
+    out = proc.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+        timeout=60, capture=True,
+    )
+    if getattr(out, "returncode", 1) != 0:
+        raise TTSFailure(f"Windows SAPI helper failed: {(out.stderr or '').strip()[:200]}")
+    return out.stdout or ""
+
+
+def detect_sapi_voices() -> list[str]:
+    """Names of the voices installed for Windows SAPI (.NET System.Speech)."""
+    try:
+        lines = _powershell(
+            "Add-Type -AssemblyName System.Speech; "
+            "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+            "$s.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Name }"
+        ).splitlines()
+        return [line.strip() for line in lines if line.strip()]
+    except Exception:
+        return []
+
+
+class WindowsSapiProvider:
+    """Local Windows SAPI voice through PowerShell (System.Speech).
+
+    AGU11 3.5: the backup voice is a real option on machines that have a
+    matching voice; the Settings UI lists only what exists."""
+
+    name = "windows_sapi"
+    rate_limit_s = 0.05
+
+    def __init__(self, voice_name: str = ""):
+        self.voice_name = str(voice_name or "")
+        installed = detect_sapi_voices()
+        if not installed:
+            raise TTSFailure(
+                "the Windows SAPI fallback is not available: no voices are "
+                "installed (Settings → Time & Language → Speech)"
+            )
+        if self.voice_name and self.voice_name not in installed:
+            raise TTSFailure(
+                f"Windows SAPI voice {self.voice_name!r} is not installed; "
+                f"installed: {', '.join(installed[:6])}"
+            )
+
+    def synthesize(self, text, voice, out_path) -> None:
+        out_path = Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        if out_path.suffix.lower() == ".wav":
+            target, convert = out_path, False
+        else:
+            target, convert = out_path.with_suffix(".wav"), True
+        select = f"$s.SelectVoice('{self.voice_name}'); " if self.voice_name else ""
+        spoken = text.replace("'", "")
+        _powershell(
+            "Add-Type -AssemblyName System.Speech; "
+            "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+            + select
+            + f"$s.SetOutputToWaveFile('{target.as_posix()}'); $s.Speak('{spoken}')"
+        )
+        if not target.exists() or target.stat().st_size < 400:
+            raise TTSFailure("the Windows SAPI backup produced no audio")
+        if convert:
+            _wav_to_mp3(target, out_path)
+
+
+def _wav_to_mp3(src: Path, dst: Path) -> None:
+    """Bundle-safe wav to mp3 for the SAPI backup (bundled ffmpeg)."""
+    from dubtool import audio_utils, proc
+
+    result = proc.run(
+        [audio_utils.ffmpeg_bin(), "-y", "-loglevel", "error",
+         "-i", str(src), "-q:a", "4", str(dst)],
+        capture=True,
+    )
+    if result.returncode != 0:
+        raise TTSFailure(f"wav-to-mp3 conversion failed: {result.returncode}")
+    src.unlink(missing_ok=True)
+
 
 def build_backup(config) -> TTSProvider | None:
     """The configured backup provider (config tts.fallback), or None when it
@@ -103,14 +207,8 @@ def build_backup(config) -> TTSProvider | None:
         return None
     try:
         if mode == "windows_sapi":
-            # Evaluation found no Vietnamese SAPI voice on this machine
-            # (David/Zira en-US, Hedda de-DE only) — AGU8 2.3 says do not
-            # implement it then; keep the message precise for any machine.
-            raise TTSFailure(
-                "the Windows SAPI fallback is not available: no Vietnamese "
-                "(vi-VN) voice is installed on this machine (Settings → "
-                "Time & Language → Speech can add one)"
-            )
+            tts_cfg = getattr(config, "tts", {}) or {}
+            return WindowsSapiProvider(str(tts_cfg.get("sapi_voice", "") or ""))
         if mode == "piper":
             voice_path = str((getattr(config, "tts", {}) or {}).get("piper_voice", "") or "")
             return PiperTTSProvider(voice_path)

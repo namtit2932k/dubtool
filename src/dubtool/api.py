@@ -263,13 +263,16 @@ def run_dub(
     interactive: bool = True,
     overload_dialog: Callable[[], str] | None = None,
     fillers_dialog: Callable[[list], dict | None] | None = None,
+    tts_budget_dialog: Callable[[int, str, bool], str] | None = None,
 ) -> DubResult:
     """Run the full pipeline on one video. Never raises; returns a DubResult.
 
     `interactive` marks an app-driven run (the overload policy may ask the
     user); `overload_dialog` is the AGU8 3.4 callback answering 'wait' or
     'fallback_fast' when Gemini is overloaded, called only when the policy
-    is 'ask'."""
+    is 'ask'. `tts_budget_dialog` is the AGU11 3.4 callback answering
+    'wait10', 'fallback' or 'stop' when voice generation exceeds its
+    wait budget (called only when tts.budget_policy is 'ask')."""
     from dubtool import heartbeat
 
     budget: Any = None  # bound below, inside the try (exception paths read it)
@@ -323,6 +326,17 @@ def run_dub(
         prio = str(user_settings.get("translate_priority", "balanced") or "balanced").lower()
         if prio in ("faithful", "timing"):
             overrides["translate"]["priority"] = prio
+        # AGU11 3.5: the Settings → General backup voice rides into the TTS
+        # config (windows_sapi with its voice name, or a piper model path).
+        _backup = str(user_settings.get("tts_backup_voice", "") or "")
+        if _backup.startswith("windows_sapi:"):
+            overrides["tts"] = {
+                "fallback": "windows_sapi", "sapi_voice": _backup.split(":", 1)[1],
+            }
+        elif _backup.startswith("piper:"):
+            overrides["tts"] = {
+                "fallback": "piper", "piper_voice": _backup.split(":", 1)[1],
+            }
         # AGU9 10.4: optional punctuation hint for stage 2 — present, not
         # decided; the default stays off (Update 8 measured 41.0% -> 52.5%
         # sentence-final segments on test2 with no extra time).
@@ -350,6 +364,8 @@ def run_dub(
             # and the video identity for per-video choice storage.
             "fillers_dialog": fillers_dialog,
             "fillers_video": video,
+            # AGU11: the TTS budget dialog (ask / fallback / stop).
+            "tts_budget_dialog": tts_budget_dialog,
         }
 
         # Config lives next to the shipped files, so behavior is identical
@@ -375,6 +391,7 @@ def run_dub(
         cfg.llm_overload_dialog = llm_volatility["llm_overload_dialog"]
         cfg.fillers_dialog = llm_volatility["fillers_dialog"]
         cfg.fillers_video = llm_volatility["fillers_video"]
+        cfg.tts_budget_dialog = llm_volatility["tts_budget_dialog"]
         _saved = _user_settings()
         _preset = str(_saved.get("video_encode_preset", "")) or None
         if _preset in ("veryfast", "faster", "medium"):

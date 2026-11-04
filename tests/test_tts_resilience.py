@@ -75,6 +75,15 @@ class FakeConfig:
             "retry_rounds": 3,
             "round_cooldown_s": [0.0, 0.0, 0.0],
             "breaker_consecutive": 3,
+            # AGU11 ladder knobs (config-driven, zero real sleeping here)
+            "attempt_delays_s": [0.0, 0.0],
+            "breaker_pause_s": 0.0,
+            "unit_budget_s": 10.0,
+            "max_chars_per_request": 90,
+            "join_silence_s": 0.0,
+            "request_timeout_s": 45.0,
+            "alt_voice": "vi-TEST-Alt",
+            "budget_policy": "ask",
             "fallback": "none",
             "piper_voice": "",
             **tts_extra,
@@ -214,9 +223,11 @@ def test_circuit_breaker_pauses_after_consecutive_failures(tmp_path, monkeypatch
 
     with pytest.raises(globals()["TTSUnavailableError"]):
         s4.run(job, cfg)
-    # Breaker: 3 attempts in the first pass, then the pass stops (6 segments
-    # would otherwise each be attempted in 3 rounds = up to 18 calls).
-    assert provider.calls == 3
+    # AGU11 counting: the ladder makes up to 4 bounded steps per exhausted
+    # segment; after breaker_consecutive exhausted segments the pass pauses
+    # (bounded) and continues with the remaining segments — it never hangs.
+    # retry_rounds=0 -> a second pass never runs. 6 segments x 4 steps = 24.
+    assert provider.calls == 24
 
 
 def test_cancel_during_cooldown(tmp_path, monkeypatch):
@@ -270,10 +281,10 @@ def test_fallback_voice_used_and_counted(tmp_path, monkeypatch):
     entries = json.loads(job.translated_path.read_text(encoding="utf-8"))
     assert all(e["tts_duration"] is not None for e in entries)
     assert CountingBackup.uses == 4
-    # 3 rounds x 3 attempts through the breaker (segments 0-2) + 4 primary
-    # tries inside the backup pass (the wrapper always retries the primary
-    # once before falling back).
-    assert primary.calls == 12 + 4
+    # AGU11 counting: first pass 4 segments x 4 ladder steps = 16; three
+    # retry rounds revisit all 4 segments each = 48; inside the backup pass
+    # the wrapper retries the primary once per segment = 4. Total 68.
+    assert primary.calls == 16 + 48 + 4
 
 
 def test_failure_log_fields_present_no_key(tmp_path, monkeypatch):

@@ -1,118 +1,89 @@
 # REVIEW_NOTES.md
 
-## Session: AGENT_UPDATE_10.md work — verified facts only
+## Session: AGENT_UPDATE_11.md work — verified facts only
 
 Working rule (same as previous updates): every section below contains
-either a **measured result** from this session (the command or probe
-that produced it is stated in it) or an explicit "not measured /
-reason". Full rows live in `REPORT_UPDATE_10.md`; this file is the
-reviewer's cheat sheet.
+either a **measured result** from this session (with the command or probe
+that produced it) or an explicit "not measured / reason". Full rows live
+in `REPORT_UPDATE_11.md`; this file is the reviewer's cheat sheet.
 
-## 1. What exists in this repo for AGU10 (verified present)
+## 1. What this update adds (verified present in code)
 
-- Build root: `src/dubtool/workspace.py` —
-  `DUBTOOL_BUILD_ROOT` env or default `<project parent>_build`; a
-  build root inside the project folder raises. Getters:
-  `build_root()`, `venv_dir()`, `dist_dir()`, `vendor_dir()`,
-  `jobs_dir()`, `models_dir()`, `hf_cache()`, `sample_output()`,
-  `screenshots_dir()`, `logs_dir()`, `tmp_dir()`.
-- Migration: `scripts/migrate_workspace.py` (dry run by default;
-  `--apply` moves dist/jobs/vendor/models/.venv-build/logs and
-  recreates the two venvs at the build root).
-- Shared caches from source runs: `app/paths.py` `models_dir()` /
-  `jobs_dir()` prefer `<build root>/models` and `<build root>/jobs`
-  when they exist (fallback to the legacy in-project folders until the
-  user migrates).
-- Retention levels: `keep_level: none|light|full` in
-  `app/settings.py` DEFAULTS + legacy `keep_intermediate` migration
-  (false → none, true → light); applied in `api.py` `run_dub()`
-  prune path. Old boolean setting is never written back.
-- Git guards: `scripts/git_guard.py` (staged file > 5 MB blocked at
-  commit; `ALLOW_BIG_FILE=1` override; pre-push 50 MB gate),
-  `scripts/install_git_hooks.py`, tested in `tests/test_git_guard.py`.
-- Disk report: `scripts/disk_report.py` (+ reusable
-  `src/dubtool/disk_report.py`) — per-folder counts, duplicate-DB
-  check, undocumented-entry check against `docs/WORKSPACE.md`, and
-  the "Disk budget" line; never reads `.env*` contents.
-- `docs/WORKSPACE.md`: every generated folder, what creates it, what
-  needs it, how to regenerate, safe-to-delete.
-- `mix_original_with_dub()` now references the ORIGINAL VIDEO by the
-  absolute path the stage passes it (no-copy default), fixing the
-  `jobs.copy_input: false` regression found during verification.
+- **LLM right-sizing:** chunking by `llm.chunk_max_chars` (1200) and
+  `llm.chunk_max_units` (8) for both modes (`stages/_units_runner.py`, new
+  file); translate concurrency (3/Accurate) unchanged; latency-adaptive
+  chunk size (halve after a request took > 60% of the timeout, floor 400;
+  +25% after 3 fast requests, ceiling = default).
+- **Real split:** `stages/s3_translate.py` `translate_resilient` now splits
+  into two halves after the FIRST 504/503/client-timeout of a chunkable
+  chunk (server 504s qualify — verified); `split_min_units` 2 /
+  `split_min_chars` 300; an identical large request is resent at most once.
+- **Overload policy fires and repeats:** `_units_runner.py` counts
+  consecutive 503/504 per model; after `llm.overload_after` (2) the GUI
+  dialog is consulted again after each further `overload_after` failures
+  while "wait" was chosen; `llm.stage_budget_s` (600) forces the policy and
+  logs it; headless/CLI applies `fallback_fast` without a dialog.
+- **Visibility:** `dubtool/heartbeat.py` module-global callback replaces
+  the ContextVar (which previously never reached worker threads — that was
+  the nine absent minutes); `sleeping()` returns the slept seconds so
+  ladder budgets exclude waits; every wait emits an event bound ≤ `ui.
+  quiet_after_s`.
+- **TTS hard timeout:** `EdgeTTSProvider` wraps the whole request in
+  `asyncio.wait_for(tts.request_timeout_s=45)`.
+- **Repair ladder:** `stages/s4_tts.py` `_Ladder` — direct →
+  sentence-split (`tts.max_chars_per_request` 90, ffmpeg concat, 80 ms
+  silence) → alternate voice (`tts.alt_voice` vi-VN-NamMinhNeural) →
+  alt+split; `attempt_delays_s [2,5]`, `unit_budget_s` 60, deferred rounds
+  with `round_cooldown_s [30,60,120]`, breaker pause = round cooldown.
+- **Budget dialog + backup voice:** `TtsBudgetDialog` (ask/fallback/stop;
+  asked again after each budget period), headless auto-rule:
+  fallback if a backup voice is configured else stop (clips kept,
+  `tts_unavailable`); Settings → General "Giọng dự phòng" dropdown
+  (Windows SAPI / Piper detection) + "Nghe thử" 10-s sample via
+  `os.startfile`; disabled while a run is active.
+- **Progress text:** stage row "Tạo giọng đọc — N/M xong, K đang thử lại
+  (vòng r/R)"; details panel names failing ids and the ladder step.
 
-## 2. Aggregate offline suite (final state, one run)
+## 2. Verified before/after (this session's measurements)
 
-`python -m pytest tests -q --ignore=tests/test_screenshots.py` →
-**492 passed, 2 skipped in 66.22 s**. Skips are the environmental
-symlink-privilege skips, not coverage skips.
-
-## 3. Build in dist (identity verified this session)
-
-`<build root>/dist/DubTool/DubTool.exe` — version **1.0.10**, build id
-`Update 10 (ad373d8)`; zip `DubTool-1.0.10-win64.zip` = 187 MB
-(sha256 `fe98c8cf…d74721`, full in the report). Unpacked dist 470 MB.
-Fresh-exe gates on the sanitized environment: `--selftest overall:
-PASS`; sanitized headless runs code=ok. Screenshot set
-`<build root>/screenshots/update_10_ad373d8/` + `INDEX.txt`.
-
-## 4. Retention levels — real test2 runs (the exe, sanitized APPDATA)
-
-| level | job folder after run | kept |
+| what | command / probe | result |
 | --- | --- | --- |
-| none | **16 KB** | pipeline.log + state.json only |
-| light | **133 KB** | all JSONs + logs, clips/tts/fitted deleted |
-| full | **229.7 MB** | everything incl. fitted (10.8 MB), tts (1.2 MB), output.nosubs.mp4 (78.8 MB) |
+| old code replays the observed multi-hour run | `scripts/replay_run.py` BEFORE (fails on the pre-AGU11 stages) | 6 identical 16-unit sends, backoffs 10/30/90 s, whole-chunk restart, t+1340 s ≈ 22 min, zero dialogs (see REPORT §1) |
+| new code replays the same faults | `scripts/replay_run.py` AFTER | split after the first 504 (16→8→4…), dialog at the 2nd consecutive error, stage total t+548 s < 600 s budget |
+| aggregate suite | `pytest tests -q` | **508 passed, 6 skipped**, single run, NO `--ignore` |
+| TTS experiment | `scripts/tts_experiment.py` → `logs/tts_experiment.log` | variant D (alt voice + split pieces) 42/42 on both groups; split verdicts show rate-based refusals (pass in one trial, refuse in another) |
+| exe checks (final build) | `--selftest` / `--layout-check` / `--screenshots` / `--gui-smoke` | all exit 0; 25 screenshots incl. the two new dialog shots; gui-smoke PASS 9 steps with the sanitized home removed at exit |
+| fault on exe | `--headless-run … --fault tts:refuse-ids=0,1,2` | honest `tts_unavailable` (segments 2/5/6/7/23; 29 clips kept; resume offered), exit 1 |
+| retention (fresh, exe, sanitized) | `scripts/run_retention.sh` → `logs/rt_none|rt_light|rt_full.log` + `logs/run_retention_console.log` | all three levels end `tts_unavailable` (26/22/19 clips kept), homes removed (`leftover rt_ dirs: 0`); second fresh `light` run kept 31 clips, still refused 4 segments |
+| disk report notices | `scripts/disk_report.py` | `.freebuff` = sanitized-run homes (937.5 MB here), legacy in-project folders read-only |
+| number of jobs/models writes | `app/paths.py` + tests | always build root; legacy dirs read-only |
 
-`jobs.copy_input: false` (new default): the job folder has no video
-copy — the table above. With `copy_input: true` the folder additionally
-holds the input video copy (test2.mp4 = 79.0 MB), i.e. full+copy ≈
-308.7 MB. `mix_original_with_dub` reads the input by its absolute path
-(regression test `tests/test_mix_input_ref.py`).
+## 3. Not measured in this session (and why)
 
-## 5. Verification evidence (all run this session)
+- Real Fast/Accurate dub with sound and a per-stage seconds table on a
+  healthy network (today's network refused enough edge-tts requests that
+  every real run ended `tts_unavailable`; no user quota was spent on a
+  probably-same-day refusal).
+- LLM fault kinds on the exe (`llm:504-first=2`, `llm:503-first=3`): the
+  real model calls fail before the injection point on today's network —
+  covered by the replay + unit tests instead.
+- Screenshots of the "đang thử lại" stage row and the mid-wait details
+  panel: a GUI run with live TTS fights cannot be reproduced offscreen on
+  this network; the two new dialogs ARE captured.
 
-- `scripts/migrate_workspace.py` dry run: **3.5 GB** would move out of
-  the project (dist 657 MB, jobs 918.4 MB, .venv-build 963.7 MB,
-  sample\output 608.5 MB, vendor 244.6 MB, models 86.8 MB, logs…).
-- `scripts/disk_report.py`: project 4930.2 MB, build root 2126.2 MB;
-  budget line + top-10 in the report.
-- Clone check: `git clone --no-hardlinks` → 2.7 MB, 194 files, **no
-  file > 5 MB**.
-- Pre-commit hook test: staged a 6 MB text file → `pre-commit: BLOCK -
-  larger than 5 MB: tmp_hooktest.txt (5.72 MB)`, commit refused;
-  unstaged and deleted.
-- Quiet key scan over `<build root>` (dist, logs, tmp): only
-  sha256/base64 strings, crypto binaries, and the `fixture-fake-key`
-  test constants. No real key found.
-- Shared caches proof: the three sanitized runs used
-  `HF_HOME=<build root>/hf-cache` + `DUBTOOL_MODELS_DIR=<build root>/
-  models-cache`; no model re-download in any run (run 1 downloaded
-  nothing; the Whisper small model came from the shared cache).
+## 4. Carry-over items (Task 3) — status per item
 
-## 6. Bugs found during verification (fixed this session)
+1 build-root jobs/models always ✓ (notice + doctor) — 2 sample_output ✓ —
+3 sanitized homes removed + run_retention rebuilt outside `build/` ✓ —
+4 review zip includes `docs/` + all REPORT_UPDATE_*.md ✓ — 5 aggregate
+suite without `--ignore` ✓ (6 skips listed in the report) — 6 by-group
+package table ✓ (first-ever baseline; before/after vs AGU10 not possible —
+recorded in the report) — 7 GitHub line inside the report ✓ + user
+questions (repo visibility; the `agent/AGENT_UPDATE_*.md` files quote
+phrases from the test video) — 8 `.freebuff` description corrected
+("sanitized-run HOME folders of past verification runs", never written
+again) ✓ — 9 fresh `light` measurement (table numbers remain AGU10's
+because this network cannot finish the runs; both runs honestly recorded)
+✓.
 
-1. `run_headless` ignored the saved `keep_level` (always the default
-   `light`), so the first `none`/`full` verification runs measured the
-   wrong level. Fixed in `app/main.py`: the settings file decides the
-   level, as the GUI does. The `none`/`full` rows above are from the
-   fixed exe; the `light` row is from the (default-equal) earlier run.
-2. With `jobs.copy_input: false`, stage 6's ffmpeg opened the input by
-   bare filename (worked only when the video was copied into the job
-   folder). Fixed in `audio_utils.py` + regression test.
-
-## 7. Sizes before → after (build environment)
-
-| item | before | after |
-| --- | --- | --- |
-| project folder | 4930.2 MB | unchanged (user must run migration) |
-| build venv | 963.7 MB (`.venv-build` in project) | **634 MB** (`<build root>/venv-build`) |
-| dist/DubTool | 657 MB (project) | **470 MB** (`<build root>/dist`) |
-| zip | 187 MB | 187 MB |
-| build-root hf-cache | — | 464 MB (shared, once) |
-| build-root tmp after runs | — | 544 MB (sanitized run homes; safe to delete) |
-
-## 8. What is NOT in this file
-
-Full provenance and the GitHub line live in `REPORT_UPDATE_10.md`.
-Not verified (cannot be automated): how the app feels on the user's
-display, dub sound, translation quality, antivirus behavior.
+## 5. Zip file list (appended by scripts/make_review_zip.py)

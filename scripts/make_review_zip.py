@@ -41,8 +41,10 @@ ALLOWLIST_TOP_LEVEL_FILES = [
     "README_BUILD.md",
     "REVIEW_NOTES.md",
 ]
-ALLOWLIST_DIRS = ["src", "tests", "scripts", "packaging",
-                  "eval"]  # AGU9 10.3: the eval-translation file travels too
+# AGU11 item 4: docs/ travels in the review zip too (WORKSPACE.md,
+# docs/images/ - the README's screenshots - so the images can be checked).
+ALLOWLIST_DIRS = ["src", "tests", "scripts", "packaging", "eval",
+                  "docs"]  # AGU9 10.3: the eval-translation file travels too
 
 SOURCE_SUFFIXES = (".py", ".yaml", ".yml", ".md", ".toml", ".json", ".cfg", ".txt")
 NEVER_SUFFIXES = (".mp4", ".mov", ".mkv", ".wav", ".mp3", ".m4a", ".zip", ".pt", ".model")
@@ -133,11 +135,11 @@ def candidate_files(root: Path) -> list[Path]:
         p = root / name
         if p.exists():
             candidates.append(p)
-    # AGU8 task 7.4: the latest REPORT_UPDATE_*.md travels in the review zip
-    # (REVIEW_NOTES.md is already allowlisted above).
+    # AGU8 task 7.4: the REPORT_UPDATE_*.md files travel in the review zip
+    # (REVIEW_NOTES.md is already allowlisted above). AGU11 item 4: all of
+    # them, not only the latest.
     reports = sorted(root.glob("REPORT_UPDATE_*.md"), key=lambda p: p.stat().st_mtime)
-    if reports:
-        candidates.append(reports[-1])
+    candidates.extend(reports)
     for dirname in ALLOWLIST_DIRS:
         base = root / dirname
         if not base.exists():

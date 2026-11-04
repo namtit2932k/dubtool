@@ -47,12 +47,21 @@ SCHEDULE_DEFAULTS: dict = {
 # AGENT_UPDATE_8 task 1: TTS resilience.
 TTS_DEFAULTS: dict = {
     "retry_rounds": 3,
-    "round_cooldown_s": [60, 180, 300],
+    "round_cooldown_s": [30, 60, 120],  # AGU11 3.3: short cooldowns
     "breaker_consecutive": 3,
+    "request_timeout_s": 45,     # AGU11 3.1: hard cap per edge-tts request
+    "attempt_delays_s": [2, 5],  # AGU11 3.3: waits between ladder steps
+    "max_chars_per_request": 90, # AGU11 3.3: ladder step 2 sentence chunking
+    "alt_voice": "vi-VN-NamMinhNeural",  # AGU11 3.3 ladder step 3
+    "join_silence_s": 0.08,      # AGU11 3.3: silence between joined parts
+    "unit_budget_s": 60,         # AGU11 3.3: minutes a segment may burn
+    "stage_budget_s": 600,       # AGU11 3.4: failing-wait budget for the stage
+    "budget_policy": "ask",      # ask | fallback | stop
     "pacing_delay_s": 0.3,
     "max_delay_s": 2.0,
     "max_cooldown_s": 120.0,
     "fallback": "none",  # none | windows_sapi | piper
+    "sapi_voice": "",    # AGU11 3.5: the detected Windows voice name
     "piper_voice": "",
 }
 
@@ -135,9 +144,14 @@ LLM_DEFAULTS: dict = {
     # AGU8 task 2: retry redesign knobs.
     "server_error_backoff_s": [10, 30, 90],
     "split_on_timeout": True,
-    "split_min_units": 4,
+    "split_min_units": 2,     # AGU11 2.2: default halves floor (was 4)
+    "split_min_chars": 300,   # AGU11 2.2: halves also stay above this volume
+    # AGU11 2.1: right-sized requests (chars first, then unit count).
+    "chunk_max_chars": 1200,
+    "chunk_max_units": 8,
     "overload_after": 2,
     "overload_policy": "ask",   # ask | fallback_fast | wait (CLI uses fallback_fast)
+    "stage_budget_s": 600,      # AGU11 2.3: waiting budget per stage
     "request_timeout_s": 180,   # Accurate-mode per-request cap
     "request_timeout_s_fast": 90,
 }

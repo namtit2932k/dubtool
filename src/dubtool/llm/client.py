@@ -1,16 +1,30 @@
 """Shared wrapper around any LLMProvider used by the pipeline stages.
 
-Responsibilities (AGENT_UPDATE.md 3.1):
+Responsibilities (AGENT_UPDATE.md 3.1; AGENT_UPDATE_11.md task 2):
 - retries (max 3) for transient errors with exponential backoff
 - rate-limit handling: waits, honors retry hints, then fails with a clear
   provider-naming error
 - parsing/validation with the error appended to the prompt on retry
 - logs provider name, model, and token counts
+
+AGENT_UPDATE_11 2.2: a 504/503/client-timeout on a split-eligible chunk
+raises SplitRequiredError on the FIRST qualifying failure, so
+translate_resilient halves the chunk immediately instead of resending the
+identical big request up to MAX_RETRIES times (the user's 2026-11-01 run
+sent the same 3,827-character request at least six times).
+
+AGENT_UPDATE_11 2.3: the overload policy ('ask') is consulted AGAIN after
+every further `overload_after` consecutive 503/504 when the user chose
+'wait' (and when `llm.stage_budget_s` of waiting is used up), the model
+name and how long it has been trying ride in the callback info, and all
+clients of one stage share a stage-wait accumulator through
+options["stage_wait_state"].
 """
 
 from __future__ import annotations
 
 import logging
+import inspect
 import time
 from typing import Callable
 
@@ -25,6 +39,7 @@ from dubtool.llm.base import (
     RateLimitExhausted,
     ServerErrorLLMError,
     OverloadFallbackFast,
+    SplitRequiredError,
     TimeoutLLMError,
 )
 from dubtool import heartbeat
@@ -44,6 +59,7 @@ MAX_VALIDATION_ATTEMPTS = 2   # AGU8 3.1: reply-invalid (parse) attempts only
 BACKOFF_BASE_S = 2.0
 RATE_LIMIT_BASE_WAIT_S = 30.0
 DEFAULT_SERVER_BACKOFF_S = [10.0, 30.0, 90.0]
+DEFAULT_STAGE_BUDGET_S = 600.0
 
 
 def _waiting_text(elapsed: int) -> str:
@@ -66,34 +82,74 @@ def _backoff_text(seconds: int) -> str:
         return f"model busy — retrying in {seconds} s"
 
 
+def _panel(key: str, **kwargs) -> None:
+    """One immediate progress line resolved in the active UI language
+    (AGENT_UPDATE_11 2.4 — every 503/504/backoff is visible from the
+    moment it happens, never only in pipeline.log)."""
+    try:
+        from dubtool.app import i18n
+
+        heartbeat.emit(i18n.tr(key, **kwargs))
+    except Exception:
+        pass
+
+
 class LLMClient:
     def __init__(self, provider: LLMProvider, on_rate_limit: Callable[[float], None] | None = None,
                  cancel=None, options: dict | None = None,
-                 on_overload: Callable[[], str] | None = None):
+                 on_overload: Callable[..., str] | None = None):
         """on_rate_limit(seconds) is called ONLY when every key is limited and
         the wrapper has to wait (AGENT_UPDATE_5.md 2.4): a caller running
         chunks in parallel can back off and reduce concurrency. A successful
         key switch never triggers it. `cancel` reaches the pool's waits via
         provider.wait_for_key().
 
-        `options` carries the AGU8 task-2 retry knobs read from config llm:
-        server_error_backoff_s, overload_after, split_on_timeout,
-        split_min_units. `on_overload` is the AGU8 3.4 overload-policy
-        callback: returns "wait" (keep backing off), "fallback_fast" (README
-        raises OverloadFallbackFast itself), or raises (e.g. StageCancelled).
+        `options` carries the AGU8/AGU11 retry knobs read from config llm:
+        server_error_backoff_s, overload_after, overload_policy,
+        split_on_timeout, split_min_units, stage_budget_s and the shared
+        "stage_wait_state" accumulator. `on_overload` is the
+        AGU8 3.4 / AGU11 2.3 overload-policy callback: it receives an info
+        dict (model, consecutive failures, waited seconds) and returns
+        "wait" (keep backing off), "fallback_fast" (the caller raises
+        OverloadFallbackFast itself), or raises (e.g. StageCancelled).
         """
         self.provider = provider
         self.on_rate_limit = on_rate_limit
         self.cancel = cancel
         self.options = options or {}
         self.on_overload = on_overload
+        # AGU11 2.3: the callback may take the info dict or nothing (tests,
+        # simple policies) — decide once from its signature.
+        self._on_overload_takes_info = False
+        if callable(on_overload):
+            try:
+                params = inspect.signature(on_overload).parameters
+                self._on_overload_takes_info = any(
+                    p.kind in (p.POSITIONAL_OR_KEYWORD, p.POSITIONAL_ONLY, p.KEYWORD_ONLY)
+                    or p.kind is p.VAR_POSITIONAL
+                    for p in params.values()
+                )
+            except (TypeError, ValueError):
+                self._on_overload_takes_info = False
         # Key positions that failed — keypool logging only, never values.
         self.key_switches = 0
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.total_calls = 0
         self.consecutive_server_errors = 0
-        self.overload_asked = False  # 'ask' consults on_overload only once
+        # AGU11 2.3: consecutive failures since the last policy consult —
+        # 'ask' is asked again every time this reaches overload_after, not
+        # once per run as before.
+        self.consecutive_since_consult = 0
+        # AGU11 2.2: the payload count the stage sets per chunk (split
+        # eligibility); None = unknown/never split.
+        self.request_units: int | None = None
+        # AGU11 2.3: one shared wait accumulator per stage (passed via
+        # options so the Fast-model rebuild shares the same stage budget).
+        self.stage_wait = self.options.get("stage_wait_state") or {"waited_s": 0.0}
+        self.stage_budget_s = float(
+            self.options.get("stage_budget_s", DEFAULT_STAGE_BUDGET_S)
+        )
         # Labels from the stage ("translate chunk 3/4, 20 units, 2431 chars")
         # are attached per call and echoed on every request log line.
         self.request_label = ""
@@ -112,39 +168,130 @@ class LLMClient:
         base = delays[min(max(attempt - 1, 0), len(delays) - 1)]
         return max(0.1, base * (0.8 + 0.4 * random.random()))
 
+    def _over_budget(self) -> bool:
+        return self.stage_wait.get("waited_s", 0.0) >= self.stage_budget_s
+
+    def _announce_budget(self) -> None:
+        _panel("llm.stage_budget_exceeded", n=int(self.stage_wait.get("waited_s", 0.0)))
+
     def _handle_overload(self) -> str:
-        """AGU8 3.4: the overload policy after `overload_after` consecutive
-        503/504. Returns "wait" (keep retrying) or raises OverloadFallbackFast
-        (the stage then rebuilds the client around the Fast model). The
-        callback may raise (e.g. StageCancelled) — it propagates untouched.
-        With no callback, 'ask' behaves like 'wait'."""
-        overload_after = int(self.options.get("overload_after") or 2)
-        if self.consecutive_server_errors < max(1, overload_after):
+        """AGU8 3.4 + AGU11 2.3: the overload policy after `overload_after`
+        consecutive 503/504 — and again after EVERY further
+        `overload_after` failures, and whenever the stage's shared
+        `llm.stage_budget_s` wait budget is used up (even when the user
+        chose 'wait' earlier). Returns "wait" (keep retrying) or raises
+        OverloadFallbackFast (the stage then rebuilds the client around
+        the Fast model). The callback may raise (e.g. StageCancelled) — it
+        propagates untouched. With no callback, 'ask' behaves like 'wait'.
+        """
+        overload_after = max(1, int(self.options.get("overload_after") or 2))
+        due = self.consecutive_since_consult >= overload_after
+        over_budget = self._over_budget()
+        if not due and not over_budget:
             return "wait"
-        if self.overload_asked:
-            return "wait"  # the user already decided; keep the decision
-        self.overload_asked = True
+        if over_budget and self.stage_wait.get("announced_at", -1.0) != self.stage_wait.get("waited_s", 0.0):
+            self._announce_budget()
+            self.stage_wait["announced_at"] = self.stage_wait.get("waited_s", 0.0)
+        if not (due or (over_budget and int(self.stage_wait.get("consults", 0)) == 0)):
+            # The budget was exceeded but the policy already ran at the last
+            # consecutive-error consult: only announce, never nag within the
+            # same episode unless the budget grew past another full period.
+            if over_budget and self.stage_wait.get("waited_s", 0.0) - float(
+                self.stage_wait.get("budget_consulted_at", 0.0)
+            ) >= self.stage_budget_s:
+                pass  # fall through and consult again below
+            else:
+                return "wait"
+        self.consecutive_since_consult = 0
+        self.stage_wait["consults"] = int(self.stage_wait.get("consults", 0)) + 1
+        self.stage_wait["budget_consulted_at"] = self.stage_wait.get("waited_s", 0.0)
         default_policy = str(self.options.get("overload_policy") or "ask").lower()
+        info = {
+            "model": self.provider.model,
+            "consecutive": self.consecutive_server_errors,
+            "waited_s": round(float(self.stage_wait.get("waited_s", 0.0)), 1),
+            "over_budget": over_budget,
+        }
         if self.on_overload is None:
             policy = default_policy
+        elif self._on_overload_takes_info:
+            action = self.on_overload(info)  # may raise (dialog Cancel)
+            policy = str(action or default_policy).lower()
         else:
             action = self.on_overload()  # may raise (dialog Cancel)
             policy = str(action or default_policy).lower()
         if policy in ("fallback_fast", "fallback-fast"):
-            from dubtool.llm.base import OverloadFallbackFast
-
             raise OverloadFallbackFast(self.provider.model)
         return "wait"
 
-    def _request_started_log(self, kind: str) -> None:
-        """AGU8 3.5: name the model, the request kind and its size before the
-        call; the stage sets request_label like 'translate chunk 3/4 (20
-        units, 2431 chars)'."""
+    def _maybe_split(self, exc: Exception) -> None:
+        """AGENT_UPDATE_11 2.2: after the FIRST 504/503/client-timeout of a
+        chunk big enough to split, raise SplitRequiredError immediately —
+        translate_resilient halves the payloads instead of resending the
+        identical big request. Only the translate client carries the split
+        options (mechanical steps like punctuation never split)."""
+        if not bool(self.options.get("split_on_timeout", False)):
+            return
+        units = self.request_units
+        min_units = max(2, int(self.options.get("split_min_units") or 2))
+        if units is None or units < max(2, 2 * min_units):
+            return
+        status = getattr(exc, "status", None)
+        _panel(
+            "llm.chunk_split",
+            n=units,
+            err=str(status or exc),
+        )
+        raise SplitRequiredError(
+            f"chunk of {units} units failed ({exc or status}) — splitting in half "
+            "instead of resending it (AGENT_UPDATE_11 2.2)",
+            status=status,
+        ) from exc
+
+    def _process_server_error(self, exc: Exception, attempt: int, max_attempts: int) -> float | None:
+        """AGU8 3.2/3.4 + AGU11 2.2/2.3/2.4: one 503/504/client-timeout
+        failure. Logs the plain explanation into pipeline.log AND the
+        details panel, then consults the overload policy when due, then
+        raises SplitRequiredError for a split-eligible chunk. Returns the
+        backoff seconds for the caller to sleep (None when the caller
+        should re-raise because attempts are exhausted).
+        """
+        self.consecutive_server_errors += 1
+        self.consecutive_since_consult += 1
+        status = getattr(exc, "status", None)
+        if status == 503:
+            _panel("llm.server_503", model=self.provider.model)
+        elif status == 504:
+            _panel("llm.server_504", model=self.provider.model)
+        else:
+            _panel("llm.server_error", model=self.provider.model, status=status or "?")
+        log.warning(
+            "llm %s/%s server error %s (attempt %d/%d, %s): %s — model-wide: no key rotation",
+            self.provider.name, self.provider.model,
+            status if status is not None else getattr(exc, "name", "?"), attempt, max_attempts,
+            self.request_label or "", exc,
+        )
+        self._handle_overload()  # raises OverloadFallbackFast per policy
+        self._maybe_split(exc)   # raises SplitRequiredError for big chunks
+        return self._server_backoff_s(attempt)
+
+    def _sleep_backoff(self, seconds: float) -> None:
+        """Wait out one server-error backoff, feeding the shared stage-wait
+        accumulator (AGU11 2.3) and emitting the countdown from sleeping()."""
+        slept = heartbeat.sleeping(seconds, _backoff_text, self.cancel)
+        self.stage_wait["waited_s"] = float(self.stage_wait.get("waited_s", 0.0)) + max(0.0, float(slept))
+
+    def _request_started_log(self, kind: str, attempt: int = 1) -> None:
+        """AGU8 3.5 + AGU11 2.4: name the model, the request kind, its size
+        and the attempt, in the log AND in the details panel from the
+        moment the call starts."""
         label = self.request_label or kind
         # The per-mode timeout lives on the provider (llm/__init__.py get_provider).
         timeout = float(getattr(self.provider, "timeout_s", 0) or 0)
         tail = f" — đang chờ phản hồi (timeout {timeout:.0f} s)" if timeout else ""
-        log.info("llm %s/%s — %s%s", self.provider.name, self.provider.model, label, tail)
+        message = f"llm {self.provider.name}/{self.provider.model} — {label} (lần {attempt}){tail}"
+        log.info(message)
+        _panel("llm.request_start", model=self.provider.model, label=label, n=attempt)
 
     def _call_logged(self, provider_call, *args, **kwargs):
         """Wrap one provider.complete() with the elapsed-time log line."""
@@ -185,10 +332,12 @@ class LLMClient:
         # (the non-pool loop below re-raises InternalLLMError directly in the
         # same way — see the except clauses)
         last_error: Exception | None = None
+        attempt_no = 0
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 self._consume_budget()
-                self._request_started_log("complete")
+                attempt_no += 1
+                self._request_started_log("complete", attempt_no)
                 with heartbeat.waiting(_waiting_text):
                     result = self._call_logged(
                         self.provider.complete,
@@ -196,6 +345,8 @@ class LLMClient:
                     )
                 self.total_calls += 1
                 self.consecutive_server_errors = 0
+                self.consecutive_since_consult = 0
+                self.stage_wait["consulted_at"] = self.stage_wait.get("waited_s", 0.0)
                 if result.input_tokens is not None:
                     self.total_input_tokens += result.input_tokens
                 if result.output_tokens is not None:
@@ -214,18 +365,16 @@ class LLMClient:
                 # help, so NO key rotation; exponential-with-jitter backoff
                 # instead, capped at MAX_RETRIES transport attempts.
                 last_error = exc
-                self.consecutive_server_errors += 1
-                log.warning(
-                    "llm %s/%s server error %s (attempt %d/%d, %s): %s — backoff %.0f s (model-wide: no key rotation)",
-                    self.provider.name, self.provider.model,
-                    getattr(exc, "status", "?"), attempt, MAX_RETRIES,
-                    self.request_label or "", exc, self._server_backoff_s(attempt),
-                )
-                self._handle_overload()  # raises OverloadFallbackFast per policy
+                backoff = self._process_server_error(exc, attempt, MAX_RETRIES)
                 if attempt < MAX_RETRIES:
-                    heartbeat.sleeping(
-                        self._server_backoff_s(attempt), _backoff_text, self.cancel
-                    )
+                    self._sleep_backoff(backoff)
+            except TimeoutLLMError as exc:
+                # AGU11 2.2: a client-side timeout is treated exactly like a
+                # server deadline — same backoff schedule, same split rule.
+                last_error = exc
+                backoff = self._process_server_error(exc, attempt, MAX_RETRIES)
+                if attempt < MAX_RETRIES:
+                    self._sleep_backoff(backoff)
             except RateLimitError as exc:
                 last_error = exc
                 self.consecutive_server_errors = 0
@@ -242,7 +391,8 @@ class LLMClient:
                     except Exception:
                         log.exception("on_rate_limit callback failed")
                 if attempt < MAX_RETRIES:
-                    heartbeat.sleeping(wait, _backoff_text, self.cancel)
+                    slept = heartbeat.sleeping(wait, _backoff_text, self.cancel)
+                    self.stage_wait["waited_s"] = float(self.stage_wait.get("waited_s", 0.0)) + slept
             except InternalLLMError:
                 # AGENT_UPDATE_7.md 4.3: deterministic — fails immediately,
                 # never retried, never reported as a connection problem.
@@ -255,7 +405,8 @@ class LLMClient:
                     self.provider.name, attempt, MAX_RETRIES, exc,
                 )
                 if attempt < MAX_RETRIES:
-                    heartbeat.sleeping(BACKOFF_BASE_S * attempt, _backoff_text, self.cancel)
+                    slept = heartbeat.sleeping(BACKOFF_BASE_S * attempt, _backoff_text, self.cancel)
+                    self.stage_wait["waited_s"] = float(self.stage_wait.get("waited_s", 0.0)) + slept
         if isinstance(last_error, RateLimitError):
             raise LLMError(
                 f"giving up after {MAX_RETRIES} attempts: {last_error.provider} rate "
@@ -272,7 +423,8 @@ class LLMClient:
         while attempts < MAX_RETRIES:
             try:
                 self._consume_budget()
-                self._request_started_log("complete")
+                attempts += 1
+                self._request_started_log("complete", attempts)
                 with heartbeat.waiting(_waiting_text):
                     result = self._call_logged(
                         self.provider.complete,
@@ -280,6 +432,8 @@ class LLMClient:
                     )
                 self.total_calls += 1
                 self.consecutive_server_errors = 0
+                self.consecutive_since_consult = 0
+                self.stage_wait["consulted_at"] = self.stage_wait.get("waited_s", 0.0)
                 if result.input_tokens is not None:
                     self.total_input_tokens += result.input_tokens
                 if result.output_tokens is not None:
@@ -294,25 +448,21 @@ class LLMClient:
                 )
                 return result.text
             except ServerErrorLLMError as exc:
-                # AGU8 3.2/3.4: model-wide server errors — NO key rotation in
-                # the pool loop either; jittered backoff, then the overload
-                # policy after `overload_after` consecutive errors.
-                attempts += 1
+                # AGU8 3.2/3.4 + AGU11 2.2/2.3: model-wide server errors —
+                # NO key rotation in the pool loop either; jittered backoff,
+                # the overload policy after `overload_after` consecutive
+                # errors (and again later), and the immediate split.
                 last_error = exc
-                self.consecutive_server_errors += 1
-                log.warning(
-                    "llm %s/%s server error %s (attempt %d/%d, %s): %s — backoff %.0f s (model-wide: no key rotation)",
-                    self.provider.name, self.provider.model,
-                    getattr(exc, "status", "?"), attempts, MAX_RETRIES,
-                    self.request_label or "", exc, self._server_backoff_s(attempts),
-                )
-                self._handle_overload()  # raises OverloadFallbackFast per policy
+                backoff = self._process_server_error(exc, attempts, MAX_RETRIES)
                 if attempts < MAX_RETRIES:
-                    heartbeat.sleeping(
-                        self._server_backoff_s(attempts), _backoff_text, self.cancel
-                    )
+                    self._sleep_backoff(backoff)
+            except TimeoutLLMError as exc:
+                # AGU11 2.2: same handling as a server deadline.
+                last_error = exc
+                backoff = self._process_server_error(exc, attempts, MAX_RETRIES)
+                if attempts < MAX_RETRIES:
+                    self._sleep_backoff(backoff)
             except RateLimitError as exc:
-                attempts += 1
                 last_error = exc
                 self.consecutive_server_errors = 0
                 used = getattr(exc, "key_used", None)
@@ -366,7 +516,8 @@ class LLMClient:
                 if attempts < MAX_RETRIES:
                     if self.cancel is not None and self.cancel.is_set():
                         break
-                    heartbeat.sleeping(BACKOFF_BASE_S * attempts, _backoff_text, self.cancel)
+                    slept = heartbeat.sleeping(BACKOFF_BASE_S * attempts, _backoff_text, self.cancel)
+                    self.stage_wait["waited_s"] = float(self.stage_wait.get("waited_s", 0.0)) + slept
             except KeyExhaustedError:
                 # acquire() found every key unavailable right now: this is
                 # not a failure of a request — wait until the earliest
@@ -414,6 +565,8 @@ class LLMClient:
                     log.warning("llm validation retry: %s", exc)
             except OverloadFallbackFast:
                 raise
+            except (SplitRequiredError,):
+                raise  # AGU11 2.2: split happens at translate_resilient
             except LLMError as exc:
                 # A transport/side-error while text is still None: the inner
                 # loop already gave up or the outcome is final — propagate.

@@ -902,7 +902,9 @@ class MainWindow(QMainWindow):
         self.progress_group._last_mode = mode
         self.progress_group.show_running()
         self.set_busy(True)
-        from dubtool.app.ui.fillers_dialog import DialogBridge, FillersDialog, OverloadDialog
+        from dubtool.app.ui.fillers_dialog import (
+            DialogBridge, FillersDialog, OverloadDialog, TtsBudgetDialog,
+        )
 
         bridge = DialogBridge(self)  # lives on the GUI thread
 
@@ -915,11 +917,24 @@ class MainWindow(QMainWindow):
             }
             return bridge.call(lambda: FillersDialog(suggestions, parent=self, defaults=defaults_map).result_choices())
 
-        def _overload_dialog():
+        def _overload_dialog(info: dict | None = None):
             from dubtool.app.modes import get as mode_get
 
-            model = str((mode_get(mode, settings.load()) or {}).get("model"))
-            return bridge.call(lambda: OverloadDialog(model=model, parent=self).choice)
+            # AGU11 2.3: the dialog names the currently failing model and
+            # how long it has been trying.
+            model = str((info or {}).get("model")
+                        or (mode_get(mode, settings.load()) or {}).get("model"))
+            waited = int(float((info or {}).get("waited_s") or 0))
+            return bridge.call(
+                lambda: OverloadDialog(model=model, parent=self, waited_s=waited).choice
+            )
+
+        def _tts_budget_dialog(missing: int, waited_mmss: str, fallback_ok: bool):
+            # AGU11 3.4: voice generation over its wait budget — wait 10 min,
+            # backup voice or stop (the worker thread blocks until answered).
+            return bridge.call(
+                lambda: TtsBudgetDialog(int(missing), str(waited_mmss), bool(fallback_ok), parent=self).choice
+            )
 
         started = self.service.start(
             video=self.video_path,
@@ -930,6 +945,7 @@ class MainWindow(QMainWindow):
             jobs_dir=self._jobs_dir(),
             overload_dialog=_overload_dialog,
             fillers_dialog=_fillers_dialog,
+            tts_budget_dialog=_tts_budget_dialog,
         )
         if not started:
             self._refresh_buttons()

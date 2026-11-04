@@ -5,7 +5,10 @@ thread but shown on the GUI thread.
   found speaker tics — per token Bỏ / Giữ / Dịch thành… and Apply /
   Use defaults this time. Returns a {token: action} dict ({} = defaults).
 - `OverloadDialog`: the Gemini-overload policy question with the three
-  buttons Thử lại sau / Dùng model Nhanh cho phần còn lại / Hủy.
+  buttons Thử lại sau / Dùng model Nhanh cho phần còn lại / Hủy
+  (AGENT_UPDATE_11 2.3: the dialog also names how long it has been trying).
+- `TtsBudgetDialog`: the AGU11 budget decision when voice generation
+  cannot cover every segment — wait 10 more minutes, backup voice, stop.
 - `DialogBridge`: marshals those calls onto the GUI thread and blocks the
   worker thread until the dialog returns (the pipeline runs on a plain
   thread and never touches widgets directly).
@@ -111,9 +114,12 @@ class FillersDialog(QDialog):
 
 
 class OverloadDialog(QDialog):
-    """AGU8 3.4: three buttons — Thử lại sau / Dùng model Nhanh / Hủy."""
+    """AGU8 3.4 + AGU11 2.3: three buttons — Thử lại sau / Dùng model
+    Nhanh / Hủy, with the model name and how long the policy has been
+    trying (AGENT_UPDATE_11 2.3)."""
 
-    def __init__(self, model: str, parent: QWidget | None = None):
+    def __init__(self, model: str, parent: QWidget | None = None,
+                 waited_s: int | None = None):
         super().__init__(parent)
         self.setWindowTitle("DubTool")
         self.setMinimumWidth(480)
@@ -121,6 +127,9 @@ class OverloadDialog(QDialog):
         label = QLabel(i18n.tr("overload.header", model=model))
         label.setWordWrap(True)
         layout.addWidget(label)
+        if waited_s is not None and waited_s >= 0:
+            waited = QLabel(i18n.tr("overload.waiting", n=int(waited_s)))
+            layout.addWidget(waited)
 
         wait_btn = QPushButton(i18n.tr("overload.button.try_later"))
         fast_btn = QPushButton(i18n.tr("overload.button.fallback_fast", model=model))
@@ -136,6 +145,40 @@ class OverloadDialog(QDialog):
     def _pick(self, value: str) -> None:
         self.choice = value
         self._done = True
+        self.accept()
+
+
+class TtsBudgetDialog(QDialog):
+    """AGU11 3.4: the voice service is unstable — wait 10 more minutes,
+    switch the still-missing segments to the backup voice, or stop.
+    'fallback' is disabled when no backup voice is configured."""
+
+    def __init__(self, missing: int, waited_mmss: str, fallback_ok: bool,
+                 parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("DubTool")
+        self.setMinimumWidth(480)
+        layout = QVBoxLayout(self)
+        header = QLabel(i18n.tr("tts.budget_exceeded", n=int(missing), mmss=waited_mmss))
+        header.setWordWrap(True)
+        layout.addWidget(header)
+
+        wait_btn = QPushButton(i18n.tr("tts.budget.wait10"))
+        fallback_btn = QPushButton(
+            i18n.tr("tts.budget.fallback") if fallback_ok
+            else i18n.tr("tts.budget.fallback_disabled")
+        )
+        stop_btn = QPushButton(i18n.tr("tts.budget.stop"))
+        for btn in (wait_btn, fallback_btn, stop_btn):
+            layout.addWidget(btn)
+        wait_btn.clicked.connect(lambda: self._pick("wait10"))
+        fallback_btn.setEnabled(bool(fallback_ok))
+        fallback_btn.clicked.connect(lambda: self._pick("fallback"))
+        stop_btn.clicked.connect(lambda: self._pick("stop"))
+        self.choice = "stop"
+
+    def _pick(self, value: str) -> None:
+        self.choice = value
         self.accept()
 
 

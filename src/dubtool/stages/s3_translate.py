@@ -24,10 +24,16 @@ from typing import Any, Callable
 
 from dubtool.job import StageCancelled, read_json, write_json
 from dubtool.llm import LLMClient, get_provider
-from dubtool.llm.base import LLMError, OverloadFallbackFast, failed_after_timeout
+from dubtool.llm.base import (
+    LLMError,
+    OverloadFallbackFast,
+    SplitRequiredError,
+    failed_after_timeout,
+)
 from dubtool.llm.budget import BudgetExhausted
 from dubtool.units import build_units, split_translation
 from dubtool.llm.base import RateLimitError
+from dubtool.stages._units_runner import run_units_parallel  # noqa: F401 (AGU11 2.1; re-exported)
 
 log = logging.getLogger("dubtool")
 
@@ -551,22 +557,31 @@ def translate_resilient(
     payloads: list, context_payload: list, label: str, *,
     on_fallback: Callable[[str], None], split_on_timeout: bool,
     split_min_units: int, stats: dict, depth: int = 0,
+    split_min_chars: int = 300,
 ) -> list:
-    """AGU8 task 2 external resilience layer for one translation chunk.
+    """AGU8 task 2 + AGENT_UPDATE_11 task 2 external resilience layer for
+    one translation chunk.
 
     - OverloadFallbackFast (the overload policy said 'use the Fast model'):
       rebuild the client via on_fallback, then retry the same chunk once.
       The exception is otherwise left untouched by the wrapper.
-    - A 504 / client-side timeout (split_on_timeout): split the chunk in
-      two halves and translate each with the same policy, recursively, so
-      long requests become short ones instead of timing out again. Halves
-      are only made while each is at least split_min_units payloads.
+    - SplitRequiredError (AGU11 2.2 — the client raised it after the
+      FIRST 504/503/client-timeout of a big enough chunk): split the
+      chunk in two halves and translate each with the same policy,
+      recursively, so long requests become short ones instead of timing
+      out again. Halves are only made while each is at least
+      split_min_units payloads.
+
+      (AGU11 2.2 fallback: a wrapped 'giving up after N attempts' error
+      that still classifies as a timeout split — kept for chunks the
+      client was not told about.)
     """
     client = holder["client"]
     # Agreed chunk label echoed on the request logs (AGU8 3.5). Concurrent
     # threads share the client, so a label can be overwritten by the next
     # call; it stays informational.
     client.request_label = label
+    client.request_units = len(payloads)
     try:
         return translate_call(client, payloads, context_payload)
     except OverloadFallbackFast as exc:
@@ -577,7 +592,27 @@ def translate_resilient(
             holder, translate_call, payloads, context_payload, label,
             on_fallback=on_fallback, split_on_timeout=split_on_timeout,
             split_min_units=split_min_units, stats=stats, depth=depth + 1,
+            split_min_chars=split_min_chars,
         )
+    except SplitRequiredError as exc:
+        if depth >= 8:
+            raise
+        stats["splits"] = stats.get("splits", 0) + 1
+        log.warning(
+            "s3: %s failed (%s) — splitting %d payloads in two after the first error (AGU11 2.2: never resend the big request)",
+            label, exc.status or exc, len(payloads),
+        )
+        mid = _split_index(payloads)
+        out: list = []
+        for k, part in enumerate((payloads[:mid], payloads[mid:]), start=1):
+            out.extend(translate_resilient(
+                holder, translate_call, part, context_payload,
+                f"{label} [part {k}/2]", on_fallback=on_fallback,
+                split_on_timeout=split_on_timeout,
+                split_min_units=split_min_units, stats=stats, depth=depth + 1,
+                split_min_chars=split_min_chars,
+            ))
+        return out
     except LLMError as exc:
         can_split = (
             split_on_timeout and depth < 8 and failed_after_timeout(exc)
@@ -590,7 +625,7 @@ def translate_resilient(
             "s3: %s failed after a timeout (%s) — splitting %d payloads in two",
             label, exc, len(payloads),
         )
-        mid = len(payloads) // 2
+        mid = _split_index(payloads)
         out: list = []
         for k, part in enumerate((payloads[:mid], payloads[mid:]), start=1):
             out.extend(translate_resilient(
@@ -598,9 +633,21 @@ def translate_resilient(
                 f"{label} [part {k}/2]", on_fallback=on_fallback,
                 split_on_timeout=split_on_timeout,
                 split_min_units=split_min_units, stats=stats, depth=depth + 1,
+                split_min_chars=split_min_chars,
             ))
         return out
 
+
+def _split_index(payloads: list) -> int:
+    """The unit boundary closest to half the total source characters
+    (AGENT_UPDATE_11 2.2 — halves by volume, not by count)."""
+    total = sum(len(p.get("text") or "") for p in payloads)
+    acc = 0
+    for i, p in enumerate(payloads[:-1], start=1):
+        acc += len(p.get("text") or "")
+        if acc * 2 >= total:
+            return i
+    return max(1, len(payloads) // 2)
 
 def _run_segment_mode(
     job, entries, translate_payloads: Callable[[list, list, str], list],
@@ -702,29 +749,40 @@ def run(
     # AGU8 task 2: the retry knobs come from config llm; the stage owns the
     # overload policy callback and the split-on-timeout resilience layer.
     split_on_timeout = bool(llm_cfg.get("split_on_timeout", True))
-    split_min_units = max(2, int(llm_cfg.get("split_min_units", 4) or 4))
+    split_min_units = max(2, int(llm_cfg.get("split_min_units", 2) or 2))
+    split_min_chars = max(100, int(llm_cfg.get("split_min_chars", 300) or 300))
     overload_policy = str(
         llm_cfg.get("overload_policy", ("ask" if interactive else "fallback_fast"))
     ).lower()
+    # AGU11 2.2/2.3: the split rule and the shared stage-wait budget ride in
+    # the client options, so the Fast-model rebuild keeps the same budget.
+    stage_wait_state: dict = {"waited_s": 0.0, "consulted_at": 0.0, "consults": 0}
     client_options = {
         "server_error_backoff_s": llm_cfg.get("server_error_backoff_s"),
         "overload_after": llm_cfg.get("overload_after", 2),
         "overload_policy": overload_policy,
+        "split_on_timeout": split_on_timeout,
+        "split_min_units": split_min_units,
+        "stage_budget_s": float(llm_cfg.get("stage_budget_s", 600.0) or 600.0),
+        "stage_wait_state": stage_wait_state,
     }
-    stats: dict = {"splits": 0, "fallback": False, "fast_model": None}
+    stats: dict = {"splits": 0, "fallback": False, "fast_model": None, "models": {}}
     # AGU8 task 4: suggestions + per-video choices + the filler policy.
     fill_state = _filler_state(job, config, transcript)
     base_policy = fill_state["policy"]
 
-    def _overload_callback() -> str:
+    def _overload_callback(info: dict | None = None) -> str:
         # AGU8 3.4. interactive asks the dialog; 'ask' without a dialog and
         # 'wait' keep backing off; 'fallback_fast' makes the wrapper raise
         # OverloadFallbackFast, which translate_resilient turns into the
-        # Fast-model switch below.
+        # Fast-model switch below. AGU11 2.3: the callback receives the
+        # client's info (model, consecutive failures, waited seconds).
         if overload_policy == "ask":
             dialog = getattr(config, "llm_overload_dialog", None)
             if interactive and callable(dialog):
-                action = str(dialog()).lower()  # may raise (dialog Cancel)
+                info_out = dict(info or {})
+                info_out.setdefault("model", provider.model)
+                action = str(dialog(info_out) or "").lower()  # may raise (dialog Cancel)
                 if action in ("cancel", "cancelled"):
                     raise StageCancelled("s3: overload — cancelled by user")
                 return "fallback_fast" if action in (
@@ -753,6 +811,16 @@ def run(
             "s3: overload policy switched the rest of stage 3 to the Fast model %s",
             fast_provider.model,
         )
+        try:
+            from dubtool.app import i18n
+
+            heartbeat_emit = None
+            from dubtool import heartbeat as hb_mod
+
+            hb_mod.emit(i18n.tr("llm.fallback_to_fast", model=fast_provider.model))
+            _ = heartbeat_emit
+        except Exception:
+            pass
 
     holder: dict = {"client": LLMClient(
         provider, cancel=cancel, options=client_options, on_overload=_overload_callback,
@@ -779,6 +847,7 @@ def run(
             on_fallback=switch_to_fast_model,
             split_on_timeout=split_on_timeout,
             split_min_units=split_min_units, stats=stats,
+            split_min_chars=split_min_chars,
         )
 
     chunk_size = config.chunk_size(pid)
@@ -814,10 +883,12 @@ def run(
 
         todo_units = [u for u in units if unit_is_todo(u)]
         translated_units = 0
-        unit_chunks = list(enumerate(chunks_of(todo_units, chunk_size), start=1))
+        from dubtool.stages._units_runner import adaptive_state
 
-        def unit_chunk_fn(chunk_with_index):
-            chunk_index, chunk = chunk_with_index
+        adaptive = adaptive_state(config)
+        unit_by_id = {u["unit_id"]: u for u in todo_units}
+
+        def unit_chunk_fn(chunk, label):
             first = chunk[0]["segments"][0]["id"]
             context_entries = [e for e in entries if e["id"] < first and e.get("vi")]
             context = context_entries[-CONTEXT_SEGMENTS:] if context_entries else []
@@ -846,36 +917,33 @@ def run(
             chunk_glossary = _filter_glossary(
                 glossary, chunk_texts + [s["text"] for s in chunk_spans]
             )
-            total_chars = sum(len(u["text"]) for u in chunk)
-            label = (
-                f"translate chunk {chunk_index}/{len(unit_chunks)} "
-                f"({len(payloads)} units, {total_chars} chars)"
-            )
-            return translate_payloads(
+            updates = translate_payloads(
                 payloads, context_payload, label,
                 policy=chunk_policy, glossary_override=chunk_glossary,
             )
+            # AGU11 2.3: the final summary states which units were translated
+            # by which model (the Fast fallback serves later chunks).
+            model_name = getattr(getattr(holder["client"], "provider", None), "model", "?")
+            stats["models"][model_name] = stats["models"].get(model_name, 0) + len(payloads)
+            return updates
 
-        def apply_units(idx, updates):
+        def apply_units(updates):
             nonlocal translated_units
-            chunk_index, chunk = unit_chunks[idx]
-            by_unit_id = {u["unit_id"]: u for u in chunk}
             for upd in updates:
-                unit = by_unit_id.get(upd["id"])
+                unit = unit_by_id.get(upd["id"])
                 if unit is None:
                     log.warning("s3: translation for unknown unit %d ignored", upd["id"])
                     continue
                 apply_unit_translation(entries, unit, upd["vi"])
                 translated_units += 1
-            log.info(
-                "s3: units chunk %d done (%d/%d units)",
-                chunk_index, translated_units, len(todo_units),
-            )
             write_json(job.translated_path, entries)
             write_units_file(job, units)
 
         try:
-            run_chunks_parallel(unit_chunks, unit_chunk_fn, concurrency, apply=apply_units, cancel=cancel)
+            run_units_parallel(
+                todo_units, unit_chunk_fn, apply=apply_units,
+                concurrency=concurrency, cancel=cancel, adaptive=adaptive,
+            )
         except BudgetExhausted as exc:  # 5.2: finish with what exists
             log.warning("s3: %s — the rerun fills the remaining units", exc)
         translated_count = translated_units
@@ -919,6 +987,12 @@ def run(
         summary += f" timeout_splits={stats['splits']}"
     if stats["fallback"]:
         summary += f" overload_fallback=fast({stats['fast_model']})"
+    # AGU11 2.3: units per model in the summary.
+    model_counts = stats.get("models") or {}
+    if len(model_counts) > 1:
+        summary += " units_by_model=" + ",".join(
+            f"{model}:{count}" for model, count in sorted(model_counts.items())
+        )
     if fill_state["count"]:
         summary += f" filler_suggestions={fill_state['count']}"
     if uncertain:
