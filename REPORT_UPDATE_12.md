@@ -121,11 +121,13 @@ and `agu12_suite_final.log`).
   note), **GPL-3.0** (needed if the GPL FFmpeg build is treated as
   derivative), **all-rights-reserved** (default when nothing is done).
 - **Tags:** `git tag -l` now shows `update-6, update-7, update-9,
-  v1.0.10, v1.0.11, v1.0.9`; this update adds **v1.0.9**
-  (→ `ad373d84652aeed26d463647b2f957ee30045417`, same commit as
-  `update-9`) and **v1.0.11** (→ `b33451f78692c59f3a57b197c45f9fd1987a3325`,
-  the update 11 feature commit). `v1.0.12` is appended to the final
-  update-12 commit. Tags only — no history rewrite, no force push.
+  v1.0.9, v1.0.10, v1.0.11, v1.0.12`. This update adds **v1.0.9**
+  (→ `ad373d84652aeed26d463647b2f957ee30045417`, same commit the user's
+  `update-9` tag points to) and **v1.0.12** (→ `04531dd…`, the update 12
+  feature commit). `v1.0.10` and `v1.0.11` already existed on the remote
+  (the user's own `v1.0.11` points at the Update 11 finalize commit
+  `0bcc723…`, which the local tag now matches after retagging). Tags
+  only — no history rewrite, no force push.
 
 ## 7. Task 7 carry-overs — status
 
@@ -147,9 +149,18 @@ and `agu12_suite_final.log`).
 
 ## 8. The GitHub line
 
-    git log -1 --format=%H       <pasted after commit below>
-    git status -sb               <pasted after commit below>
-    git ls-remote origin refs/heads/main   <pasted after commit below>
+    git log -1 --format=%H
+    04531dd32012591877affb5d55b6217f5ce308e7
+
+    git status -sb
+    ## main...origin/main
+
+    git ls-remote origin refs/heads/main
+    04531dd32012591877affb5d55b6217f5ce308e7	refs/heads/main
+
+The remote head equals the local head (main at 04531dd) after the push;
+both pushed tags (`v1.0.9`, `v1.0.12`) confirmed by the same `git push`.
+
 
 ## 9. What could not be verified
 
@@ -172,5 +183,5 @@ and `agu12_suite_final.log`).
   (195,842,575 bytes)
 - SHA-256:
   `589e7f3c74a33d42bfb694bcafa7419893c72cf9fd9b5db893fd871b559978f2`
-- review zip: `D:\Projects\Vibe\Project_K\review\dubtool-review-20261105-0138.zip`
-  (1,519,628 bytes)
+- review zip: `D:\Projects\Vibe\Project_K\review\dubtool-review-20261105-0145.zip`
+  (1,519,969 bytes)

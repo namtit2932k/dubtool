@@ -90,8 +90,8 @@ build-root/logs/agu12_suite_final.log).
 - Zip SHA-256: `589e7f3c74a33d42bfb694bcafa7419893c72cf9fd9b5db893fd871b559978f2`.
 
 The Update 12 review zip is
-`D:\Projects\Vibe\Project_K\review\dubtool-review-20261105-0138.zip`
-(1,519,628 bytes), produced by `scripts/make_review_zip.py`.
+`D:\Projects\Vibe\Project_K\review\dubtool-review-20261105-0145.zip`
+(1,519,969 bytes), produced by `scripts/make_review_zip.py`.
 
 ## 4. Not measured in this session (with the reason)
 
@@ -112,11 +112,19 @@ The Update 12 review zip is
   run reuses the same retention code paths and is pending one re-run
   on Update 12.
 
-## 5. GitHub line (to be pasted together with the commit push)
+## 5. GitHub line (pasted from the commit push)
 
-    git log -1 --format=%H       recorded in the commit step
-    git status -sb               recorded in the commit step
-    git ls-remote origin refs/heads/main   recorded in the commit step
+    git log -1 --format=%H
+    04531dd32012591877affb5d55b6217f5ce308e7
+
+    git status -sb
+    ## main...origin/main
+
+    git ls-remote origin refs/heads/main
+    04531dd32012591877affb5d55b6217f5ce308e7	refs/heads/main
+
+Remote head equals local head; tags v1.0.9, v1.0.11 (the user's
+existing one, aligned locally) and v1.0.12 exist for updates 9–12.
 
 ## 6. License options (the user must choose; nothing was decided here)
 
