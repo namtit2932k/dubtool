@@ -16,9 +16,11 @@ The per-chunk cap adapts to measured latency (AGU11 2.1):
 - three consecutive requests under 20% of the timeout raise the cap by
   25% (never above the configured default).
 
-Rate limiting keeps the AGU4 semantics: a 429 reduces concurrency by one
-for the rest of the run (never below 1) and re-queues the chunk; other
-failures finish the in-flight chunks and re-raise (resume-safe).
+Rate limiting (Update 12 2.2): after any 503/429 the translation
+concurrency drops to 1; five consecutive successful chunks raise it by
+one again, never above the configured value. A 429 also re-queues its
+chunk; other failures finish the in-flight chunks and re-raise
+(resume-safe).
 """
 
 from __future__ import annotations
@@ -121,6 +123,8 @@ def run_units_parallel(
     lock = threading.Lock()
     label_no = [0]
     workers = max(1, int(concurrency))
+    max_workers = workers
+    success_streak = 0
     first_error: Exception | None = None
 
     def cut_chunk() -> list | None:
@@ -169,7 +173,9 @@ def run_units_parallel(
                 except RateLimitError as exc:
                     with lock:
                         pending_units = list(chunk) + pending_units
-                    workers = max(1, workers - 1)
+                    # Update 12 2.2: after any 429 the concurrency drops to
+                    # 1; five consecutive successes raise it by one again.
+                    workers = 1
                     pool._max_workers = workers  # free workers stop early
                     hint = float(getattr(exc, "retry_after", 0) or 0)
                     remaining = max(0.0, min(hint, 300.0))
@@ -194,6 +200,21 @@ def run_units_parallel(
                 elapsed = _time.monotonic() - started
                 log.info("s3: %s done in %.1f s", label, elapsed)
                 adapt_after_latency(adaptive, elapsed)
+                # Update 12 2.2: five consecutive successes raise the
+                # adaptive concurrency back up by one (never above the
+                # configured value).
+                success_streak += 1
+                if (
+                    success_streak % 5 == 0 and workers < max_workers
+                    and int(adaptive.get("quick_streak", 0)) >= 0
+                ):
+                    workers = min(max_workers, workers + 1)
+                    pool._max_workers = workers
+                    log.info(
+                        "s3: five consecutive successes — translation "
+                        "concurrency back up to %d",
+                        workers,
+                    )
     finally:
         pool.shutdown(wait=True)  # in-flight chunks finish (resume-safe)
     if pending_units:

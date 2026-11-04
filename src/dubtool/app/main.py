@@ -77,6 +77,10 @@ def run_gui() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("DubTool")
     app.setApplicationVersion(app_version())
+    # Update 12 task 5 item 2: the bundled Vietnamese-capable font joins
+    # the interface's fallback chain (Vietnamese letters can never turn
+    # into boxes — same code the README screenshots use).
+    _apply_app_fonts(app)
     # AGU8 7.1: from source, PyAV 19+ breaks stage 2 — tell the user the
     # exact repair command before any caption fails deep in the run.
     from dubtool import av_check
@@ -102,6 +106,59 @@ def run_layout_check(scale: float = 1.0) -> int:
     return _run(scale=scale)
 
 
+def _apply_app_fonts(app) -> str:
+    """Update 12 task 5 item 2: load the bundled Vietnamese-capable OFL font
+    (the one the subtitle pipeline ships) into the application's font
+    fallback chain, so Vietnamese letters can never turn into boxes — on
+    any machine, under any platform. Returns the loaded family name."""
+    from dubtool.app.paths import font_file
+
+    font_path = font_file()
+    if font_path is None:
+        return ""
+    from PySide6.QtGui import QFont, QFontDatabase
+
+    font_id = QFontDatabase.addApplicationFont(str(font_path))
+    families = QFontDatabase.applicationFontFamilies(font_id) if font_id >= 0 else []
+    if not families:
+        return ""
+    family = str(families[0])
+    primary = app.font().family() or "Segoe UI"
+    # The glyph-level fallback chain of the interface's real font.
+    QFont.insertSubstitutions(primary, [family])
+    app.setFont(QFont(primary))
+    return family
+
+
+def _verify_no_tofu(app, family: str) -> list[str]:
+    """Update 12 task 5 item 3: for EVERY string the captured states can
+    show, check each non-ASCII character with QFontMetrics.inFontUcs4
+    against the resolved interface font — a box (missing glyph) stops the
+    screenshot run before a single image is written."""
+    from dubtool.app import i18n
+
+    if not family:
+        family = app.font().family() or "Segoe UI"
+    from PySide6.QtGui import QFont, QFontMetrics
+
+    metrics = QFontMetrics(QFont(family))
+    strings: list[str] = []
+    dicts = getattr(i18n, "_dicts", None)
+    if isinstance(dicts, dict):
+        for table in dicts.values():
+            if isinstance(table, dict):
+                strings += [s for s in table.values() if isinstance(s, str)]
+    missing: set[str] = set()
+    for text in strings:
+        for ch in text:
+            code = ord(ch)
+            if code < 128 or code in (0x2013, 0x2014, 0x2019):  # ASCII + dashes
+                continue
+            if not metrics.inFontUcs4(code):
+                missing.add(ch)
+    return sorted(missing)
+
+
 def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     """Render the UI states offscreen (AGU4 11.1, extended by AGU5 task 4):
     every window state at three sizes, then dialogs and each Settings tab.
@@ -111,7 +168,9 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     """
     if scale != 1.0:
         os.environ["QT_SCALE_FACTOR"] = str(scale)
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    # Update 12 task 5 item 1: README images must show the REAL interface
+    # (the real windows platform, real theme, real fonts). Nothing else
+    # may produce them; offscreen stays reserved for unit tests.
     from PySide6.QtCore import QSize
     from PySide6.QtWidgets import QApplication
 
@@ -127,6 +186,21 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     settings.load()  # key state stays honest
     i18n.set_language("vi")
     app = QApplication.instance() or QApplication([])
+    platform = str(app.platformName())
+    if platform != "windows":
+        print(
+            f"refusing to write screenshots: the platform is {platform!r} — "
+            "README images require the real 'windows' platform"
+        )
+        return 1
+    font_family = _apply_app_fonts(app)
+    missing = _verify_no_tofu(app, font_family)
+    if missing:
+        print(
+            "refusing to write screenshots: the interface font is missing "
+            f"glyphs for: {''.join(missing)}"
+        )
+        return 1
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -163,13 +237,13 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     # budget dialog, offscreen, without any dialog callbacks attached.
     from dubtool.app.ui.fillers_dialog import OverloadDialog, TtsBudgetDialog
 
-    overload = OverloadDialog("gemini-2.5-flash", waited_s=240)
+    overload = OverloadDialog("gemini-3.8-flash", waited_s=240)  # real model name
     overload.show()
     app.processEvents()
     overload.adjustSize()
     overload.grab().save(str(out_dir / "dialog_overload.png"))
     overload.accept()
-    tts_budget = TtsBudgetDialog(13, "09:37", False)
+    tts_budget = TtsBudgetDialog(13, "09:37", True, "Windows SAPI (Hỏa My)")
     tts_budget.show()
     app.processEvents()
     tts_budget.adjustSize()
@@ -200,11 +274,15 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     app.processEvents()
     settings_dialog.adjustSize()
     settings_dialog.grab().save(str(out_dir / "dialog_settings.png"))
+    keys_tab_shot: str | None = None
     for index in range(settings_dialog.tabs.count()):
         settings_dialog.tabs.setCurrentIndex(index)
         app.processEvents()
         tab_name = settings_dialog.tabs.tabText(index).replace("/", "-").replace(" ", "_")
-        settings_dialog.grab().save(str(out_dir / f"dialog_settings_tab{index}_{tab_name}.png"))
+        shot_name = f"dialog_settings_tab{index}_{tab_name}.png"
+        if index == 0:  # the API keys tab is first (settings.tab_keys)
+            keys_tab_shot = shot_name
+        settings_dialog.grab().save(str(out_dir / shot_name))
     settings_dialog.close()
     # release the fake store patch immediately after the dialog shots
     for name, original in _orig.items():
@@ -218,6 +296,19 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     app.processEvents()
     privacy.grab().save(str(out_dir / "dialog_first_run.png"))
     privacy.close()
+
+    # Update 12 task 5 item 4: the README references canonical images by
+    # name — write them alongside the size/state grid (the same real
+    # pixels from the real windows platform).
+    import shutil
+
+    for alias, source in (
+        ("ready.png", "900x700_idle.png"),
+        ("running.png", "900x700_running.png"),
+        ("finished.png", "900x700_finished.png"),
+        ("settings_api_keys.png", keys_tab_shot or "dialog_settings.png"),
+    ):
+        shutil.copyfile(str(out_dir / source), str(out_dir / alias))
 
     _write_screenshots_index(out_dir, scale)
     print(f"screenshots written to {out_dir}")
@@ -250,9 +341,14 @@ def _write_screenshots_index(out_dir: Path, scale: float) -> None:
                 lines.append(f"built (UTC):  {now} (from BUILD_INFO.txt is absent)")
             else:
                 lines.append("build id: (source run, no BUILD_INFO.txt)")
+    from PySide6.QtCore import QCoreApplication
+
+    _app = QCoreApplication.instance()
+    platform = str(_app.platformName()) if _app is not None else "unknown"
     lines.insert(0, f"DubTool screenshots - {app_version()}")
     lines += [
-        "images:       from the packaged exe (DubTool.exe --screenshots), offscreen",
+        "images:       from the packaged exe (DubTool.exe --screenshots), "
+        f"platform: {platform} — the REAL interface",
         f"scale:        {scale} (QT_SCALE_FACTOR unset when 1.0)",
         "window sizes: 760x600, 900x700, 1100x800",
         "states:       idle, video, running, finished (with 'Mo ban dich'), error",
@@ -654,7 +750,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="store_true")
     parser.add_argument("--selftest", action="store_true")
     parser.add_argument("--network", action="store_true",
-                        help="with --selftest: add the DNS/TLS connectivity table (AGU8 2.2)")
+                        help="with --selftest: add the DNS/TLS connectivity table ")
     parser.add_argument("--json", default=None, help="--selftest output file")
     parser.add_argument("--screenshots", default=None, metavar="DIR")
     parser.add_argument("--layout-check", action="store_true")
@@ -664,12 +760,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--profile", action="store_true",
                         help="with --headless-run: sample CPU once per second into profile.csv")
     parser.add_argument("--mode", choices=("fast", "accurate"), default="fast")
+    parser.add_argument("--tts-probe", nargs="?", const="tts_probe_results.json",
+                        default=None, metavar="JSON",
+                        help="run the interleaved voice-request experiment (same code from source and from the exe) and print the table")
     parser.add_argument("--fault", action="append", default=[], metavar="STAGE:SPEC=N",
-                        help="debug-only fault injection, e.g. --fault tts:fail-first=6 (AGU8 2.5; ignored by the GUI)")
+                        help="debug-only fault injection, e.g. --fault tts:fail-first=6 (debug-only; ignored by the GUI)")
     args = parser.parse_args(argv)
 
     if args.version:
         _print_version()
+        return 0
+    if args.tts_probe:
+        from dubtool.config import Config
+        from dubtool.tts_probe import run_experiment
+
+        run_experiment(Config(), out_path=args.tts_probe)
         return 0
     if args.fault:
         from dubtool import faults as faults_mod

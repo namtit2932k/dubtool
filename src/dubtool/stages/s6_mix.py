@@ -45,21 +45,28 @@ def run(job, config, force: bool = False, cancel=None) -> None:
     if not audio_utils.has_audio_stream(src_video):
         return run_dub_only(job, config, cancel=cancel)
 
-    entries = [e for e in read_json(job.translated_path) if e.get("vi")]
-    # Only segments with a fitted clip take part in the schedule; empty-text
-    # segments never collide and take no part in next-start math downstream
+    # Update 12 task 3: sentence mode schedules the dub units (one clip per
+    # whole sentence; schedule.json identifies them by unit_id); segment
+    # mode keeps the old per-segment flow.
+    from dubtool.dub_units import source_for_stage
+
+    _mode, all_entries, _persist, base = source_for_stage(job, config)
+    entries = [e for e in all_entries if e.get("vi")]
+    # Only entries with a fitted clip take part in the schedule; empty-text
+    # units never collide and take no part in next-start math downstream
     # (schedule.json also holds the playback times used by s7 for cues).
     clip_items = [
         (e["id"], float(e["start"]))
         for e in entries
-        if (job.fitted_dir / f"{e['id']}.wav").exists()
+        if (job.fitted_dir / f"{base(e)}.wav").exists()
     ]
     if not clip_items:
         raise RuntimeError("no fitted clips found — run stage s5 first")
 
     video_duration = media_cache.duration(src_video)
+    fitted_by_id = {e["id"]: job.fitted_dir / f"{base(e)}.wav" for e in entries}
     durations = {
-        seg_id: media_cache.duration(job.fitted_dir / f"{seg_id}.wav")
+        seg_id: media_cache.duration(fitted_by_id[seg_id])
         for seg_id, _start in clip_items
     }
     sched_cfg = getattr(config, "schedule", None) or {}
@@ -72,7 +79,7 @@ def run(job, config, force: bool = False, cancel=None) -> None:
     sched.write_schedule(job.dir, schedule)
     sched.log_report(schedule)
     clips = [
-        (job.fitted_dir / f"{s['id']}.wav", float(s["play_start"]))
+        (fitted_by_id[s["id"]], float(s["play_start"]))
         for s in schedule
     ]
     mix = config.mix

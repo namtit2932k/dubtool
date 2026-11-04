@@ -659,12 +659,31 @@ class SettingsDialog(QDialog):
             self._backup_piper = []
         for name in self._backup_sapi:
             key = f"windows_sapi:{name}"
-            self.backup_combo.addItem(f"Windows — {name}", key)
+            self.backup_combo.addItem(f"Windows — {name} (trên máy)", key)
             self._backup_choices[key] = "none"
         for path in self._backup_piper:
             key = f"piper:{path}"
-            self.backup_combo.addItem(f"Piper — {Path(path).name}", key)
+            self.backup_combo.addItem(f"Piper — {Path(path).name} (trên máy)", key)
         form.addRow(i18n.tr("settings.fallback_voice"), self.backup_combo)
+        # Update 12 task 3 item 4: a one-line warning when the chosen backup
+        # uses the same Microsoft online service as the primary voice — it
+        # may then fail for the same reason.
+        self.backup_warn = QLabel(i18n.tr("settings.fallback_same_service"))
+        self.backup_warn.setWordWrap(True)
+        self.backup_warn.setStyleSheet("color: #e6b800;")
+        self.backup_warn.setVisible(False)
+        form.addRow("", self.backup_warn)
+        self.backup_combo.currentIndexChanged.connect(self._on_backup_changed)
+
+        # Update 12 task 2.4: what happens when the Accurate model is
+        # overloaded or out of quota for every key (disabled while a run is
+        # busy through the dialog's read-only mode).
+        self.overload_combo = QComboBox()
+        self.overload_combo.addItem(i18n.tr("settings.overload_auto"), "fallback_fast")
+        self.overload_combo.addItem(i18n.tr("settings.overload_ask"), "ask")
+        self.overload_combo.addItem(i18n.tr("settings.overload_wait"), "keep_backoff")
+        self.overload_combo.setToolTip(i18n.tr("settings.overload_tooltip"))
+        form.addRow(i18n.tr("settings.overload_label"), self.overload_combo)
         self.backup_listen_btn = QPushButton(i18n.tr("settings.fallback_listen"))
         self.backup_listen_btn.clicked.connect(self._listen_backup)
         form.addRow("", self.backup_listen_btn)
@@ -932,6 +951,13 @@ class SettingsDialog(QDialog):
             )
         self._refresh_jobs_stats()
 
+    def _on_backup_changed(self) -> None:
+        """Show the same-service warning when the chosen backup would fail
+        for the same reason as the primary (Update 12 task 3 item 4)."""
+        key = self._selected_backup()
+        same = key.startswith("edge:") or key.startswith("edge_voice:")
+        self.backup_warn.setVisible(bool(same))
+
     def _load(self) -> None:
         s = settings.load()
         self.lang_combo.setCurrentIndex(max(0, self.lang_combo.findData(s["language"])))
@@ -941,6 +967,9 @@ class SettingsDialog(QDialog):
         self.priority_combo.setCurrentIndex(max(0, self.priority_combo.findData(s.get("translate_priority", "balanced"))))
         self.cpu_combo.setCurrentIndex(max(0, self.cpu_combo.findData(s.get("cpu_usage", "balanced"))))
         self.asr_prompt_check.setChecked(bool(s.get("asr_punctuation_prompt", False)))
+        self.overload_combo.setCurrentIndex(
+            max(0, self.overload_combo.findData(s.get("overload_policy", "fallback_fast")))
+        )
         self._load_backup_choice(s)
         self.preset_combo.setCurrentIndex(max(0, self.preset_combo.findData(s.get("video_encode_preset", "veryfast"))))
         self.jobs_days_spin.setValue(int(s.get("jobs_max_days", 14) or 14))
@@ -958,6 +987,7 @@ class SettingsDialog(QDialog):
         s["translate_priority"] = self.priority_combo.currentData() or "balanced"
         s["cpu_usage"] = self.cpu_combo.currentData() or "balanced"
         s["asr_punctuation_prompt"] = bool(self.asr_prompt_check.isChecked())
+        s["overload_policy"] = self.overload_combo.currentData() or "fallback_fast"
         s["tts_backup_voice"] = self._selected_backup()
         s["video_encode_preset"] = self.preset_combo.currentData() or "veryfast"
         s["jobs_max_days"] = int(self.jobs_days_spin.value())

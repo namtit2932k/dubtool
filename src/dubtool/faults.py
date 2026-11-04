@@ -18,7 +18,8 @@ import re
 log = logging.getLogger("dubtool")
 
 ENV_NAME = "DUBTOOL_FAULTS"
-_SPEC_RE = re.compile(r"^\s*(tts|llm)\s*:\s*(fail-first|503-first|timeout-first|hang)\s*=\s*(\d+)\s*$")
+_SPEC_RE = re.compile(r"^\s*(tts|llm)\s*:\s*(fail-first|503-first|504-first|timeout-first|hang)\s*=\s*(\d+)\s*$")
+_FLAG_RE = re.compile(r"^\s*(llm)\s*:\s*(429-day)\s*$")
 _IDS_RE = re.compile(r"^\s*(tts|llm)\s*:\s*refuse-ids\s*=\s*(\d+(?:\s*,\s*\d+)*)\s*$")
 
 
@@ -33,11 +34,16 @@ def parse_specs(specs: list[str] | None) -> dict[str, dict[str, int]]:
                 int(v) for v in ids.group(2).replace(" ", "").split(",")
             ]
             continue
+        m = _FLAG_RE.match(spec)
+        if m:
+            faults.setdefault(m.group(1), {})[m.group(2)] = 1
+            continue
         m = _SPEC_RE.match(spec)
         if not m:
             raise ValueError(
                 f"invalid --fault spec {spec!r}; expected 'tts:fail-first=N', "
-                "'tts:hang=N', 'tts:refuse-ids=4,12' or 'llm:503-first=N'"
+                "'tts:hang=N', 'tts:refuse-ids=4,12', 'llm:503-first=N', "
+                "'llm:504-first=N' or 'llm:429-day'"
             )
         faults.setdefault(m.group(1), {})[m.group(2)] = int(m.group(3))
     return faults

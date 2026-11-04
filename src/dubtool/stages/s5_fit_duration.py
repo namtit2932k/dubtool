@@ -95,7 +95,11 @@ def run(job, config, force: bool = False, cancel=None, api_keys: list[str] | Non
     from dubtool.job import StageCancelled
 
     audio_utils.require_ffmpeg()
-    entries = read_json(job.translated_path)
+    # Update 12 task 3: sentence mode works on the dub units (one clip per
+    # whole sentence); segment mode keeps the old per-segment flow.
+    from dubtool.dub_units import source_for_stage
+
+    mode, entries, persist, base = source_for_stage(job, config)
     entries.sort(key=lambda e: e["start"])
 
     counts: dict[str, int] = {}
@@ -141,12 +145,12 @@ def run(job, config, force: bool = False, cancel=None, api_keys: list[str] | Non
         if cancel is not None and cancel.is_set():
             raise StageCancelled(f"s5: cancelled by user at segment {entry['id']}")
         seg_id = entry["id"]
-        source = job.tts_dir / f"{seg_id}.mp3"
+        source = job.tts_dir / f"{base(entry)}.mp3"
         if not entry.get("vi") or not source.exists():
-            log.warning("s5: segment id=%d missing vi/tts clip, skipping", seg_id)
+            log.warning("s5: entry id=%d missing vi/tts clip, skipping", seg_id)
             log.info("s5: progress %d/%d", processed, len(entries))
             continue
-        fitted = job.fitted_dir / f"{seg_id}.wav"
+        fitted = job.fitted_dir / f"{base(entry)}.wav"
         if fitted.exists() and not force and entry.get("fit_status") not in (None, "pending"):
             counts[entry["fit_status"]] = counts.get(entry["fit_status"], 0) + 1
             log.info("s5: progress %d/%d", processed, len(entries))
@@ -289,7 +293,7 @@ def run(job, config, force: bool = False, cancel=None, api_keys: list[str] | Non
                         entry["id"], round_number, max_attempts, duration, ctx.slot,
                     )
                     updated_any = True
-                write_json(job.translated_path, entries)  # crash-safe per chunk
+                persist()  # crash-safe per chunk
         except BudgetExhausted as exc:  # 5.2: finish the run with what exists
             if not budget_note_logged:
                 budget_note_logged = True
@@ -343,9 +347,9 @@ def run(job, config, force: bool = False, cancel=None, api_keys: list[str] | Non
         log.info(
             "s5: progress %d/%d", done_early + finalize_index + 1, len(entries)
         )
-        write_json(job.translated_path, entries)  # crash-safe: save per segment
+        persist()  # crash-safe: save per entry
 
-    write_json(job.translated_path, entries)
+    persist()
     summary = ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
     log.info("s5: fit summary: %s", summary)
     if overflow_ids:

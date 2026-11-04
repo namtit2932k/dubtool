@@ -64,6 +64,32 @@ def build_rows(job_dir: Path, mark_uncertain: bool = False) -> list[dict]:
     from dubtool.schedule import load_schedule
     from dubtool.units import build_units
 
+    schedule = load_schedule(job_dir) or []
+    play_start = {int(s["id"]): float(s["play_start"]) for s in schedule}
+
+    # Update 12 task 3.5: in sentence mode the readable file reads the dub
+    # units (one row per whole sentence — no change in layout) with the
+    # schedule's playback times; older jobs fall through to units.json.
+    dub_file = job_dir / "dub_units.json"
+    if dub_file.exists():
+        try:
+            records = read_json(dub_file)
+        except Exception:
+            records = None
+        if isinstance(records, list) and records:
+            rows: list[dict] = []
+            for rec in sorted(records, key=lambda r: int(r["unit_id"])):
+                en = (rec.get("text") or "").strip()
+                vi = (rec.get("vi") or "").strip()
+                if not en or not vi:
+                    continue  # section 5.2: skip rows whose side is empty
+                uid = int(rec["unit_id"])
+                seconds = play_start.get(uid, float(rec.get("start") or 0.0))
+                if mark_uncertain and rec.get("uncertain"):
+                    vi = f"{vi} {place_uncertain()}".strip()
+                rows.append({"time": seconds, "en": en, "vi": vi})
+            return rows
+
     entries = read_json(job_dir / "translated.json")
     if not isinstance(entries, list):
         raise RuntimeError("translated.json has an unexpected format")
@@ -80,10 +106,7 @@ def build_rows(job_dir: Path, mark_uncertain: bool = False) -> list[dict]:
                 for e in entries
             ]
         )
-    schedule = load_schedule(job_dir) or []
-    play_start = {int(s["id"]): float(s["play_start"]) for s in schedule}
-
-    rows: list[dict] = []
+    rows: list[dict] = []  # segment-mode fallback rows
     for unit in units:
         seg_ids = [int(i) for i in unit.get("seg_ids", [])]
         texts_en = [by_id[i].get("text") or "" for i in seg_ids if i in by_id]

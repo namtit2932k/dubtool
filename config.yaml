@@ -26,20 +26,30 @@ llm:
   max_requests_per_run: 40     # one run stops calling the LLM after this many requests
   request_timeout_s: 180       # per-request cap (Accurate mode); Fast mode: request_timeout_s_fast
   request_timeout_s_fast: 90   # AGU8 3.5: Fast mode gets a tighter cap
-  # AGENT_UPDATE_8 task 2: 503/504 retry schedule (seconds, exponential with jitter).
-  server_error_backoff_s:
+  # Update 12 task 2: the bounded capacity retry schedule (503/500/502 —
+  # at most 4 attempts, never a split on these; jitter added).
+  backoff_s:
+    - 5
+    - 15
+    - 45
+    - 90
+  server_error_backoff_s:      # legacy name, kept for old configs
     - 10
     - 30
     - 90
-  split_on_timeout: true       # after a timeout, split the chunk instead of resending
-  split_min_units: 2           # AGU11 2.2: halves stay at least this many units
-  split_min_chars: 300         # AGU11 2.2: and at least this many source chars
+  split_on_timeout: true       # 504/timeout/400-size split ONCE (503 never splits)
+  split_min_units: 4           # a chunk must be larger than this to split
+  split_min_chars: 600         # ...and larger than this many source chars
   # AGENT_UPDATE_11 2.1: request size caps (chars first, then unit count).
   chunk_max_chars: 1200        # a 16-unit/3827-char video becomes 3-4 requests
   chunk_max_units: 8
-  overload_after: 2            # consecutive 503/504 before the overload policy kicks in
-  overload_policy: ask         # ask | fallback_fast | wait (CLI/--headless-run default fallback_fast)
-  stage_budget_s: 600          # AGU11 2.3: seconds one stage may spend waiting on failing model requests
+  breaker_failures: 3          # consecutive failed REQUESTS before the breaker opens
+  breaker_cooldown_s: 60       # the open window; a half-open probe decides
+  fallback_after_opens: 2      # breaker opens this many times -> Fast model
+  max_rpm: null                # optional token bucket per model (requests/minute)
+  overload_after: 2            # dialog cadence for the 'ask' policy
+  overload_policy: fallback_fast  # ask | fallback_fast | wait (Settings -> General)
+  stage_budget_s: 300          # stage wait budget on failing requests before the fallback
   shorten_fallback_mode: fast  # stage-5 shortening retries with the Fast model on daily quota
   gemini:
     model: gemini-3.5-flash-lite   # default: stable, free-of-charge tier (checked official docs 2026-10-25)
@@ -97,6 +107,9 @@ asr:
 schedule:
   gap_s: 0.08            # pause between adjacent Vietnamese clips
   max_shift_s: 2.0       # cap for delaying a clip; beyond -> overlap: true
+# Update 12 task 2: the unit of dubbing — one clip per whole sentence.
+dub:
+  granularity: sentence        # sentence (default) | segment (old jobs resume)
 # AGENT_UPDATE_8 task 1: TTS resilience.
 tts:
   retry_rounds: 3              # deferred retry rounds after the first pass
@@ -108,12 +121,13 @@ tts:
   attempt_delays_s:            # AGU11 3.3: waits between the repair-ladder steps
     - 2
     - 5
-  max_chars_per_request: 90    # AGU11 3.3: step-2 sentence chunking cap
-  alt_voice: vi-VN-NamMinhNeural  # AGU11 3.3: step 3 voice for one segment
-  join_silence_s: 0.08         # AGU11 3.3: silence between joined parts
-  unit_budget_s: 60            # AGU11 3.3: one segment's first-pass budget
-  stage_budget_s: 600          # AGU11 3.4: budget for failing waits in the stage
-  budget_policy: ask           # ask | fallback | stop
+  max_chars_per_request: 200   # Update 12 task 3.3: split cap (one voice)
+  alt_voice: vi-VN-NamMinhNeural  # DEPRECATED (Update 12: one voice per video) — ignored
+  join_silence_s: 0.08         # silence between the split pieces, same voice
+  unit_budget_s: 60            # one unit's first-pass budget
+  stage_budget_s: 600          # budget for failing waits before the budget dialog
+  budget_policy: stop          # headless: stop (default) | switch_all; the GUI shows the dialog
+  max_rps: 1.0                 # Update 12 task 5: global voice-request pacing
   breaker_consecutive: 3       # stop calling the service after N failures in a row
   pacing_delay_s: 0.3          # wait between requests; grows after failures
   max_delay_s: 2               # pacing delay cap

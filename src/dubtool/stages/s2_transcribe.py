@@ -162,6 +162,103 @@ def cleanup_segments(
     return cleaned, removals
 
 
+# ------------------------------------------------ boundary word repeats
+# Update 12 task 3.6: words that are legitimately doubled ("very very",
+# "so so") never collapse — the recognizer boundary repeats below skip them.
+BOUNDARY_STOP_WORDS = {
+    "very", "that", "had", "no", "so", "bye", "really", "okay", "ok",
+    "yes", "well", "now", "then", "never", "not", "too", "again",
+}
+
+
+def _norm_word(token: str) -> str:
+    return re.sub(r"[^\w'’]", "", token).lower()
+
+
+def collapse_boundary_word(
+    segments: list[dict[str, Any]], words: list[dict] | None
+) -> tuple[list[dict[str, Any]], list[tuple[int, str]]]:
+    """Update 12 task 3.6: collapse an identical word repeated at a
+    segment boundary using the word timestamps.
+
+    When the last word of segment i and the first word of segment i+1 are
+    identical (case-insensitive) and their time ranges overlap or are less
+    than 0.1 s apart, the second occurrence is dropped — but never for a
+    word that is legitimately doubled (the stop list above). Complements
+    the existing rule that removes runs of three or more repeated words.
+    Returns (segments, removals) with occurrence-order entries
+    [(segment_id_kept, dropped_word)]. Every removal is logged.
+    """
+    if not words:
+        return segments, []
+    segs = [dict(s) for s in segments]
+    removals: list[tuple[int, str]] = []
+
+    def _tokens(text: str) -> list[re.Match]:
+        return list(re.finditer(r"[\w'’]+", text or ""))
+
+    i = 0
+    while i < len(segs) - 1:
+        tail_matches = _tokens(segs[i]["text"])
+        head_matches = _tokens(segs[i + 1]["text"])
+        if not tail_matches or not head_matches:
+            i += 1
+            continue
+        tail = _norm_word(tail_matches[-1].group(0))
+        head = _norm_word(head_matches[0].group(0))
+        if not tail or tail != head or tail in BOUNDARY_STOP_WORDS:
+            i += 1
+            continue
+        tail_span = _time_of_seg_word(segs[i], tail_matches[-1], words, last=True)
+        head_span = _time_of_seg_word(segs[i + 1], head_matches[0], words, last=False)
+        if tail_span is None or head_span is None:
+            i += 1
+            continue
+        tail_start, tail_end = tail_span
+        head_start, head_end = head_span
+        # Overlapping ranges, or ranges less than 0.1 s apart.
+        gap = max(0.0, max(tail_start - head_end, head_start - tail_end))
+        if not (gap < 0.1 or (head_start < tail_end and tail_start < head_end)):
+            i += 1
+            continue
+        # Drop the second occurrence from the start of segment i+1.
+        raw = segs[i + 1]["text"]
+        begin = head_matches[0].start()
+        end = head_matches[0].end()
+        remainder = raw[end:].lstrip(" \t\r\n\u00a0")
+        removed = raw[begin:end]
+        if not remainder:
+            i += 1
+            continue  # never empty out a segment for one word
+        removals.append((int(segs[i + 1].get("id", i + 1)), removed))
+        log.info(
+            "s2: boundary repeat dropped: word %r removed from segment %d "
+            "(same word ends segment %d, times %.2f/%.2f)",
+            removed, segs[i + 1].get("id", i + 1), segs[i].get("id", i),
+            tail_start, head_start,
+        )
+        segs[i + 1]["text"] = remainder
+        i += 1
+    return segs, removals
+
+
+def _time_of_seg_word(seg: dict, match: re.Match, words: list[dict], *,
+                      last: bool) -> tuple[float, float] | None:
+    """The (start, end) span of `match` inside `seg`: word-list entries
+    whose time falls inside the segment and whose token equals the match."""
+    norm = _norm_word(match.group(0))
+    candidates = [
+        w for w in words
+        if _norm_word(w.get("w") or "") == norm
+        and float(w.get("start") or 0.0) >= float(seg["start"]) - 0.05
+        and float(w.get("end") or 0.0) <= float(seg["end"]) + 0.05
+    ]
+    if not candidates:
+        return None
+    chosen = candidates[-1] if last else candidates[0]
+    return float(chosen["start"]), float(chosen["end"])
+
+
 def _finalize(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Attach contract fields and sequential ids (AGENT.md section 4)."""
     return [
@@ -188,6 +285,15 @@ def _postprocess_only(job, config) -> None:
     cleaned, removals = dedupe_repeats(
         cleaned, min_words=int(config.asr.get("dedupe_min_words", 3))
     )
+    # Update 12 task 3.6: single boundary-word repeats collapse against the
+    # word timestamps (never for legitimately doubled words).
+    try:
+        from dubtool.punctuate import read_words
+
+        cleaned, boundary_removals = collapse_boundary_word(cleaned, read_words(job))
+        removals = removals + boundary_removals
+    except Exception:
+        log.info("s2 postprocess: boundary-word collapse skipped (no word times)")
     for i, seg in enumerate(cleaned):
         seg["id"] = i
     write_json(job.transcript_path, _finalize(cleaned))
@@ -232,6 +338,11 @@ def _transcribe(model, job, config) -> None:
     cleaned, removals = cleanup_segments(
         segments, dedupe_min_words=int(config.asr.get("dedupe_min_words", 3))
     )
+    # Update 12 task 3.6: single boundary-word repeats collapse against the
+    # word timestamps (never for legitimately doubled words).
+    if words:
+        cleaned, boundary_removals = collapse_boundary_word(cleaned, words)
+        removals = removals + boundary_removals
     for seg_id, removed in removals:
         log.info("s2: removed repeated words from segment %d: %r", seg_id, removed)
     from dubtool.job import write_json

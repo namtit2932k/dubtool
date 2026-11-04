@@ -20,7 +20,9 @@ from dubtool.units import build_units, split_translation
 # ------------------------------------------------------------- 7.1 prompts
 def test_translate_system_has_soft_budget_and_json_rule():
     text = prompts.TRANSLATE_SYSTEM
-    assert "soft target" in text
+    # Update 12 task 3.2: the budget is information, not an order.
+    assert "not an order" in text
+    assert "Never produce fragments" in text
     assert "Accuracy first" in text
     assert "ONLY valid JSON" in text
     assert "native Vietnamese YouTuber" not in text
@@ -29,7 +31,8 @@ def test_translate_system_has_soft_budget_and_json_rule():
 
 def test_translate_user_template_rules():
     text = prompts.TRANSLATE_USER_TEMPLATE
-    assert "soft target" in text
+    # Update 12 task 3.2: the budget is information, not an order.
+    assert "not an order" in text
     assert "ONLY a JSON array" in text
     assert "glossary" in text.lower()
 
@@ -296,8 +299,13 @@ def test_stage3_unit_mode_keeps_per_segment_contract(tmp_path, monkeypatch):
     assert len(entries) == 3
     by_id = {e["id"]: e for e in entries}
     for e in entries:
-        assert set(e) == {"id", "start", "end", "text", "vi", "max_chars",
-                          "reviewed", "tts_duration", "fit_status"}
+        assert set(e) in (
+            {"id", "start", "end", "text", "vi", "max_chars",
+             "reviewed", "tts_duration", "fit_status"},
+            # Update 12: sentence mode also stamps the display-only fact.
+            {"id", "start", "end", "text", "vi", "max_chars",
+             "reviewed", "tts_duration", "fit_status", "derived"},
+        )
     # Unit 0 covered segments 0+1 (same sentence split by the ASR) and unit 1 is segment 2.
     assert by_id[0]["vi"] and by_id[1]["vi"] and by_id[2]["vi"]
     joined = (by_id[0]["vi"] + " " + by_id[1]["vi"]).strip()
@@ -305,6 +313,18 @@ def test_stage3_unit_mode_keeps_per_segment_contract(tmp_path, monkeypatch):
     # units.json written
     units = read_json(job.dir / "units.json")
     assert units[0]["seg_ids"] == [0, 1]
+    # Update 12: the dub units file is written in sentence mode — one
+    # record per unit with the complete sentence and the model; the
+    # per-segment rows are marked as derived display data.
+    records = read_json(job.dir / "dub_units.json")
+    assert [r["unit_id"] for r in records] == [0, 1]
+    assert records[0]["vi"] == "Ồ, cô ấy lại làm thế nữa à?"
+    # The fake provider reports its model id as "?"; the field exists.
+    assert records[0]["model"] in (None, "?", "m")
+    assert records[0]["voice"] is None
+    assert by_id[0].get("derived") is True
+    assert by_id[1].get("derived") is True
+    assert by_id[2].get("derived") is True
 
 
 def test_stage3_skips_unit_with_reviewed_segment(tmp_path, monkeypatch):

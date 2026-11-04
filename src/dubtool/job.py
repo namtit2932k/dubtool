@@ -140,6 +140,16 @@ class Job:
         return self.dir / "translated.json"
 
     @property
+    def translate_chunks_path(self) -> Path:
+        """Update 12 task 2.3: per-chunk translation checkpoints."""
+        return self.dir / "translate_chunks.json"
+
+    @property
+    def dub_units_path(self) -> Path:
+        """Update 12 task 3.1: the sentence dub unit data (stages 3-7)."""
+        return self.dir / "dub_units.json"
+
+    @property
     def tts_dir(self) -> Path:
         return self.dir / "tts"
 

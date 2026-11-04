@@ -75,6 +75,19 @@ def test_parse_specs_accepts_llm_faults():
         faults_mod.parse_specs(["llm:bogus=1"])
 
 
+def test_parse_specs_accepts_the_update12_faults():
+    """The exe fault runs of this update need 504-first and 429-day too."""
+    from dubtool import faults as faults_mod
+
+    parsed = faults_mod.parse_specs(
+        ["llm:504-first=2", "llm:429-day", "llm:503-first=8", "tts:refuse-ids=3,5,8", "tts:hang=1"]
+    )
+    assert parsed == {
+        "llm": {"504-first": 2, "429-day": 1, "503-first": 8},
+        "tts": {"refuse-ids": [3, 5, 8], "hang": 1},
+    }
+
+
 def test_get_provider_wraps_when_faults_declared(monkeypatch):
     monkeypatch.setenv("DUBTOOL_FAULTS", "llm:503-first=1")
     monkeypatch.setattr(

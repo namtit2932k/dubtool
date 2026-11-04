@@ -153,7 +153,7 @@ Key internals:
 
 ## License
 
-Application code: see `LICENSE` (to be added). Bundled runtime components —
-FFmpeg (GPL build compliance note in `packaging/THIRD_PARTY.md`), faster-whisper
-models, edge-tts voices, Qt — keep their own licenses and are **not** committed
-to this repository.
+No license has been chosen yet (all rights reserved by default). Bundled
+runtime components — FFmpeg (GPL build compliance note in
+`packaging/THIRD_PARTY.md`), faster-whisper models, edge-tts voices, Qt — keep
+their own licenses and are **not** committed to this repository.

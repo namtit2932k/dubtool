@@ -536,7 +536,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--out", default=None, help="copy the final dubbed video to this path")
     run_p.add_argument("--force", action="store_true", help="redo finished stages / overwrite --out")
     run_p.add_argument("--keep-level", choices=("none", "light", "full"), default="light",
-                       help="what to keep in the job folder after success (AGU10 5.2)")
+                       help="what to keep in the job folder after success ")
     run_p.add_argument("--mix-mode", choices=("static", "duck"), default=None)
     run_p.add_argument("--original-gain-db", type=float, default=None)
     run_p.add_argument("--dub-gain-db", type=float, default=None)

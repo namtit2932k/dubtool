@@ -210,6 +210,51 @@ def default_line_chars(width: int, height: int, configured: int | None = None) -
     return MAX_LINE_CHARS
 
 
+def split_unit_cues(
+    text: str, start: float, end: float,
+    max_line_chars: int = MAX_LINE_CHARS, max_lines: int = MAX_LINES,
+) -> list[tuple[float, float, str]]:
+    """Update 12 task 3.5: in sentence mode one unit becomes however many
+    consecutive cues it needs — pieces cut at clause punctuation (or at a
+    word boundary when no punctuation fits), each at most
+    max_lines x max_line_chars characters, with times inside the unit's
+    window proportional to character counts. A short unit is returned
+    unchanged (one cue; wrapped later).
+
+    Pieces never overlap and never break a word."""
+    text = " ".join((text or "").split())
+    if not text:
+        return []
+    cap = max_lines * max(1, max_line_chars)
+    if len(text) <= cap:
+        return [(start, end, text)]
+    marks = (",.;:!")
+    pieces: list[str] = []
+    rest = text
+    while len(rest) > cap:
+        head = rest[: cap + 1]
+        cuts = [head.rfind(m + " ") + 1 for m in marks]
+        late = max((c for c in cuts if c > cap // 2), default=0)
+        cut = late if late > 0 else head.rfind(" ")
+        if cut <= 0:
+            cut = cap
+        pieces.append(rest[:cut].strip())
+        rest = rest[cut:].strip()
+    if rest:
+        pieces.append(rest)
+    span = max(0.0, end - start)
+    chars = [len(p) for p in pieces]
+    total = sum(chars) or 1
+    cues: list[tuple[float, float, str]] = []
+    cursor = start
+    for i, piece in enumerate(pieces):
+        share = span * chars[i] / total
+        cue_end = end if i == len(pieces) - 1 else cursor + share
+        cues.append((cursor, cue_end, piece))
+        cursor = cue_end
+    return cues
+
+
 def render_blocks(
     cues: list[tuple[float, float, str]],
     max_line_chars: int = MAX_LINE_CHARS,
@@ -242,6 +287,7 @@ def build_srt(
     fitted_dir: Path | None = None,
     schedule: list[dict] | None = None,
     max_line_chars: int = MAX_LINE_CHARS,
+    split_long_units: bool = False,
 ) -> str:
     """Render the SRT from translated entries.
 
@@ -261,7 +307,12 @@ def build_srt(
                 float(sched[index + 1]["play_start"]) if index + 1 < len(sched) else None
             )
             start, end = cue_window(s["play_start"], s["play_end"], next_start)
-            cues.append((start, end, text))
+            if split_long_units:
+                # Update 12 task 3.5: a sentence unit may need several
+                # consecutive cues with proportional times.
+                cues.extend(split_unit_cues(text, start, end, max_line_chars))
+            else:
+                cues.append((start, end, text))
     else:
         ordered = sorted(entries, key=lambda e: e["start"])
         for index, entry in enumerate(ordered):

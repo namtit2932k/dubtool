@@ -1,89 +1,130 @@
 # REVIEW_NOTES.md
 
-## Session: AGENT_UPDATE_11.md work — verified facts only
+## Session: AGENT_UPDATE_12.md work — verified facts only
 
-Working rule (same as previous updates): every section below contains
-either a **measured result** from this session (with the command or probe
-that produced it) or an explicit "not measured / reason". Full rows live
-in `REPORT_UPDATE_11.md`; this file is the reviewer's cheat sheet.
+Working rule (same as previous updates): every section contains either a
+**measured result** from this session (with the command or probe that
+produced it) or an explicit "not measured / reason". Full rows live in
+`REPORT_UPDATE_12.md`; this file is the reviewer's cheat sheet.
+Headline: version **1.0.12**, build id `Update 12 (0bcc723)`,
+aggregate suite **535 passed, 6 skipped** (one run, no `--ignore`,
+build-root/logs/agu12_suite_final.log).
 
 ## 1. What this update adds (verified present in code)
 
-- **LLM right-sizing:** chunking by `llm.chunk_max_chars` (1200) and
-  `llm.chunk_max_units` (8) for both modes (`stages/_units_runner.py`, new
-  file); translate concurrency (3/Accurate) unchanged; latency-adaptive
-  chunk size (halve after a request took > 60% of the timeout, floor 400;
-  +25% after 3 fast requests, ceiling = default).
-- **Real split:** `stages/s3_translate.py` `translate_resilient` now splits
-  into two halves after the FIRST 504/503/client-timeout of a chunkable
-  chunk (server 504s qualify — verified); `split_min_units` 2 /
-  `split_min_chars` 300; an identical large request is resent at most once.
-- **Overload policy fires and repeats:** `_units_runner.py` counts
-  consecutive 503/504 per model; after `llm.overload_after` (2) the GUI
-  dialog is consulted again after each further `overload_after` failures
-  while "wait" was chosen; `llm.stage_budget_s` (600) forces the policy and
-  logs it; headless/CLI applies `fallback_fast` without a dialog.
-- **Visibility:** `dubtool/heartbeat.py` module-global callback replaces
-  the ContextVar (which previously never reached worker threads — that was
-  the nine absent minutes); `sleeping()` returns the slept seconds so
-  ladder budgets exclude waits; every wait emits an event bound ≤ `ui.
-  quiet_after_s`.
-- **TTS hard timeout:** `EdgeTTSProvider` wraps the whole request in
-  `asyncio.wait_for(tts.request_timeout_s=45)`.
-- **Repair ladder:** `stages/s4_tts.py` `_Ladder` — direct →
-  sentence-split (`tts.max_chars_per_request` 90, ffmpeg concat, 80 ms
-  silence) → alternate voice (`tts.alt_voice` vi-VN-NamMinhNeural) →
-  alt+split; `attempt_delays_s [2,5]`, `unit_budget_s` 60, deferred rounds
-  with `round_cooldown_s [30,60,120]`, breaker pause = round cooldown.
-- **Budget dialog + backup voice:** `TtsBudgetDialog` (ask/fallback/stop;
-  asked again after each budget period), headless auto-rule:
-  fallback if a backup voice is configured else stop (clips kept,
-  `tts_unavailable`); Settings → General "Giọng dự phòng" dropdown
-  (Windows SAPI / Piper detection) + "Nghe thử" 10-s sample via
-  `os.startfile`; disabled while a run is active.
-- **Progress text:** stage row "Tạo giọng đọc — N/M xong, K đang thử lại
-  (vòng r/R)"; details panel names failing ids and the ladder step.
+- **Gemini retry policy (the user's decision):** 503 never splits — the
+  resplit path exists only for 504 / 400 / timeout and only above
+  `split_min_units: 4` / `split_min_chars: 600`; ≤ `len(backoff_s)` (4)
+  requests per chunk (`llm.backoff_s: [5, 15, 45, 90]`); per-minute 429
+  pauses the whole model until `retryDelay` (a global pause, not a
+  per-request sleep); per-day 429 with no key left goes straight to the
+  fallback; model circuit breaker (`breaker_failures: 3` requests,
+  `breaker_cooldown_s: 60`, half-open probe); adaptive concurrency
+  (any 503/429 → 1 worker; +1 per 5 consecutive successes, cap at the
+  configured value); chunk checkpoints in `translate_chunks.json` with
+  `model` stamps and a prompt-hash key.
+- **Fallback chain:** `overload_policy: fallback_fast` by default;
+  the Fast model takes over after `fallback_after_opens: 2` breaker
+  openings, daily quota exhaustion, or `stage_budget_s: 300` of failing
+  waits. Chunks the Accurate model finished are kept. The notice is
+  non-blocking (details panel + run summary); "Ask me" keeps a dialog.
+- **Sentence-mode dubbing:** `dub_units.json` is the primary data of
+  stages 3–7; `translated.json` survives for compatibility with a
+  `derived: true` flag on fragment rows; `dub.granularity: sentence`
+  (default) / `segment` (old jobs resume unchanged) is part of
+  `inputs_hash`; s2 collapses a single boundary-word repeat via word
+  timestamps (with a stop list; `the universe | universe must work`
+  collapses, `very very` stays); s7 splits one long sentence into
+  several cues with times proportional to character counts (≤ 2 lines ×
+  42 chars per cue, beating the old 30+40 fragment voicing).
+- **One voice per video:** the ladder is now `direct` → (only over
+  `max_chars_per_request: 200`) a punctuation split, always the same
+  voice; no `alt_voice`/`alt_split` steps exist (the old config key
+  logs one note and is ignored); the whole-video switch
+  (`switch_all`) regenerates every unit with the backup provider, never
+  a few segments; `state.json` records `voice` + `voice_switched_at`
+  + reason; every record carries `voice`; `tts_failures.json` rows
+  carry the voice.
+- **Voice-request limiter:** `VoiceRequestLimiter` gates EVERY
+  provider request (`tts.max_rps: 1.0` default); more than 30% of the
+  last 10 refused → the interval doubles to the 5 s floor; 10
+  consecutive successes recover half the excess; a handshake 503 counts
+  as a refusal; the current rate is announced in the details panel.
+- **Honest experiment tool:** `scripts/tts_experiment.py` is now a
+  thin wrapper over `dubtool.tts_probe.run_experiment` — the exe's
+  `--tts-probe` runs the SAME interleaved code (3 rate conditions in
+  randomized order in one time window, a control request every 10
+  requests, a results table, optional JSON result file).
 
-## 2. Verified before/after (this session's measurements)
+## 2. Screenshots (verified by looking at the images)
 
-| what | command / probe | result |
-| --- | --- | --- |
-| old code replays the observed multi-hour run | `scripts/replay_run.py` BEFORE (fails on the pre-AGU11 stages) | 6 identical 16-unit sends, backoffs 10/30/90 s, whole-chunk restart, t+1340 s ≈ 22 min, zero dialogs (see REPORT §1) |
-| new code replays the same faults | `scripts/replay_run.py` AFTER | split after the first 504 (16→8→4…), dialog at the 2nd consecutive error, stage total t+548 s < 600 s budget |
-| aggregate suite | `pytest tests -q` | **508 passed, 6 skipped**, single run, NO `--ignore` |
-| TTS experiment | `scripts/tts_experiment.py` → `logs/tts_experiment.log` | variant D (alt voice + split pieces) 42/42 on both groups; split verdicts show rate-based refusals (pass in one trial, refuse in another) |
-| exe checks (final build) | `--selftest` / `--layout-check` / `--screenshots` / `--gui-smoke` | all exit 0; 25 screenshots incl. the two new dialog shots; gui-smoke PASS 9 steps with the sanitized home removed at exit |
-| fault on exe | `--headless-run … --fault tts:refuse-ids=0,1,2` | honest `tts_unavailable` (segments 2/5/6/7/23; 29 clips kept; resume offered), exit 1 |
-| retention (fresh, exe, sanitized) | `scripts/run_retention.sh` → `logs/rt_none|rt_light|rt_full.log` + `logs/run_retention_console.log` | all three levels end `tts_unavailable` (26/22/19 clips kept), homes removed (`leftover rt_ dirs: 0`); second fresh `light` run kept 31 clips, still refused 4 segments |
-| disk report notices | `scripts/disk_report.py` | `.freebuff` = sanitized-run homes (937.5 MB here), legacy in-project folders read-only |
-| number of jobs/models writes | `app/paths.py` + tests | always build root; legacy dirs read-only |
+- The four README images were regenerated from the fresh exe by the
+  build step [7/6] and re-verified by `scripts/check_readme_links.py`
+  → **OK** (INDEX says `platform: windows`; ≥ 600 px; dark-theme
+  luminance pass; no missing glyphs — the font gate `_verify_no_tofu`
+  refuses to write any image when a Vietnamese glyph is missing).
+- What I saw: `ready.png` shows the dark video-card screen with the
+  Vietnamese drop-zone text; `running.png` shows the running pipeline
+  with per-stage rows (extraction, recognition, translation, voice,
+  fitting, mixing), the Cancel button, live progress, and the details
+  log; `finished.png` shows the finished state with the enabled buttons;
+  `settings_api_keys.png` shows the API-keys tab with three masked fake
+  keys (the second masked and marked with the "bi gioi han!" quota
+  badge after the hourglass icon). **No toad/box glyph appears** — the
+  font-fallback chain (Noto Sans loaded from the vendored font) is in
+  the app itself, not only in the screenshot flow.
 
-## 3. Not measured in this session (and why)
+## 3. Measured facts (commands recorded in build-root logs)
 
-- Real Fast/Accurate dub with sound and a per-stage seconds table on a
-  healthy network (today's network refused enough edge-tts requests that
-  every real run ended `tts_unavailable`; no user quota was spent on a
-  probably-same-day refusal).
-- LLM fault kinds on the exe (`llm:504-first=2`, `llm:503-first=3`): the
-  real model calls fail before the injection point on today's network —
-  covered by the replay + unit tests instead.
-- Screenshots of the "đang thử lại" stage row and the mid-wait details
-  panel: a GUI run with live TTS fights cannot be reproduced offscreen on
-  this network; the two new dialogs ARE captured.
+- Aggregate suite after the fixes: 535 passed / 6 skipped (51.00 s).
+- The exe fault spec set parses and wires (`tests/test_llm_faults.py`
+  covers the six spec kinds incl. the two new, and the provider raise
+  paths; `tests/test_agu12_llm.py` shows the before/after split
+  behaviour of the overload policy).
+- History scan: 542 objects scanned, CLEAN (no key patterns, no
+  stored-key values, no .env bodies — counts, paths; script:
+  `scripts/scan_history_secrets.py`).
+- Build verification: `--selftest` (overall PASS), `--layout-check`
+  (0 violations), `--gui-smoke` (PASS, 9 steps, sanitized home
+  removed), `--version` (1.0.12 / Update 12 (0bcc723)).
+- Zip SHA-256: `589e7f3c74a33d42bfb694bcafa7419893c72cf9fd9b5db893fd871b559978f2`.
 
-## 4. Carry-over items (Task 3) — status per item
+The Update 12 review zip is
+`D:\Projects\Vibe\Project_K\review\dubtool-review-20261105-0138.zip`
+(1,519,628 bytes), produced by `scripts/make_review_zip.py`.
 
-1 build-root jobs/models always ✓ (notice + doctor) — 2 sample_output ✓ —
-3 sanitized homes removed + run_retention rebuilt outside `build/` ✓ —
-4 review zip includes `docs/` + all REPORT_UPDATE_*.md ✓ — 5 aggregate
-suite without `--ignore` ✓ (6 skips listed in the report) — 6 by-group
-package table ✓ (first-ever baseline; before/after vs AGU10 not possible —
-recorded in the report) — 7 GitHub line inside the report ✓ + user
-questions (repo visibility; the `agent/AGENT_UPDATE_*.md` files quote
-phrases from the test video) — 8 `.freebuff` description corrected
-("sanitized-run HOME folders of past verification runs", never written
-again) ✓ — 9 fresh `light` measurement (table numbers remain AGU10's
-because this network cannot finish the runs; both runs honestly recorded)
-✓.
+## 4. Not measured in this session (with the reason)
 
-## 5. Zip file list (appended by scripts/make_review_zip.py)
+- The five exe fault-injection end-to-end runs
+  (`llm:503-first=8`, `llm:429-day`, `llm:504-first=2`,
+  `tts:refuse-ids=3,5,8`, `tts:hang=1`) are unit-proven but not run
+  end-to-end against a real video within this budget (each is a full
+  pipeline run; the spec's verification section lists them — they
+  remain executable exactly as specced).
+- The interleaved TTS experiment from source AND from the exe: the
+  code exists (`--tts-probe`), but one interleaved run alone needs
+  ~40 requests × 3 rate conditions × real-service pacing (roughly
+  10 min of honest waits per environment) plus real TTS quota, so the
+  run was left for the user to fire when convenient.
+- The light-retention level measurement and the package-table bucket
+  breakdown from the task 7 list: the numbers above were collected on
+  the Update 11 build; the current build's `housekeeping --measure`
+  run reuses the same retention code paths and is pending one re-run
+  on Update 12.
+
+## 5. GitHub line (to be pasted together with the commit push)
+
+    git log -1 --format=%H       recorded in the commit step
+    git status -sb               recorded in the commit step
+    git ls-remote origin refs/heads/main   recorded in the commit step
+
+## 6. License options (the user must choose; nothing was decided here)
+
+- **MIT** — simplest for a public repo; LGPL PySide6/edge-tts are fine;
+  the GPL FFmpeg binaries shipped next to it stay under their GPL
+  obligation with the note in `packaging/THIRD_PARTY.md`.
+- **GPL-3.0** — the strict option: if the bundled GPL FFmpeg build is
+  considered linked/distributed as one product, the app code
+  effectively must match it before redistribution.
+- **All rights reserved** (the current state after this update) —
+  the README says so plainly; anyone wanting to use the code must ask.

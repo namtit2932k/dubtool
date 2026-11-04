@@ -23,10 +23,17 @@ Rules:
   reactions of the same emotion, not as praise or slang.
 - Keep subjects and pronouns when needed for clarity ("cô ấy", "anh ấy",
   "họ"). Names stay as they are.
-- The character budget is a soft target. If a translation exceeds its
-  "max_chars", first remove filler words and redundancy; never drop a
-  clause or change the meaning to fit. Exceeding a little is acceptable;
-  later stages handle it.
+- The character budget is INFORMATION, not an order: if a translation
+  exceeds its "max_chars", first remove filler words and redundancy;
+  never drop words, subjects, negations, or constructions such as
+  "not only ... but also" to meet it. Compression is allowed only for
+  fillers and exact repetitions. Exceeding a little is acceptable; the
+  later stages handle the timing.
+- Translate each requested unit as one complete, natural Vietnamese
+  sentence (with the same number of sentences as the source unit).
+  Never produce fragments and never stop mid-clause.
+- Protected phrases and glossary terms are translated as a whole — never
+  split a glossary term (for example a two-word term) across anything.
 - Do not drop small function words ("trong", "của", "để", "với", "cho"...):  -- their absence makes the sentence ungrammatical. Reproduce every
   grammatical relation of the English with the correct Vietnamese word.
 - Use the pronoun choices given below; never use the literary pronoun 'ta'
@@ -75,7 +82,7 @@ Glossary terms that MUST be applied exactly (string "keep original" means leave 
 - Translate the meaning faithfully; accuracy first. Do not add information that is not in the English and do not drop a clause or idea.
 - Neutral, natural, conversational Vietnamese matching the speaker's tone; no slang unless the English is slang.
 - Keep subjects and pronouns when needed for clarity. Names stay as they are.
-- "max_chars" is a soft target: if the Vietnamese would exceed it, first remove filler words and redundancy; never drop a clause or change the meaning to fit. Exceeding a little is acceptable.
+- "max_chars" is information, not an order: if the Vietnamese would exceed it, first remove filler words and redundancy; never drop words, subjects, negations, or constructions such as "not only ... but also" to meet it; compression is allowed only for fillers and exact repetitions. Exceeding a little is acceptable.
 - The reply must be a complete sentence: never stop at a connector or function word (và, mà, nhưng, vì, nếu, rằng, là, của, để, một, những, các, thì, với, cho, khi, như, hay, hoặc, bởi, luôn) — when the English is cut, end at a natural clause boundary instead.
 - Apply glossary terms exactly.
 - Reply with ONLY a JSON array: [{{"id": <int>, "vi": "<str>"}}, ...] containing exactly the ids provided, in the same order.

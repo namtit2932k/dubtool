@@ -79,16 +79,31 @@ def run(job, config, force: bool = False, cancel=None) -> None:
     audio_utils.require_ffmpeg()
     cfg = config.subtitles
 
-    entries = read_json(job.translated_path)
-    if not isinstance(entries, list):
-        raise RuntimeError("translated.json is malformed — rerun stage s3")
+    # Update 12 task 3: in sentence mode the cues come from the dub units
+    # (a long sentence becomes several consecutive cues with proportional
+    # times); segment mode keeps the old per-segment cues. Both files are
+    # read through this module's read_json (patch-friendly for tests).
+    from dubtool.dub_units import granularity_for_job, units_path
+
+    mode = granularity_for_job(job, config)
+    entries = None
+    if units_path(job).exists():
+        loaded = read_json(units_path(job))
+        if isinstance(loaded, list) and loaded:
+            mode, entries = "sentence", loaded
+    if entries is None:
+        entries = read_json(job.translated_path)
+    if not isinstance(entries, list) or not entries:
+        raise RuntimeError("no translation data — rerun stage s3")
 
     # 1. Soft subtitles (always).
     schedule = _load_schedule(job)
     info = audio_utils.probe_video_info(job.output_nosubs_path)
     style = style_in_units(int(info.get("height") or 720), int(info.get("width") or 0), cfg)
     srt_text = subs.build_srt(
-        entries, job.fitted_dir, schedule=schedule, max_line_chars=style["max_line_chars"]
+        entries, job.fitted_dir, schedule=schedule,
+        max_line_chars=style["max_line_chars"],
+        split_long_units=(mode == "sentence"),
     )
     job.srt_path.write_text(srt_text, encoding="utf-8", newline="\r\n")
     log.info("s7: wrote %s (%d cues)", job.srt_path.name, srt_text.count("-->"))

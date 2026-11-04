@@ -149,31 +149,37 @@ class OverloadDialog(QDialog):
 
 
 class TtsBudgetDialog(QDialog):
-    """AGU11 3.4: the voice service is unstable — wait 10 more minutes,
-    switch the still-missing segments to the backup voice, or stop.
-    'fallback' is disabled when no backup voice is configured."""
+    """Update 12 task 4: the voice service is unstable — wait 10 more
+    minutes, switch the WHOLE video to the backup voice (every unit is
+    regenerated; one voice per video), or stop. The switch button is
+    disabled with a tooltip when no backup voice is configured."""
 
     def __init__(self, missing: int, waited_mmss: str, fallback_ok: bool,
+                 backup_voice: str | None = None,
                  parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle("DubTool")
-        self.setMinimumWidth(480)
+        self.setMinimumWidth(520)
         layout = QVBoxLayout(self)
         header = QLabel(i18n.tr("tts.budget_exceeded", n=int(missing), mmss=waited_mmss))
         header.setWordWrap(True)
         layout.addWidget(header)
 
         wait_btn = QPushButton(i18n.tr("tts.budget.wait10"))
-        fallback_btn = QPushButton(
-            i18n.tr("tts.budget.fallback") if fallback_ok
-            else i18n.tr("tts.budget.fallback_disabled")
+        switch_btn = QPushButton(
+            i18n.tr("tts.budget.switch", voice=backup_voice or "?")
+            if fallback_ok else i18n.tr("tts.budget.switch_disabled")
         )
+        if fallback_ok:
+            switch_btn.setToolTip(i18n.tr("tts.budget.switch_tooltip", voice=backup_voice or ""))
+        else:
+            switch_btn.setToolTip(i18n.tr("tts.budget.switch_disabled_tooltip"))
         stop_btn = QPushButton(i18n.tr("tts.budget.stop"))
-        for btn in (wait_btn, fallback_btn, stop_btn):
+        for btn in (wait_btn, switch_btn, stop_btn):
             layout.addWidget(btn)
         wait_btn.clicked.connect(lambda: self._pick("wait10"))
-        fallback_btn.setEnabled(bool(fallback_ok))
-        fallback_btn.clicked.connect(lambda: self._pick("fallback"))
+        switch_btn.setEnabled(bool(fallback_ok))
+        switch_btn.clicked.connect(lambda: self._pick("switch_all"))
         stop_btn.clicked.connect(lambda: self._pick("stop"))
         self.choice = "stop"
 

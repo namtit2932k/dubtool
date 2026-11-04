@@ -70,6 +70,7 @@ class FakeConfig:
         self.tts_trim_silence = False
         self.tts = {
             "pacing_delay_s": 0.0,          # no real sleeping in tests
+            "max_rps": 0.0,                 # Update 12: no request pacing in tests
             "max_delay_s": 0.0,
             "max_cooldown_s": 0.0,
             "retry_rounds": 3,
@@ -223,11 +224,12 @@ def test_circuit_breaker_pauses_after_consecutive_failures(tmp_path, monkeypatch
 
     with pytest.raises(globals()["TTSUnavailableError"]):
         s4.run(job, cfg)
-    # AGU11 counting: the ladder makes up to 4 bounded steps per exhausted
-    # segment; after breaker_consecutive exhausted segments the pass pauses
-    # (bounded) and continues with the remaining segments — it never hangs.
-    # retry_rounds=0 -> a second pass never runs. 6 segments x 4 steps = 24.
-    assert provider.calls == 24
+    # Update 12: one voice per video — the ladder lost its alternate-voice
+    # steps, and a short text makes exactly one bounded step (the sentence
+    # as is). After breaker_consecutive exhausted segments the pass pauses
+    # (bounded) and continues — it never hangs. retry_rounds=0 -> a second
+    # pass never runs. 6 segments x 1 step = 6.
+    assert provider.calls == 6
 
 
 def test_cancel_during_cooldown(tmp_path, monkeypatch):
@@ -252,10 +254,10 @@ def test_cancel_during_cooldown(tmp_path, monkeypatch):
 
 
 def test_fallback_voice_used_and_counted(tmp_path, monkeypatch):
-    """AGU8 2.3/2.6: the backup voice covers the still-missing segments and
-    the use is counted."""
+    """Update 12 task 3: the backup voice is an explicit whole-video switch —
+    every unit regenerates with it and the result keeps exactly one voice."""
     job = FakeJob(tmp_path, n_segments=4)
-    cfg = FakeConfig(tmp_path, fallback="piper")
+    cfg = FakeConfig(tmp_path, fallback="piper", budget_policy="switch_all")
     s4 = _import_stage()
 
     class CountingBackup:
@@ -280,11 +282,13 @@ def test_fallback_voice_used_and_counted(tmp_path, monkeypatch):
 
     entries = json.loads(job.translated_path.read_text(encoding="utf-8"))
     assert all(e["tts_duration"] is not None for e in entries)
+    # Update 12: the whole-video switch — first pass 4 segments x 1 step = 4;
+    # three retry rounds revisit all 4 = 12; the switch pass uses ONLY the
+    # backup (the failing primary is never retried) for all 4 units.
     assert CountingBackup.uses == 4
-    # AGU11 counting: first pass 4 segments x 4 ladder steps = 16; three
-    # retry rounds revisit all 4 segments each = 48; inside the backup pass
-    # the wrapper retries the primary once per segment = 4. Total 68.
-    assert primary.calls == 16 + 48 + 4
+    assert primary.calls == 16
+    # Exactly one voice in the finished data (and it is not the primary).
+    assert len({e["voice"] for e in entries}) == 1
 
 
 def test_failure_log_fields_present_no_key(tmp_path, monkeypatch):

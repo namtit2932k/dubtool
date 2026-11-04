@@ -101,36 +101,69 @@ def _ladder_with(tmp_path, entries, config_tts, fail: bool = False):
     return _Ladder(tts, failures, cfg)
 
 
-def test_refuse_ids_fault_recovers_through_alternate_voice(tmp_path, monkeypatch):
-    """`tts:refuse-ids=1` refuses both primary-voice steps; the alternate
-    voice steps of the ladder recover the segment (3.3 + fault spec)."""
-    monkeypatch.setenv("DUBTOOL_FAULTS", "tts:refuse-ids=1")
-    from dubtool import faults as faults_mod
+def test_no_alternate_voice_ever_used(tmp_path, monkeypatch):
+    """Update 12 task 3: the alternate-voice steps are GONE. With every
+    request refused and no dialog, the headless budget policy stops —
+    no other voice is ever synthesized (the legacy alt_voice setting is
+    ignored), in the clips, in state.json, or in the recorded failures."""
+    from dubtool.tts.base import TTSUnavailableError
 
-    spec = faults_mod.get("tts")
-    assert spec.get("refuse-ids") == [1], spec
+    s4 = _stage_module()
+    provider = _RefusingProvider()
+    _wired_build_tts(monkeypatch, s4, tmp_path, provider)
 
-    ladder = _ladder_with(tmp_path, [], {"unit_budget_s": 30.0})
+    def fake_sleeping(seconds, text=None, cancel=None):
+        return float(seconds)  # the waits are simulated, not slept
+
+    monkeypatch.setattr(s4.heartbeat, "sleeping", fake_sleeping)
+
+    cfg = _cfg_stub(tmp_path, budget_policy="stop")
+    job = _JobStub(tmp_path, 2)
+    with pytest.raises(TTSUnavailableError):
+        s4.run(job, cfg)
+
+    entries = json.loads(job.translated_path.read_text(encoding="utf-8"))
+    assert all(e.get("tts_duration") is None for e in entries)
+    # No alternate voice anywhere: not in the failure records...
+    from dubtool.job import read_json
+
+    failures = read_json(job.dir / "tts_failures.json")
+    assert failures
+    assert all(r.get("voice") == "vi-TEST-Voice" for r in failures)
+    assert all(r["step"] in (s4.STEP_DIRECT, s4.STEP_SPLIT) for r in failures)
+    # ...nor in state.json (the video-wide voice is the configured one).
+    state = read_json(job.dir / "state.json")
+    assert state.get("voice") == "vi-TEST-Voice"
+
+
+def test_ladder_never_uses_the_legacy_alt_voice(tmp_path):
+    """Update 12 task 3: with a legacy alt_voice configured, a refused
+    segment still runs only the one-voice steps and returns 'exhausted' —
+    the decision moves up to the budget dialog, never to another voice."""
+    ladder = _ladder_with(tmp_path, [], {"unit_budget_s": 1.0})
     ladder.refuse_ids = {1}
     entry = {"id": 1, "vi": "câu bị từ chối"}
-    state, duration, cache_path = ladder.attempt(entry)
-    assert state == "done"
-    assert cache_path is not None and Path(cache_path).exists()
-    # the alternate voice performed the successful step
-    voices = [voice for _text, voice in ladder.tts.provider.calls]
-    assert "vi-TEST-Alt" in voices
+    state, _duration, _path = ladder.attempt(entry)
+    assert state == "exhausted"
+    voices = [v for _text, v in ladder.tts.provider.calls]
+    assert voices == ["vi-TEST-Voice"] * len(voices)
 
 
 def test_unit_budget_defers_instead_of_blocking(tmp_path):
     """A segment that keeps failing is deferred by its budget; the wait
     stays bounded (never minutes of backoff inside one attempt)."""
-    started = time.monotonic()
+    import time as _time
+
+    started = _time.monotonic()
     ladder = _ladder_with(tmp_path, [], fail=True, config_tts={
-        "unit_budget_s": 0.001, "attempt_delays_s": [2.0, 5.0],
+        "unit_budget_s": 0.0, "attempt_delays_s": [2.0, 5.0],
     })
-    entry = {"id": 9, "vi": "câu luôn từ chối"}
+    # Update 12: a long text (over max_chars_per_request) is what keeps
+    # the second step alive — a short text has exactly one step now, so a
+    # zero budget defers right at the second step's gate.
+    entry = {"id": 9, "vi": "câu bị từ chối " * 30}
     state, _duration, _path = ladder.attempt(entry)
-    elapsed = time.monotonic() - started
+    elapsed = _time.monotonic() - started
     assert state == "deferred"
     assert elapsed < 1.0, elapsed  # no real 2 s/5 s waits were taken
 
@@ -214,6 +247,7 @@ def _cfg_stub(tmp_path, **extra):
         "pacing_delay_s": 0.0, "max_delay_s": 0.0, "max_cooldown_s": 0.0,
         "retry_rounds": 3, "round_cooldown_s": [0.0, 0.0, 0.0],
         "breaker_consecutive": 3, "breaker_pause_s": 0.0,
+        "max_rps": 0.0,  # Update 12: no request pacing in tests
         "attempt_delays_s": [0.0, 0.0], "unit_budget_s": 10.0,
         "max_chars_per_request": 90, "join_silence_s": 0.0,
         "request_timeout_s": 45.0, "alt_voice": "vi-TEST-Alt",
@@ -259,8 +293,8 @@ def test_budget_dialog_asked_again_after_wait10(tmp_path, monkeypatch):
     asks = []
     choices = ["wait10", "stop"]
 
-    def dialog(missing, waited, fallback_ok):
-        asks.append((missing, waited, fallback_ok))
+    def dialog(missing, waited, fallback_ok, voice=None):
+        asks.append((missing, waited, fallback_ok, voice))
         return choices.pop(0)
 
     cfg = _cfg_stub(tmp_path, retry_rounds=0, budget_policy="ask")
@@ -335,11 +369,11 @@ def test_failure_log_records_step_and_timing(tmp_path, monkeypatch):
     assert records, "no failures recorded"
     steps = set()
     for r in records:
-        assert r["step"] in (s4.STEP_DIRECT, s4.STEP_SPLIT, s4.STEP_ALT,
-                             s4.STEP_ALT_SPLIT), r
+        # Update 12: the ladder has exactly two steps (no alt voice).
+        assert r["step"] in (s4.STEP_DIRECT, s4.STEP_SPLIT), r
         assert isinstance(r["elapsed_s"], (int, float))
         steps.add(r["step"])
-    assert {s4.STEP_DIRECT, s4.STEP_SPLIT} <= steps
+    assert s4.STEP_DIRECT in steps
 
 
 def test_first_pass_stays_under_unit_budget_x_failing(tmp_path, monkeypatch):

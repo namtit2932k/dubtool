@@ -62,9 +62,78 @@ def check(root: Path, tracked: set[str] | None) -> list[str]:
     return problems
 
 
+def check_images(root: Path) -> list[str]:
+    """Update 12 task 5 item 3: automatic image checks for every PNG the
+    READMEs reference — the sidecar INDEX.txt must record the real
+    windows platform, each image must be at least 600 px wide and not
+    blank, and the windows-area luminance must match the dark theme (no
+    mostly-white offscreen leftovers)."""
+    problems: list[str] = []
+    images_dir = root / "docs" / "images"
+    index_path = images_dir / "INDEX.txt"
+    references: list[Path] = []
+    for doc in DOCS:
+        doc_path = root / doc
+        if not doc_path.is_file():
+            continue
+        text = doc_path.read_text(encoding="utf-8", errors="replace")
+        for target in _links(text):
+            dest = (root / unquote(target)).resolve()
+            if dest.suffix.lower() == ".png" and dest.exists():
+                references.append(dest)
+    if not references:
+        return problems  # no README images at all
+    if not index_path.exists():
+        problems.append("docs/images/INDEX.txt: missing (required next to the images)")
+    else:
+        body = index_path.read_text(encoding="utf-8", errors="replace").lower()
+        if "platform: windows" not in body:
+            problems.append(
+                'docs/images/INDEX.txt: does not say "platform: windows" — '
+                "the screenshots must come from the real platform"
+            )
+    try:
+        from PySide6.QtGui import QImage
+    except Exception as exc:  # pragma: no cover - env dependent
+        problems.append(f"image checks skipped (QImage unavailable: {exc})")
+        return problems
+    for dest in references:
+        image = QImage(str(dest))
+        if image.isNull():
+            problems.append(f"{dest.relative_to(root)}: unreadable/blank PNG")
+            continue
+        if image.width() < 600:
+            problems.append(
+                f"{dest.relative_to(root)}: only {image.width()} px wide (< 600)"
+            )
+        step = 7
+        pixels = []
+        for y in range(0, image.height(), step):
+            for x in range(0, image.width(), step):
+                color = image.pixelColor(x, y)
+                pixels.append(0.299 * color.red() + 0.587 * color.green()
+                              + 0.114 * color.blue())
+        if not pixels:
+            problems.append(f"{dest.relative_to(root)}: no pixels sampled")
+            continue
+        mean = sum(pixels) / len(pixels)
+        if mean > 140:
+            problems.append(
+                f"{dest.relative_to(root)}: mean luminance {mean:.0f} — looks "
+                "like a light-theme/leftover image (the real theme is dark)"
+            )
+        variations = max(pixels) - min(pixels)
+        if variations < 30:
+            problems.append(
+                f"{dest.relative_to(root)}: nearly flat image (range {variations:.0f})"
+            )
+    return problems
+
+
 def main() -> int:
     tracked = _tracked(ROOT)
     problems = check(ROOT, tracked)
+    problems += check_images(ROOT)
     for p in problems:
         print(p)
     print("check_readme_links:", "FAIL" if problems else "OK")

@@ -77,10 +77,16 @@ def merge_translations(
 
 
 def apply_unit_translation(
-    entries: list[dict[str, Any]], unit: dict[str, Any], vi_text: str
+    entries: list[dict[str, Any]], unit: dict[str, Any], vi_text: str,
+    derived: bool = False,
 ) -> bool:
     """Divide one unit's Vietnamese across its segments (returns True when
     at least one entry changed). Reviewed segments keep their vi.
+
+    `derived` (Update 12 task 3.1) marks the per-segment texts as derived
+    from the unit's whole sentence: display-only; the dub unit record
+    carries the sentence, and stages 4-7 in sentence mode read it, not
+    these fragments.
 
     Raises RuntimeError when the unit's text comes back empty.
     """
@@ -97,6 +103,8 @@ def apply_unit_translation(
         if not part or not part.strip():  # never write an empty translation
             continue
         seg["vi"] = part.strip()
+        if derived:
+            seg["derived"] = True
         changed = True
     return changed
 
@@ -557,31 +565,26 @@ def translate_resilient(
     payloads: list, context_payload: list, label: str, *,
     on_fallback: Callable[[str], None], split_on_timeout: bool,
     split_min_units: int, stats: dict, depth: int = 0,
-    split_min_chars: int = 300,
+    split_min_chars: int = 300, allow_split: bool = True,
 ) -> list:
-    """AGU8 task 2 + AGENT_UPDATE_11 task 2 external resilience layer for
-    one translation chunk.
+    """The external resilience layer for one translation chunk.
 
     - OverloadFallbackFast (the overload policy said 'use the Fast model'):
       rebuild the client via on_fallback, then retry the same chunk once.
       The exception is otherwise left untouched by the wrapper.
-    - SplitRequiredError (AGU11 2.2 — the client raised it after the
-      FIRST 504/503/client-timeout of a big enough chunk): split the
-      chunk in two halves and translate each with the same policy,
-      recursively, so long requests become short ones instead of timing
-      out again. Halves are only made while each is at least
-      split_min_units payloads.
-
-      (AGU11 2.2 fallback: a wrapped 'giving up after N attempts' error
-      that still classifies as a timeout split — kept for chunks the
-      client was not told about.)
+    - SplitRequiredError (the client raised it for a 504/timeout/400-size
+      failure of a chunk larger than the minimum sizes): split the chunk
+      in two halves and translate each with the same policy — once. A
+      half is never split again (allow_split=False), and a chunk below
+      the split minimums is never split at all (the client decides that).
     """
     client = holder["client"]
-    # Agreed chunk label echoed on the request logs (AGU8 3.5). Concurrent
-    # threads share the client, so a label can be overwritten by the next
-    # call; it stays informational.
+    # Agreed chunk label echoed on the request logs. Concurrent threads
+    # share the client, so a label can be overwritten by the next call;
+    # it stays informational.
     client.request_label = label
     client.request_units = len(payloads)
+    client.request_chars = sum(len(p.get("text") or "") for p in payloads)
     try:
         return translate_call(client, payloads, context_payload)
     except OverloadFallbackFast as exc:
@@ -592,15 +595,18 @@ def translate_resilient(
             holder, translate_call, payloads, context_payload, label,
             on_fallback=on_fallback, split_on_timeout=split_on_timeout,
             split_min_units=split_min_units, stats=stats, depth=depth + 1,
-            split_min_chars=split_min_chars,
+            split_min_chars=split_min_chars, allow_split=allow_split,
         )
     except SplitRequiredError as exc:
-        if depth >= 8:
+        if depth >= 8 or not allow_split:
+            # A half is never split again — the failure propagates and the
+            # normal resume flow covers it.
             raise
         stats["splits"] = stats.get("splits", 0) + 1
         log.warning(
-            "s3: %s failed (%s) — splitting %d payloads in two after the first error (AGU11 2.2: never resend the big request)",
-            label, exc.status or exc, len(payloads),
+            "s3: %s failed (%s) — splitting %d payloads in two once "
+            "(error kind splits once, halves are final)",
+            label, exc.status or "timeout", len(payloads),
         )
         mid = _split_index(payloads)
         out: list = []
@@ -610,12 +616,13 @@ def translate_resilient(
                 f"{label} [part {k}/2]", on_fallback=on_fallback,
                 split_on_timeout=split_on_timeout,
                 split_min_units=split_min_units, stats=stats, depth=depth + 1,
-                split_min_chars=split_min_chars,
+                split_min_chars=split_min_chars, allow_split=False,
             ))
         return out
     except LLMError as exc:
         can_split = (
-            split_on_timeout and depth < 8 and failed_after_timeout(exc)
+            allow_split and split_on_timeout and depth < 8
+            and failed_after_timeout(exc)
             and len(payloads) >= max(2, 2 * split_min_units)
         )
         if not can_split:
@@ -633,7 +640,7 @@ def translate_resilient(
                 f"{label} [part {k}/2]", on_fallback=on_fallback,
                 split_on_timeout=split_on_timeout,
                 split_min_units=split_min_units, stats=stats, depth=depth + 1,
-                split_min_chars=split_min_chars,
+                split_min_chars=split_min_chars, allow_split=False,
             ))
         return out
 
@@ -649,11 +656,40 @@ def _split_index(payloads: list) -> int:
             return i
     return max(1, len(payloads) // 2)
 
+
+class _ChunkStore:
+    """Update 12 task 2.3: per-chunk translation checkpoints in
+    translate_chunks.json. get() matches a chunk's unit ids, source text
+    and prompt shape; a matching record reuses its Vietnamese without any
+    request. 'Start over' (--force) clears the store first."""
+
+    def __init__(self, job, force: bool):
+        from dubtool.llm.checkpoints import ChunkCheckpointStore
+
+        self._jobs = 0
+        self._hits = 0
+        self.store = ChunkCheckpointStore(job.translate_chunks_path)
+        if force:
+            self.store.clear()
+
+    @staticmethod
+    def stable_no(unit_ids: list[int]) -> int:
+        """A job-stable chunk number derived from the unit ids, so resume
+        matches chunks across runs (the live cut order also varies with
+        concurrency)."""
+        import hashlib
+
+        raw = json.dumps([int(i) for i in unit_ids])
+        return int(hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12], 16)
+
+
 def _run_segment_mode(
     job, entries, translate_payloads: Callable[[list, list, str], list],
     chunk_size, glossary, brief, force: bool,
     pronouns: dict | None = None, concurrency: int = 1,
     cancel: threading.Event | None = None,
+    chunk_store=None, prompt_hash: str = "", stats: dict | None = None,
+    holder: dict | None = None,
 ):
     """Previous behavior: translate segment by segment."""
     todo = []
@@ -675,12 +711,48 @@ def _run_segment_mode(
         context_payload = [
             {"id": e["id"], "text": e["text"], "vi": e.get("vi") or ""} for e in context
         ]
+        payloads = [
+            {"id": e["id"], "text": e["text"], "max_chars": e.get("max_chars") or 0}
+            for e in chunk
+        ]
         total_chars = sum(len(s.get("text") or "") for s in chunk)
         label = (
             f"translate chunk {chunk_index}/{n_chunks} "
             f"({len(chunk)} segments, {total_chars} chars)"
         )
-        return translate_payloads(chunk, context_payload, label)
+        # Update 12: chunk checkpoints serve the segment mode as well.
+        stable_no = _ChunkStore.stable_no([e["id"] for e in chunk])
+        hit = chunk_store.store.get(stable_no, payloads, prompt_hash) if chunk_store else None
+        if hit is not None:
+            model_name = hit.get("model") or "?"
+            if stats is not None:
+                stats["models"][model_name] = (
+                    stats["models"].get(model_name, 0) + len(payloads)
+                )
+                stats["checkpoint_hits"] = int(stats.get("checkpoint_hits", 0)) + 1
+            log.info("s3: %s reused from the chunk checkpoints (no request)", label)
+            return [
+                dict(upd, model=model_name) for upd in (hit.get("vi") or [])
+            ]
+        updates = translate_payloads(chunk, context_payload, label)
+        model_name = "?"
+        if holder is not None:
+            model_name = getattr(
+                getattr(holder.get("client"), "provider", None), "model", "?"
+            )
+        if chunk_store is not None and model_name != "?":
+            try:
+                chunk_store.store.save(
+                    stable_no, payloads, model=model_name, prompt_hash=prompt_hash,
+                    vi=[{"id": u["id"], "vi": u["vi"]} for u in updates],
+                )
+            except Exception:
+                pass
+        if stats is not None:
+            stats["models"][model_name] = stats["models"].get(model_name, 0) + len(payloads)
+            for upd in updates:
+                upd["model"] = model_name
+        return updates
 
     def apply_chunk(idx, updates):
         nonlocal translated
@@ -749,23 +821,37 @@ def run(
     # AGU8 task 2: the retry knobs come from config llm; the stage owns the
     # overload policy callback and the split-on-timeout resilience layer.
     split_on_timeout = bool(llm_cfg.get("split_on_timeout", True))
-    split_min_units = max(2, int(llm_cfg.get("split_min_units", 2) or 2))
-    split_min_chars = max(100, int(llm_cfg.get("split_min_chars", 300) or 300))
+    # Update 12 2.1: a split needs a chunk larger than these minimums (a
+    # 504/timeout/400-size failure splits once; 503s never split).
+    split_min_units = max(1, int(llm_cfg.get("split_min_units", 4) or 4))
+    split_min_chars = max(100, int(llm_cfg.get("split_min_chars", 600) or 600))
+    # Update 12 2.4: the default policy is fallback_fast for the GUI and
+    # the CLI (the user's choice in Settings can return 'ask'/'wait').
     overload_policy = str(
-        llm_cfg.get("overload_policy", ("ask" if interactive else "fallback_fast"))
+        llm_cfg.get("overload_policy", "fallback_fast")
     ).lower()
-    # AGU11 2.2/2.3: the split rule and the shared stage-wait budget ride in
-    # the client options, so the Fast-model rebuild keeps the same budget.
+    # The split rule, the breaker, the rate limiters and the shared
+    # stage-wait budget ride in the client options, so the Fast-model
+    # rebuild shares the same stage budget.
     stage_wait_state: dict = {"waited_s": 0.0, "consulted_at": 0.0, "consults": 0}
     client_options = {
+        "backoff_s": llm_cfg.get("backoff_s"),
         "server_error_backoff_s": llm_cfg.get("server_error_backoff_s"),
         "overload_after": llm_cfg.get("overload_after", 2),
         "overload_policy": overload_policy,
         "split_on_timeout": split_on_timeout,
         "split_min_units": split_min_units,
-        "stage_budget_s": float(llm_cfg.get("stage_budget_s", 600.0) or 600.0),
+        "split_min_chars": split_min_chars,
+        "stage_budget_s": float(llm_cfg.get("stage_budget_s", 300.0) or 300.0),
         "stage_wait_state": stage_wait_state,
+        "breaker_failures": llm_cfg.get("breaker_failures", 3),
+        "breaker_cooldown_s": llm_cfg.get("breaker_cooldown_s", 60),
+        "fallback_after_opens": llm_cfg.get("fallback_after_opens", 2),
+        "max_rpm": llm_cfg.get("max_rpm"),
     }
+    # Update 12 task 2.3: per-chunk translation checkpoints. A finished
+    # chunk is never re-requested; 'Start over' (force) clears the store.
+    checkpoint_store = _ChunkStore(job, force)
     stats: dict = {"splits": 0, "fallback": False, "fast_model": None, "models": {}}
     # AGU8 task 4: suggestions + per-video choices + the filler policy.
     fill_state = _filler_state(job, config, transcript)
@@ -865,6 +951,11 @@ def run(
 
     unit_mode = str((config.translate or {}).get("unit_mode", "sentence")).lower()
     tolerance = float((config.translate or {}).get("budget_overshoot", 1.15))
+    # The prompt shape for the chunk checkpoints (glossary + pronouns; the
+    # filler policy varies per chunk by design and is excluded).
+    from dubtool.llm.checkpoints import chunk_prompt_hash
+
+    prompt_hash = chunk_prompt_hash(glossary, pronouns)
 
     if unit_mode == "sentence":
         units = units_for(entries, config.units or {})
@@ -899,6 +990,20 @@ def run(
                 {"id": u["unit_id"], "text": u["text"], "max_chars": u["max_chars"]}
                 for u in chunk
             ]
+            # Update 12 task 2.3: a finished chunk of THIS job reuses its
+            # Vietnamese — no request goes out for it.
+            stable_no = _ChunkStore.stable_no([u["unit_id"] for u in chunk])
+            hit = checkpoint_store.store.get(stable_no, payloads, prompt_hash)
+            if hit is not None:
+                model_name = hit.get("model") or "?"
+                stats["models"][model_name] = (
+                    stats["models"].get(model_name, 0) + len(payloads)
+                )
+                stats["checkpoint_hits"] = int(stats.get("checkpoint_hits", 0)) + 1
+                log.info("s3: %s reused from the chunk checkpoints (no request)", label)
+                return [
+                    dict(upd, model=model_name) for upd in (hit.get("vi") or [])
+                ]
             # AGU8 5.4: per-chunk detected spans + glossary filtering.
             chunk_spans: list[dict] = []
             from dubtool import fillers as fillers_mod
@@ -921,11 +1026,23 @@ def run(
                 payloads, context_payload, label,
                 policy=chunk_policy, glossary_override=chunk_glossary,
             )
-            # AGU11 2.3: the final summary states which units were translated
-            # by which model (the Fast fallback serves later chunks).
+            # The final summary states which units were translated by which
+            # model (the Fast fallback serves later chunks); the chunk
+            # checkpoint records the model too.
             model_name = getattr(getattr(holder["client"], "provider", None), "model", "?")
             stats["models"][model_name] = stats["models"].get(model_name, 0) + len(payloads)
+            try:
+                checkpoint_store.store.save(
+                    stable_no, payloads, model=model_name, prompt_hash=prompt_hash,
+                    vi=[{"id": upd["id"], "vi": upd["vi"]} for upd in updates],
+                )
+            except Exception:
+                log.exception("s3: chunk checkpoint write failed (non-fatal)")
+            for upd in updates:
+                upd["model"] = model_name
             return updates
+
+        unit_vi_by_id: dict[int, str] = {}   # Update 12: the dub units' sentences
 
         def apply_units(updates):
             nonlocal translated_units
@@ -934,7 +1051,10 @@ def run(
                 if unit is None:
                     log.warning("s3: translation for unknown unit %d ignored", upd["id"])
                     continue
-                apply_unit_translation(entries, unit, upd["vi"])
+                apply_unit_translation(entries, unit, upd["vi"], derived=True)
+                unit_vi_by_id[int(upd["id"])] = (upd.get("vi") or "").strip()
+                if upd.get("model"):
+                    unit["model"] = upd["model"]  # per-unit model record (2.4)
                 translated_units += 1
             write_json(job.translated_path, entries)
             write_units_file(job, units)
@@ -952,15 +1072,69 @@ def run(
             translated_count = _run_segment_mode(
                 job, entries, translate_payloads, chunk_size, glossary, brief, force,
                 pronouns=pronouns, concurrency=concurrency, cancel=cancel,
+                chunk_store=checkpoint_store, prompt_hash=prompt_hash,
+                stats=stats, holder=holder,
             )
         except BudgetExhausted as exc:  # 5.2: finish with what exists
             log.warning("s3: %s — the rerun fills the remaining segments", exc)
 
+    # Update 12 task 3: the dub units file — the primary data of stages
+    # 4-7 in sentence mode. One record per sentence unit with the COMPLETE
+    # Vietnamese sentence (never fragments).
+    if unit_mode == "sentence" and units:
+        from dubtool.dub_units import build_dub_units, write_dub_units
+
+        translations: dict[int, dict] = {}
+        for u in units:
+            uid = int(u["unit_id"])
+            vi = unit_vi_by_id.get(uid)
+            if vi is None:
+                # Resume of an older sentence-mode run: rebuild the sentence
+                # from its derived segments with the boundary-dedupe join.
+                from dubtool.stages.s8_export_readable import _join_deduped
+
+                seg_vi = {e["id"]: (e.get("vi") or "") for e in entries}
+                segs = [seg_vi.get(sid, "") for sid in u["seg_ids"]]
+                vi = _join_deduped([t for t in segs if t.strip()])
+            translations[uid] = {"vi": vi, "model": u.get("model")}
+        write_dub_units(job, build_dub_units(units, translations))
+        log.info("s3: dub_units.json written (%d sentence units)", len(units))
+
+    # Update 12 task 2.4: a non-blocking fallback notice — in the details
+    # panel and the run summary naming how many units the Fast model took.
+    if stats.get("fallback") and translated_count:
+        fast_count = int((stats.get("models") or {}).get(stats.get("fast_model") or "", 0))
+        try:
+            from dubtool.app import i18n
+            from dubtool import heartbeat as hb_mod
+
+            hb_mod.emit(
+                i18n.tr(
+                    "llm.fallback_notice",
+                    model=stats.get("fast_model") or "?",
+                    n=fast_count,
+                    total=int(translated_count),
+                )
+            )
+        except Exception:
+            pass
+        log.info(
+            "s3: fallback notice: %d/%d translated by the Fast model %s "
+            "(the units by the Accurate model are kept)",
+            fast_count, translated_count, stats.get("fast_model"),
+        )
+
     final_client = holder["client"]
     # One-shot enforcement pass (soft-budget tolerance, AGU3 task 7).
-    over_before, over_after = enforce_budget(
-        entries, final_client, tolerance, policy=base_policy
-    )
+    # In sentence mode the voiced unit is the whole sentence (stage 5 fits
+    # and shortens per unit), so the per-segment crude enforcement here
+    # would only touch derived display text — it is skipped.
+    if unit_mode == "sentence":
+        over_before = over_after = 0
+    else:
+        over_before, over_after = enforce_budget(
+            entries, final_client, tolerance, policy=base_policy
+        )
     write_json(job.translated_path, entries)
 
     # AGU8 6.2: truncation/shrink guard — one re-translation batch, then the

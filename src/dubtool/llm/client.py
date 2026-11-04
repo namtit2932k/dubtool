@@ -1,24 +1,27 @@
 """Shared wrapper around any LLMProvider used by the pipeline stages.
 
-Responsibilities (AGENT_UPDATE.md 3.1; AGENT_UPDATE_11.md task 2):
-- retries (max 3) for transient errors with exponential backoff
-- rate-limit handling: waits, honors retry hints, then fails with a clear
-  provider-naming error
-- parsing/validation with the error appended to the prompt on retry
-- logs provider name, model, and token counts
+Responsibilities (AGENT_UPDATE.md 3.1; Update 12 task 2):
+- the Update 12 error taxonomy decides the action: a 503/500/502 (or any
+  model-wide server error) is capacity — the SAME request is retried with
+  the bounded `llm.backoff_s` schedule [5, 15, 45, 90] (never split);
+  a 504 DEADLINE or a client timeout (or a 400-size limit) is a request-
+  size/latency signal — it splits once into two halves (only when the
+  chunk is larger than `split_min_chars`/`split_min_units`, and halves
+  are never split again); a 429 per-minute pauses every request to the
+  model until the retry delay; a 429 per-day with no key left goes
+  straight to the fallback;
+- the model circuit breaker: `breaker_failures` consecutive failed
+  requests open it for `breaker_cooldown_s`; when it has opened
+  `fallback_after_opens` times, or the per-day quota is gone for every
+  key, or the stage waited past `llm.stage_budget_s` on failing
+  requests, the remaining chunks go to the Fast model through the
+  existing overload callback;
+- parsing/validation with the error appended to the prompt on retry;
+- logs provider name, model, and token counts.
 
-AGENT_UPDATE_11 2.2: a 504/503/client-timeout on a split-eligible chunk
-raises SplitRequiredError on the FIRST qualifying failure, so
-translate_resilient halves the chunk immediately instead of resending the
-identical big request up to MAX_RETRIES times (the user's 2026-11-01 run
-sent the same 3,827-character request at least six times).
-
-AGENT_UPDATE_11 2.3: the overload policy ('ask') is consulted AGAIN after
-every further `overload_after` consecutive 503/504 when the user chose
-'wait' (and when `llm.stage_budget_s` of waiting is used up), the model
-name and how long it has been trying ride in the callback info, and all
-clients of one stage share a stage-wait accumulator through
-options["stage_wait_state"].
+One LLMClient object is shared by the parallel chunk workers of a stage;
+the breaker, the rate pause and the stage-wait accumulator are all
+thread-safe instance/shared state on it.
 """
 
 from __future__ import annotations
@@ -144,6 +147,25 @@ class LLMClient:
         # AGU11 2.2: the payload count the stage sets per chunk (split
         # eligibility); None = unknown/never split.
         self.request_units: int | None = None
+        # Update 12: source characters of the current chunk (split
+        # eligibility for the character cap).
+        self.request_chars: int | None = None
+        # Update 12 task 1: the bounded backoff schedule for capacity
+        # errors (503/500/502): llm.backoff_s, at most 4 attempts.
+        self.backoff_s = self._read_backoff()
+        # The model circuit breaker (task 2.2), one per model.
+        from dubtool.llm.breaker import ModelBreaker
+        self.breaker = ModelBreaker(
+            failures=int(self.options.get("breaker_failures", 3) or 3),
+            cooldown_s=float(self.options.get("breaker_cooldown_s", 60.0) or 60.0),
+        )
+        self.fallback_after_opens = max(
+            1, int(self.options.get("fallback_after_opens", 2) or 2)
+        )
+        # Per-minute 429: EVERY request to this model pauses until then
+        # (a global pause, not a per-request sleep).
+        self.rate_pause_until = 0.0
+        self.min_interval_s = self._read_min_interval()
         # AGU11 2.3: one shared wait accumulator per stage (passed via
         # options so the Fast-model rebuild shares the same stage budget).
         self.stage_wait = self.options.get("stage_wait_state") or {"waited_s": 0.0}
@@ -159,6 +181,64 @@ class LLMClient:
         self._budget = budget_mod.current()
 
     # ------------------------------------------------------------ internals
+    def _read_backoff(self) -> list[float]:
+        """The bounded 503/504 backoff schedule: llm.backoff_s first, the
+        legacy llm.server_error_backoff_s second.
+        """
+        raw = (
+            self.options.get("backoff_s")
+            or self.options.get("server_error_backoff_s")
+            or DEFAULT_SERVER_BACKOFF_S
+        )
+        if raw is DEFAULT_SERVER_BACKOFF_S:
+            return list(DEFAULT_SERVER_BACKOFF_S)
+        try:
+            return [float(v) for v in raw] or list(DEFAULT_SERVER_BACKOFF_S)
+        except (TypeError, ValueError):
+            return list(DEFAULT_SERVER_BACKOFF_S)
+
+    def _read_min_interval(self) -> float:
+        """Token-bucket interval from llm.max_rpm (default: unset).
+        """
+        rpm = self.options.get("max_rpm") or 0
+        try:
+            rpm = float(rpm)
+        except (TypeError, ValueError):
+            rpm = 0.0
+        return 60.0 / rpm if rpm > 0 else 0.0
+
+    def _rate_gate(self) -> None:
+        """Wait out the model rate pause (per-minute 429) and the token
+        bucket (llm.max_rpm) BEFORE a request is sent; both waits are
+        visible and count against the stage budget."""
+        import time as _time
+
+        wait_s = max(0.0, self.rate_pause_until - _time.monotonic())
+        if wait_s > 0:
+            def pause_text(remaining: float) -> str:
+                return _panel_text_rate_pause(int(remaining + 0.999))
+
+            slept = heartbeat.sleeping(wait_s, pause_text, self.cancel)
+            self.stage_wait["waited_s"] = float(
+                self.stage_wait.get("waited_s", 0.0)) + max(0.0, float(slept))
+            self.rate_pause_until = _time.monotonic()
+        elif self.min_interval_s > 0:
+            heartbeat.sleeping(
+                self.min_interval_s, lambda _r: "", self.cancel,
+            )
+
+    def _split_eligible(self) -> bool:
+        """Update 12 2.1: a chunk may split only when it is larger than
+        `llm.split_min_chars` (600) or `llm.split_min_units` (4 units).
+        """
+        units = self.request_units
+        if units is None:
+            return False
+        min_units = max(1, int(self.options.get("split_min_units", 4) or 4))
+        min_chars = max(100, int(self.options.get("split_min_chars", 600) or 600))
+        chars = self.request_chars or 0
+        return units > min_units or chars > min_chars
+
     def _server_backoff_s(self, attempt: int) -> float:
         """AGU8 3.2: exponential-with-jitter delay (s) after the `attempt`-th
         consecutive server error (1-based), from llm.server_error_backoff_s."""
@@ -174,34 +254,30 @@ class LLMClient:
     def _announce_budget(self) -> None:
         _panel("llm.stage_budget_exceeded", n=int(self.stage_wait.get("waited_s", 0.0)))
 
-    def _handle_overload(self) -> str:
-        """AGU8 3.4 + AGU11 2.3: the overload policy after `overload_after`
-        consecutive 503/504 — and again after EVERY further
-        `overload_after` failures, and whenever the stage's shared
-        `llm.stage_budget_s` wait budget is used up (even when the user
-        chose 'wait' earlier). Returns "wait" (keep retrying) or raises
-        OverloadFallbackFast (the stage then rebuilds the client around
-        the Fast model). The callback may raise (e.g. StageCancelled) — it
+    def _handle_overload(self, *, quota_gone: bool = False) -> str:
+        """Update 12 task 2: the overload policy consult.
+
+        The fallback triggers (2.4) are: the breaker has opened
+        `fallback_after_opens` times, the per-day quota is gone for every
+        key, or the stage has waited past `llm.stage_budget_s` on failing
+        requests. With the dialog policy ('ask') the dialog is consulted
+        again after every `overload_after` consecutive failures (and at the
+        budget), receiving the info dict. 'wait' keeps backing off (only
+        the budget then switches it). The callback may raise — it
         propagates untouched. With no callback, 'ask' behaves like 'wait'.
         """
         overload_after = max(1, int(self.options.get("overload_after") or 2))
-        due = self.consecutive_since_consult >= overload_after
+        opens_ok = self.breaker.opens >= self.fallback_after_opens
         over_budget = self._over_budget()
-        if not due and not over_budget:
+        must_consult = (
+            (self.consecutive_since_consult >= overload_after)
+            or over_budget or quota_gone or opens_ok
+        )
+        if not must_consult:
             return "wait"
         if over_budget and self.stage_wait.get("announced_at", -1.0) != self.stage_wait.get("waited_s", 0.0):
             self._announce_budget()
             self.stage_wait["announced_at"] = self.stage_wait.get("waited_s", 0.0)
-        if not (due or (over_budget and int(self.stage_wait.get("consults", 0)) == 0)):
-            # The budget was exceeded but the policy already ran at the last
-            # consecutive-error consult: only announce, never nag within the
-            # same episode unless the budget grew past another full period.
-            if over_budget and self.stage_wait.get("waited_s", 0.0) - float(
-                self.stage_wait.get("budget_consulted_at", 0.0)
-            ) >= self.stage_budget_s:
-                pass  # fall through and consult again below
-            else:
-                return "wait"
         self.consecutive_since_consult = 0
         self.stage_wait["consults"] = int(self.stage_wait.get("consults", 0)) + 1
         self.stage_wait["budget_consulted_at"] = self.stage_wait.get("waited_s", 0.0)
@@ -211,51 +287,72 @@ class LLMClient:
             "consecutive": self.consecutive_server_errors,
             "waited_s": round(float(self.stage_wait.get("waited_s", 0.0)), 1),
             "over_budget": over_budget,
+            "breaker_opens": int(self.breaker.opens),
+            "quota_gone": bool(quota_gone),
         }
         if self.on_overload is None:
-            policy = default_policy
+            action = None
         elif self._on_overload_takes_info:
             action = self.on_overload(info)  # may raise (dialog Cancel)
-            policy = str(action or default_policy).lower()
         else:
             action = self.on_overload()  # may raise (dialog Cancel)
-            policy = str(action or default_policy).lower()
+        policy = str(action or default_policy).lower()
         if policy in ("fallback_fast", "fallback-fast"):
             raise OverloadFallbackFast(self.provider.model)
+        if policy == "wait" and (quota_gone or over_budget):
+            # 'wait' cannot wait out a daily quota or an empty budget:
+            # fail the stage with the clear reason instead of waiting hours.
+            raise LLMError(
+                f"model {self.provider.model} is unavailable "
+                + ("(daily quota used up for every key)" if quota_gone
+                   else f"(stage wait budget {self.stage_budget_s:.0f} s spent)")
+                + "; stages are resumable — re-run the same command"
+            )
         return "wait"
 
     def _maybe_split(self, exc: Exception) -> None:
-        """AGENT_UPDATE_11 2.2: after the FIRST 504/503/client-timeout of a
-        chunk big enough to split, raise SplitRequiredError immediately —
-        translate_resilient halves the payloads instead of resending the
-        identical big request. Only the translate client carries the split
-        options (mechanical steps like punctuation never split)."""
+        """Update 12 2.1: ONLY a latency or request-size signal splits —
+        504 DEADLINE, a client timeout, or a 400 for size (a reply cut by
+        MAX_TOKENS). A 503 (capacity) never splits. The split happens once,
+        into two halves, and only when the chunk is larger than
+        `split_min_chars`/`split_min_units` (small chunks and halves are
+        never split)."""
         if not bool(self.options.get("split_on_timeout", False)):
             return
-        units = self.request_units
-        min_units = max(2, int(self.options.get("split_min_units") or 2))
-        if units is None or units < max(2, 2 * min_units):
-            return
         status = getattr(exc, "status", None)
+        is_timeout = isinstance(exc, TimeoutLLMError) or status == 504
+        is_size = status == 400
+        if not (is_timeout or is_size):
+            return
+        if not self._split_eligible():
+            return
+        units = self.request_units or 0
         _panel(
             "llm.chunk_split",
             n=units,
             err=str(status or exc),
         )
         raise SplitRequiredError(
-            f"chunk of {units} units failed ({exc or status}) — splitting in half "
-            "instead of resending it (AGENT_UPDATE_11 2.2)",
+            f"chunk of {units} units failed ({status or 'client timeout'}) — "
+            "splitting in two once instead of resending it",
             status=status,
         ) from exc
 
-    def _process_server_error(self, exc: Exception, attempt: int, max_attempts: int) -> float | None:
-        """AGU8 3.2/3.4 + AGU11 2.2/2.3/2.4: one 503/504/client-timeout
-        failure. Logs the plain explanation into pipeline.log AND the
-        details panel, then consults the overload policy when due, then
-        raises SplitRequiredError for a split-eligible chunk. Returns the
+    def _process_server_error(self, exc: Exception, attempt: int,
+                              max_attempts: int) -> float | None:
+        """AGU8 3.2 + Update 12 task 2: one server failure (503/504/timeout).
+
+        Logs the plain explanation into pipeline.log AND the details panel,
+        counts the failed request against the model circuit breaker, then
+        consults the overload policy (the fallback triggers: enough breaker
+        opens, the stage budget spent, the quota gone), then raises
+        SplitRequiredError — only for a latency (504/timeout) or request-
+        size (400) failure of a chunk large enough to split. Returns the
         backoff seconds for the caller to sleep (None when the caller
-        should re-raise because attempts are exhausted).
+        should give up because attempts are exhausted).
         """
+        import time as _time
+
         self.consecutive_server_errors += 1
         self.consecutive_since_consult += 1
         status = getattr(exc, "status", None)
@@ -263,6 +360,8 @@ class LLMClient:
             _panel("llm.server_503", model=self.provider.model)
         elif status == 504:
             _panel("llm.server_504", model=self.provider.model)
+        elif isinstance(exc, TimeoutLLMError):
+            _panel("llm.server_timeout", model=self.provider.model)
         else:
             _panel("llm.server_error", model=self.provider.model, status=status or "?")
         log.warning(
@@ -271,8 +370,15 @@ class LLMClient:
             status if status is not None else getattr(exc, "name", "?"), attempt, max_attempts,
             self.request_label or "", exc,
         )
-        self._handle_overload()  # raises OverloadFallbackFast per policy
-        self._maybe_split(exc)   # raises SplitRequiredError for big chunks
+        opened = self.breaker.record_failure(_time.monotonic())
+        self._handle_overload()  # raises OverloadFallbackFast per the triggers
+        if opened:
+            _panel(
+                "llm.breaker_open",
+                n=int(self.breaker.cooldown_s),
+                opens=int(self.breaker.opens),
+            )
+        self._maybe_split(exc)   # raises SplitRequiredError for eligible latency/size chunks
         return self._server_backoff_s(attempt)
 
     def _sleep_backoff(self, seconds: float) -> None:
@@ -319,21 +425,146 @@ class LLMClient:
     def _call(self, system: str, user: str, *, json_mode: bool = True, max_tokens: int = 8000):
         """Raw call with transient-error and rate-limit handling.
 
-        Pool-capable providers (gemini + KeyPool, AGENT_UPDATE_5.md 2.4):
-        a 429 or an invalid key switches to the next available key
-        immediately — no sleep, no retry attempt consumed; only when ALL
-        keys are limited does the wrapper wait (honoring the cancel event
-        and total-wait cap; on_rate_limit reduced-concurrency callback fires
-        only in that case). Give up with a clear error naming how many keys
-        were tried after the total wait ran out.
+        Pool-capable providers (gemini + KeyPool): a 429 or an invalid key
+        switches keys per the Update 12 taxonomy — a per-minute rate limit
+        pauses the whole model instead of rotating, and a daily quota with
+        no key left goes straight to the fallback. Only when keys remain
+        limited does the wrapper wait (honoring the cancel event).
         """
         if self._pool_capable():
             return self._call_with_pool(system, user, json_mode=json_mode, max_tokens=max_tokens)
         # (the non-pool loop below re-raises InternalLLMError directly in the
         # same way — see the except clauses)
+        import time as _time
+
         last_error: Exception | None = None
         attempt_no = 0
-        for attempt in range(1, MAX_RETRIES + 1):
+        cap_attempts = 0          # 503/500/502/504/timeouts: at most len(backoff_s)
+        max_cap_attempts = max(1, min(4, len(self.backoff_s)))
+        gen_attempts = 0          # connection/misc failures
+        pauses_left = 3           # per-minute pause occurrences per request
+        first_attempt = True
+        while True:
+            self._rate_gate()     # per-minute model pause + token bucket
+            if first_attempt:
+                first_attempt = False
+            try:
+                self._consume_budget()
+                attempt_no += 1
+                self._request_started_log("complete", attempt_no)
+
+                with heartbeat.waiting(_waiting_text):
+                    result = self._call_logged(
+                        self.provider.complete,
+                        system, user, json_mode=json_mode, max_tokens=max_tokens,
+                    )
+                self.total_calls += 1
+                self.consecutive_server_errors = 0
+                self.consecutive_since_consult = 0
+                self.stage_wait["consulted_at"] = self.stage_wait.get("waited_s", 0.0)
+                self.breaker.record_success()
+                if result.input_tokens is not None:
+                    self.total_input_tokens += result.input_tokens
+                if result.output_tokens is not None:
+                    self.total_output_tokens += result.output_tokens
+                self.key_switches = getattr(self.provider, "switches", 0)
+                log.info(
+                    "llm %s/%s call %d (%s, replied in %.1f s): in=%s out=%s tokens (total in=%s out=%s)",
+                    self.provider.name, self.provider.model, self.total_calls,
+                    self.request_label or "complete", self.last_request_elapsed_s or 0.0,
+                    result.input_tokens, result.output_tokens,
+                    self.total_input_tokens, self.total_output_tokens,
+                )
+                return result.text
+            except ServerErrorLLMError as exc:
+                # Update 12 2.1: model-wide capacity errors (503/500/502) —
+                # no key rotation; retry the SAME request with the bounded
+                # backoff schedule (at most len(backoff_s) attempts) and the
+                # breaker counting the request.
+                last_error = exc
+                cap_attempts += 1
+                backoff = self._process_server_error(exc, cap_attempts, max_cap_attempts)
+                if cap_attempts >= max_cap_attempts:
+                    raise LLMError(
+                        f"giving up after {cap_attempts} attempts ({self.provider.name}): {exc}"
+                    ) from exc
+                self._sleep_backoff(backoff)
+            except TimeoutLLMError as exc:
+                # Update 12 2.1: a client timeout is a latency signal — the
+                # same schedule, and it may split once (split-eligible chunk).
+                last_error = exc
+                cap_attempts += 1
+                backoff = self._process_server_error(exc, cap_attempts, max_cap_attempts)
+                if cap_attempts >= max_cap_attempts:
+                    raise LLMError(
+                        f"giving up after {cap_attempts} attempts ({self.provider.name}): {exc}"
+                    ) from exc
+                self._sleep_backoff(backoff)
+            except RateLimitError as exc:
+                last_error = exc
+                kind = getattr(exc, "kind", None) or "minute"
+                retry_after = float(getattr(exc, "retry_after", None) or 60.0)
+                if kind == "day":
+                    # Per-day quota: when no key remains for this model, go
+                    # straight to the fallback (2.4) — no 3-attempt loop and
+                    # no hour-long wait. (A one-key provider is 'no key left'.)
+                    self._handle_overload(quota_gone=True)  # raises per policy
+                    raise LLMError(
+                        f"daily quota used up for {self.provider.model} on every "
+                        "key. Wait for the quota reset and re-run the same "
+                        "command — stages are resumable."
+                    ) from exc
+                # Per-minute 429: pause EVERY request to this model until the
+                # delay passes (a global pause, not a per-request sleep) — no
+                # key rotation, no attempt consumed.
+                if pauses_left <= 0:
+                    raise LLMError(
+                        f"giving up after repeated per-minute rate limits "
+                        f"({self.provider.name}): {last_error}"
+                    ) from exc
+                pauses_left -= 1
+                self.rate_pause_until = _time.monotonic() + min(retry_after, 600.0)
+                log.warning(
+                    "llm %s per-minute rate limit: %s — pausing every request "
+                    "to this model for %.0f s",
+                    self.provider.name, exc, min(retry_after, 600.0),
+                )
+                _panel("llm.rate_pause", n=int(min(retry_after, 600.0)))
+            except InternalLLMError:
+                # AGENT_UPDATE_7.md 4.3: deterministic — fails immediately,
+                # never retried, never reported as a connection problem.
+                raise
+            except (LLMError, ConnectionError, OSError) as exc:
+                last_error = exc
+                self.consecutive_server_errors = 0
+                log.warning(
+                    "llm %s attempt %d failed: %s",
+                    self.provider.name, gen_attempts + 1, exc,
+                )
+                gen_attempts += 1
+                if gen_attempts >= MAX_RETRIES:
+                    raise LLMError(
+                        f"giving up after {gen_attempts} attempts ({self.provider.name}): {exc}"
+                    ) from exc
+                slept = heartbeat.sleeping(BACKOFF_BASE_S * gen_attempts, _backoff_text, self.cancel)
+                self.stage_wait["waited_s"] = float(self.stage_wait.get("waited_s", 0.0)) + slept
+
+    def _call_with_pool(self, system: str, user: str, *, json_mode: bool, max_tokens: int):
+        """The pool-aware retry loop (Update 12 taxonomy): immediate key
+        switching on a daily 429 while another key exists, a global model
+        pause (no rotation) on a per-minute 429, the bounded 503/504
+        backoff with the breaker, and the straight fallback when no key
+        remains for the day."""
+        import time as _time
+
+        attempt_no = 0
+        cap_attempts = 0
+        max_cap_attempts = max(1, min(4, len(self.backoff_s)))
+        gen_attempts = 0
+        pauses_left = 3
+        last_error: Exception | None = None
+        while True:
+            self._rate_gate()
             try:
                 self._consume_budget()
                 attempt_no += 1
@@ -347,6 +578,7 @@ class LLMClient:
                 self.consecutive_server_errors = 0
                 self.consecutive_since_consult = 0
                 self.stage_wait["consulted_at"] = self.stage_wait.get("waited_s", 0.0)
+                self.breaker.record_success()
                 if result.input_tokens is not None:
                     self.total_input_tokens += result.input_tokens
                 if result.output_tokens is not None:
@@ -361,119 +593,61 @@ class LLMClient:
                 )
                 return result.text
             except ServerErrorLLMError as exc:
-                # AGU8 3.2: model-wide server errors — rotating keys cannot
-                # help, so NO key rotation; exponential-with-jitter backoff
-                # instead, capped at MAX_RETRIES transport attempts.
+                # Update 12: model-wide capacity errors — NO key rotation;
+                # the bounded backoff with the breaker, the policy triggers,
+                # and the one-time split for eligible latency/size chunks.
                 last_error = exc
-                backoff = self._process_server_error(exc, attempt, MAX_RETRIES)
-                if attempt < MAX_RETRIES:
-                    self._sleep_backoff(backoff)
+                cap_attempts += 1
+                backoff = self._process_server_error(exc, cap_attempts, max_cap_attempts)
+                if cap_attempts >= max_cap_attempts:
+                    raise LLMError(
+                        f"giving up after {cap_attempts} attempts ({self.provider.name}): {exc}"
+                    ) from exc
+                self._sleep_backoff(backoff)
             except TimeoutLLMError as exc:
-                # AGU11 2.2: a client-side timeout is treated exactly like a
-                # server deadline — same backoff schedule, same split rule.
+                # Update 12: same handling as a server deadline (latency).
                 last_error = exc
-                backoff = self._process_server_error(exc, attempt, MAX_RETRIES)
-                if attempt < MAX_RETRIES:
-                    self._sleep_backoff(backoff)
-            except RateLimitError as exc:
-                last_error = exc
-                self.consecutive_server_errors = 0
-                wait = RATE_LIMIT_BASE_WAIT_S * attempt
-                if getattr(exc, "retry_after", None):
-                    wait = max(wait, float(exc.retry_after))
-                log.warning(
-                    "llm %s rate limit (attempt %d/%d): %s — waiting %.0fs",
-                    self.provider.name, attempt, MAX_RETRIES, exc, wait,
-                )
-                if self.on_rate_limit is not None:
-                    try:
-                        self.on_rate_limit(wait)
-                    except Exception:
-                        log.exception("on_rate_limit callback failed")
-                if attempt < MAX_RETRIES:
-                    slept = heartbeat.sleeping(wait, _backoff_text, self.cancel)
-                    self.stage_wait["waited_s"] = float(self.stage_wait.get("waited_s", 0.0)) + slept
-            except InternalLLMError:
-                # AGENT_UPDATE_7.md 4.3: deterministic — fails immediately,
-                # never retried, never reported as a connection problem.
-                raise
-            except (LLMError, ConnectionError, OSError) as exc:
-                last_error = exc
-                self.consecutive_server_errors = 0
-                log.warning(
-                    "llm %s attempt %d/%d failed: %s",
-                    self.provider.name, attempt, MAX_RETRIES, exc,
-                )
-                if attempt < MAX_RETRIES:
-                    slept = heartbeat.sleeping(BACKOFF_BASE_S * attempt, _backoff_text, self.cancel)
-                    self.stage_wait["waited_s"] = float(self.stage_wait.get("waited_s", 0.0)) + slept
-        if isinstance(last_error, RateLimitError):
-            raise LLMError(
-                f"giving up after {MAX_RETRIES} attempts: {last_error.provider} rate "
-                f"limit was hit. Wait a bit and re-run the same command — stages are "
-                f"resumable." ) from last_error
-        raise LLMError(
-            f"giving up after {MAX_RETRIES} attempts ({self.provider.name}): {last_error}"
-        ) from last_error
-
-    def _call_with_pool(self, system: str, user: str, *, json_mode: bool, max_tokens: int):
-        """The pool-aware retry loop: immediate switching, then waiting."""
-        attempts = 0
-        last_error: Exception | None = None
-        while attempts < MAX_RETRIES:
-            try:
-                self._consume_budget()
-                attempts += 1
-                self._request_started_log("complete", attempts)
-                with heartbeat.waiting(_waiting_text):
-                    result = self._call_logged(
-                        self.provider.complete,
-                        system, user, json_mode=json_mode, max_tokens=max_tokens,
-                    )
-                self.total_calls += 1
-                self.consecutive_server_errors = 0
-                self.consecutive_since_consult = 0
-                self.stage_wait["consulted_at"] = self.stage_wait.get("waited_s", 0.0)
-                if result.input_tokens is not None:
-                    self.total_input_tokens += result.input_tokens
-                if result.output_tokens is not None:
-                    self.total_output_tokens += result.output_tokens
-                self.key_switches = getattr(self.provider, "switches", 0)
-                log.info(
-                    "llm %s/%s call %d (%s, replied in %.1f s): in=%s out=%s tokens (total in=%s out=%s)",
-                    self.provider.name, self.provider.model, self.total_calls,
-                    self.request_label or "complete", self.last_request_elapsed_s or 0.0,
-                    result.input_tokens, result.output_tokens,
-                    self.total_input_tokens, self.total_output_tokens,
-                )
-                return result.text
-            except ServerErrorLLMError as exc:
-                # AGU8 3.2/3.4 + AGU11 2.2/2.3: model-wide server errors —
-                # NO key rotation in the pool loop either; jittered backoff,
-                # the overload policy after `overload_after` consecutive
-                # errors (and again later), and the immediate split.
-                last_error = exc
-                backoff = self._process_server_error(exc, attempts, MAX_RETRIES)
-                if attempts < MAX_RETRIES:
-                    self._sleep_backoff(backoff)
-            except TimeoutLLMError as exc:
-                # AGU11 2.2: same handling as a server deadline.
-                last_error = exc
-                backoff = self._process_server_error(exc, attempts, MAX_RETRIES)
-                if attempts < MAX_RETRIES:
-                    self._sleep_backoff(backoff)
+                cap_attempts += 1
+                backoff = self._process_server_error(exc, cap_attempts, max_cap_attempts)
+                if cap_attempts >= max_cap_attempts:
+                    raise LLMError(
+                        f"giving up after {cap_attempts} attempts ({self.provider.name}): {exc}"
+                    ) from exc
+                self._sleep_backoff(backoff)
             except RateLimitError as exc:
                 last_error = exc
                 self.consecutive_server_errors = 0
                 used = getattr(exc, "key_used", None)
+                kind = getattr(exc, "kind", None) or "minute"
+                retry_after = float(getattr(exc, "retry_after", None) or 60.0)
                 outcome = self.provider.handle_rate_limit(exc, used or "")
                 self.key_switches = getattr(self.provider, "switches", 0)
                 log.warning(
-                    "llm %s rate limit (attempt %d/%d): %s",
-                    self.provider.name, attempts, MAX_RETRIES, exc,
+                    "llm %s rate limit (%s): %s",
+                    self.provider.name, kind, exc,
                 )
+                if kind == "minute":
+                    # A per-minute 429 pauses EVERY request to this model
+                    # until the delay passes (a global pause) — with no key
+                    # rotation for a minute limit.
+                    if pauses_left <= 0:
+                        raise LLMError(
+                            f"giving up after repeated per-minute rate limits "
+                            f"({self.provider.name}): {exc}"
+                        ) from exc
+                    pauses_left -= 1
+                    self.rate_pause_until = _time.monotonic() + min(retry_after, 600.0)
+                    _panel("llm.rate_pause", n=int(min(retry_after, 600.0)))
+                    continue
                 if outcome == "switched":
-                    continue  # fresh key: retry immediately, no sleep
+                    # A per-day quota on one key with another key available:
+                    # retry immediately on the fresh key.
+                    continue
+                if outcome == "fallback":
+                    # No key remains for the selected model — straight to the
+                    # fallback (2.4), no attempt loop and no hour-long wait.
+                    self._handle_overload(quota_gone=True)  # raises per policy
+                    self.provider.raise_exhausted()
                 # All keys limited: wait until the earliest cooldown; the
                 # reduced-concurrency callback fires ONLY in this case.
                 if self.on_rate_limit is not None:
@@ -489,7 +663,7 @@ class LLMClient:
                 # never retried, never reported as a connection problem.
                 raise
             except InvalidKeyError as exc:
-                attempts += 1
+                attempt_no += 1
                 last_error = exc
                 used = getattr(exc, "key_used", None)
                 outcome = self.provider.handle_invalid_key(used or "")
@@ -506,18 +680,21 @@ class LLMClient:
                     "valid key remains (check Settings → API keys)"
                 ) from exc
             except (LLMError, ConnectionError, OSError) as exc:
-                attempts += 1
                 last_error = exc
                 self.consecutive_server_errors = 0
                 log.warning(
-                    "llm %s attempt %d/%d failed: %s",
-                    self.provider.name, attempts, MAX_RETRIES, exc,
+                    "llm %s attempt %d failed: %s",
+                    self.provider.name, gen_attempts + 1, exc,
                 )
-                if attempts < MAX_RETRIES:
-                    if self.cancel is not None and self.cancel.is_set():
-                        break
-                    slept = heartbeat.sleeping(BACKOFF_BASE_S * attempts, _backoff_text, self.cancel)
-                    self.stage_wait["waited_s"] = float(self.stage_wait.get("waited_s", 0.0)) + slept
+                gen_attempts += 1
+                if gen_attempts >= MAX_RETRIES:
+                    raise LLMError(
+                        f"giving up after {gen_attempts} attempts ({self.provider.name}): {exc}"
+                    ) from exc
+                if self.cancel is not None and self.cancel.is_set():
+                    break
+                slept = heartbeat.sleeping(BACKOFF_BASE_S * gen_attempts, _backoff_text, self.cancel)
+                self.stage_wait["waited_s"] = float(self.stage_wait.get("waited_s", 0.0)) + slept
             except KeyExhaustedError:
                 # acquire() found every key unavailable right now: this is
                 # not a failure of a request — wait until the earliest
@@ -525,19 +702,13 @@ class LLMClient:
                 if self.provider.wait_for_key():
                     continue
                 self.provider.raise_exhausted()  # fail-fast message if all daily
-        if isinstance(last_error, RateLimitError):
-            raise LLMError(
-                f"giving up after {attempts} attempts: {last_error.provider} rate "
-                f"limit was hit on every key. Wait a bit and re-run the same "
-                f"command — stages are resumable."
-            ) from last_error
         if isinstance(last_error, InvalidKeyError):
             raise LLMError(
                 "invalid Gemini API key: the stored key was rejected and no "
                 "valid key remains (check Settings → API keys)"
             ) from last_error
         raise LLMError(
-            f"giving up after {attempts} attempts ({self.provider.name}): {last_error}"
+            f"giving up after {attempt_no} attempts ({self.provider.name}): {last_error}"
         ) from last_error
 
     def _call_and_validate(

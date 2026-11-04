@@ -199,7 +199,11 @@ class GeminiProvider:
         except Exception:
             if kind == "invalid":
                 return "exhausted"
-            return "wait"
+            # Update 12 taxonomy: per-day with no key left → 'fallback'
+            # (the client goes straight to the Fast model, no hour-long
+            # wait); per-minute with no key left → 'wait' (the client's
+            # global model pause then applies).
+            return "fallback" if kind == "daily" else "wait"
         self.pool.switches += 1
         log.warning(
             "keypool: switched to the next available key (previous key %s)",

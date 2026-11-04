@@ -27,7 +27,8 @@ class LLMError(RuntimeError):
 
 
 class RateLimitError(LLMError):
-    def __init__(self, provider: str, detail: str = "", retry_after: float | None = None, key_used: str | None = None):
+    def __init__(self, provider: str, detail: str = "", retry_after: float | None = None,
+                 key_used: str | None = None, kind: str | None = None):
         message = f"{provider} rate limit was hit"
         if detail:
             message += f": {detail}"
@@ -35,6 +36,11 @@ class RateLimitError(LLMError):
         self.provider = provider
         self.retry_after = retry_after
         self.key_used = key_used
+        self.kind = kind
+        # Update 12 taxonomy: "minute" (per-minute rate limit — pause the
+        # model until the retry delay passes) vs "day" (daily quota gone —
+        # when no key remains, go straight to the fallback). None keeps the
+        # legacy wait-then-retry behavior.
 
 
 class MissingKeyError(LLMError):

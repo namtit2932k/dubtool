@@ -60,6 +60,7 @@ class _FaultProvider:
     def complete(self, system: str, user: str, *, json_mode: bool = True,
                  max_tokens: int = 8000):
         from dubtool.llm.base import (
+            RateLimitError,
             ServerErrorLLMError,
             TimeoutLLMError,
         )
@@ -68,6 +69,15 @@ class _FaultProvider:
             ("503-first", lambda n: ServerErrorLLMError(
                 f"injected fault llm:503-first ({n}/{self.spec['503-first']})",
                 status=503,
+            )),
+            ("504-first", lambda n: ServerErrorLLMError(
+                f"injected fault llm:504-first ({n}/{self.spec['504-first']})",
+                status=504,
+            )),
+            ("429-day", lambda n: RateLimitError(
+                str(getattr(self._inner, "name", "") or "provider"),
+                detail=f"injected fault llm:429-day (call {n})",
+                kind="day",
             )),
             ("fail-first", lambda n: ConnectionError(
                 f"injected fault llm:fail-first ({n}/{self.spec['fail-first']})",
