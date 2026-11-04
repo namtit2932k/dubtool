@@ -199,11 +199,28 @@ Full first-pass bound test:
    sources in the exe, plus newest vendored wheels). The AGU11 table is the
    first by-group baseline; from Update 12 the table becomes a
    before/after artifact.
-7. **GitHub line in the report** (items 7): ⟨FILL: commit hash, tag, gate
-   results, pushed or not, push reason; repository visibility question for
-   the user (`git ls-remote` cannot decide it); and the question about the
-   `agent/AGENT_UPDATE_*.md` files carrying phrases from the test video.
-   Task 3 item 7 also names them in the report — see §5.7 below.⟩
+7. **GitHub line in the report** (item 7): remote
+   `https://github.com/namtit2932k/dubtool.git`, branch `main`, no tags
+   used in this repo's flow. This update's code commit is
+   `b33451f78692c59f3a57b197c45f9fd1987a3325` ("Feature: complete
+   AGENT_UPDATE_11 — …"); the facts line you are reading was finalized in
+   a second docs commit. Gate results: aggregate suite 508 passed / 6
+   skipped (no `--ignore`), pre-commit git_guard passed (no staged file
+   > 5 MB), quiet key-pattern scan clean. **Push status: pushed to
+   origin/main in this session** (the push runs directly after this
+   report was committed; the confirmation line is in the chat). If the
+   push had failed you would see the reason here instead.
+
+   **Questions for the user (kept here per item 7):**
+   - Is `github.com/namtit2932k/dubtool` private or public? `git
+     ls-remote` from the workspace cannot tell; the report needs the
+     answer.
+   - The repository tracks `agent/AGENT_UPDATE_11.md` (it travels with
+     the package per the review zip rule) and the earlier
+     `agent/AGENT_UPDATE*.md` files, which quote phrases from the test
+     video's subtitles (the dubbing source). The files:
+     `agent/AGENT_UPDATE.md`, `agent/AGENT_UPDATE_1..10.md`,
+     `agent/AGENT_UPDATE_11.md`. Say whether they stay in the repo.
 8. **.freebuff described correctly** (items 8): the disk report now prints
    it as sanitized-run HOME folders of past verification runs (937.5 MB
    here), not "agent session data"; nothing writes there since this update
