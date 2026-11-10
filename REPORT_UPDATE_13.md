@@ -250,7 +250,7 @@ Conducted `--tts-probe` comparing rate conditions `1/s`, `1/3s`, and `1/10s` wit
   - `v1.0.10` $\to$ `1f25a1a9d9bdaaf771cac2fa526b9df0b8a0e886`
   - `v1.0.11` $\to$ `0bcc7230f5c744a34f445ba76a640db866ec2bba`
   - `v1.0.12` $\to$ `04531dd32012591877affb5d55b6217f5ce308e7`
-  - `v1.0.13` $\to$ Current commit (created upon finalization)
+  - `v1.0.13` $\to$ `fa1bcb95f73e00585017f7940ab6f5513c16ec8b`
 
 ---
 
@@ -270,13 +270,13 @@ Conducted `--tts-probe` comparing rate conditions `1/s`, `1/3s`, and `1/10s` wit
 
 ```powershell
 git log -1 --format=%H
-<commit-hash>
+fa1bcb95f73e00585017f7940ab6f5513c16ec8b
 
 git status -sb
 ## main...origin/main
 
 git ls-remote origin refs/heads/main
-<commit-hash>	refs/heads/main
+fa1bcb95f73e00585017f7940ab6f5513c16ec8b	refs/heads/main
 ```
 
 ---
@@ -299,6 +299,6 @@ git ls-remote origin refs/heads/main
 
 ## 10. Review Package
 
-- **Review Zip Path:** `D:\Projects\Vibe\Project_K\review\dubtool-review-20261111-0006.zip`
-- **Review Zip Size:** 1,718,480 bytes
+- **Review Zip Path:** `D:\Projects\Vibe\Project_K\review\dubtool-review-20261111-0010.zip`
+- **Review Zip Size:** 1,718,634 bytes
 - **Review Zip Integrity:** Zero secret leaks; all source files and docs included; verified clean by `find_secret_lines` and `scan_history_secrets.py`.

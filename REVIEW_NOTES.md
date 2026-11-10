@@ -92,13 +92,13 @@ Headline: version **1.0.13**, build id `Update 13 (41ad4a8)`, aggregate suite **
 
 ```
 git log -1 --format=%H
-<commit-hash>
+fa1bcb95f73e00585017f7940ab6f5513c16ec8b
 
 git status -sb
 ## main...origin/main
 
 git ls-remote origin refs/heads/main
-<commit-hash>	refs/heads/main
+fa1bcb95f73e00585017f7940ab6f5513c16ec8b	refs/heads/main
 ```
 
 Remote head equals local head; tags `v1.0.6`, `v1.0.7`, `v1.0.9`, `v1.0.10`, `v1.0.11`, `v1.0.12`, `v1.0.13` exist.
@@ -111,5 +111,5 @@ Remote head equals local head; tags `v1.0.6`, `v1.0.7`, `v1.0.9`, `v1.0.10`, `v1
 
 ## 7. Review package
 
-The Update 13 review zip is `D:\Projects\Vibe\Project_K\review\dubtool-review-20261111-0006.zip` (1,718,480 bytes), produced by `scripts/make_review_zip.py`.
+The Update 13 review zip is `D:\Projects\Vibe\Project_K\review\dubtool-review-20261111-0010.zip` (1,718,634 bytes), produced by `scripts/make_review_zip.py`.
 
