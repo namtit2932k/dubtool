@@ -257,14 +257,19 @@ def parse_simple_yaml(path: Path) -> dict:
 
 def load_env(root: Path) -> None:
     """Load .env with python-dotenv (real env vars keep precedence), then
-    defensively strip whitespace/quotes from known key variables."""
+    defensively strip whitespace/quotes from known key variables (every
+    provider: Gemini, OpenAI — incl. the user's GPT_API_KEY name, Anthropic)."""
     try:
         from dotenv import load_dotenv
 
         load_dotenv(root / ".env")  # dotenv defaults: real environment wins
     except ImportError:  # pragma: no cover
         pass
-    for name in ("GEMINI_API_KEY", "ANTHROPIC_API_KEY"):
+    for name in (
+        "GEMINI_API_KEY", "GOOGLE_API_KEY",
+        "OPENAI_API_KEY", "GPT_API_KEY",
+        "ANTHROPIC_API_KEY", "CLAUDE_API_KEY",
+    ):
         value = os.environ.get(name, None)
         if value is not None:
             value = value.strip()

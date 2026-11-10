@@ -99,13 +99,57 @@ def _imports():
     return genai, genai_types
 
 
-def run_key_test(key: str, model: str | None = None) -> str:
-    """Test one key with one tiny request. The model defaults to the shipped
-    Fast model; the Settings dialog passes the user-selected Fast model."""
+def run_key_test(key: str, model: str | None = None,
+                 provider: str = "gemini") -> str:
+    """Test one key with one FREE or near-free call. Gemini makes its tiny
+    generate call; OpenAI and Anthropic use `GET /v1/models` (no tokens
+    billed). The model param only matters for Gemini."""
     if not key or not key.strip():
         return "invalid"
+    pid = (provider or "gemini").lower()
+    if pid == "openai":
+        return _test_openai(key.strip())
+    if pid == "anthropic":
+        return _test_anthropic(key.strip())
     try:
         _request_ok(key.strip(), model or "gemini-3.5-flash-lite")
         return "ok"
     except Exception as exc:
         return classify_request_error(exc)
+
+
+STATUS_KEYS = {401: "invalid", 403: "invalid", 404: "invalid_model", 429: "quota"}
+
+
+def _test_openai(key: str) -> str:
+    """`GET /v1/models` with the key (free) — ok/invalid/network/quota."""
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=key, timeout=REQUEST_TIMEOUT_MS / 1000.0, max_retries=0)
+        client.models.list()
+        return "ok"
+    except Exception as exc:
+        return classify_provider_error(exc)
+
+
+def _test_anthropic(key: str) -> str:
+    try:
+        from anthropic import Anthropic
+
+        client = Anthropic(api_key=key, timeout=REQUEST_TIMEOUT_MS / 1000.0, max_retries=0)
+        client.models.list()
+        return "ok"
+    except Exception as exc:
+        return classify_provider_error(exc)
+
+
+def classify_provider_error(exc: Exception) -> str:
+    """OpenAI/Anthropic key-test outcome from status and cause type."""
+    status = getattr(exc, "status_code", None)
+    if status in STATUS_KEYS:
+        return STATUS_KEYS[status]
+    if status == 529:
+        return "quota"
+    kind = _is_network(exc)
+    return "network" if kind else "unknown"

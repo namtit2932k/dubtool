@@ -288,9 +288,8 @@ def _stubbed_api(tmp_path, monkeypatch):
 
     root = tmp_path / "project"
     (root / "packaging").mkdir(parents=True)
-    (root / "packaging" / "modes.yaml").write_text(
-        "fast:\n  provider: gemini\n  model: m-fast\n  translate_concurrency: 1\n"
-        "accurate:\n  provider: gemini\n  model: m-acc\n  translate_concurrency: 1\n",
+    (root / "packaging" / "models.yaml").write_text(
+        "gemini-3.5-flash-lite:\n  provider: gemini\n  model: m-fast\n  translate_concurrency: 1\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(paths_mod, "bundle_root", lambda: root)
@@ -364,7 +363,7 @@ def test_run_dub_failure_isolated_readable(monkeypatch, tmp_path):
     monkeypatch.setattr(s8, "deliver", flaky_deliver)
     result = api.run_dub(
         video, outdir,
-        options=DubOptions(mode="fast"), secrets=StubSecrets(),
+        options=DubOptions(model="gemini-3.5-flash-lite"), secrets=StubSecrets(),
         progress=lambda e: None, cancel=threading.Event(),
     )
     assert result.ok, result.error
@@ -416,7 +415,7 @@ def test_run_dub_readless_when_export_never_succeeds(monkeypatch, tmp_path):
     )
     result = api.run_dub(
         video, outdir,
-        options=DubOptions(mode="fast"), secrets=StubSecrets(),
+        options=DubOptions(model="gemini-3.5-flash-lite"), secrets=StubSecrets(),
         progress=lambda e: None, cancel=threading.Event(),
     )
     assert result.ok, result.error

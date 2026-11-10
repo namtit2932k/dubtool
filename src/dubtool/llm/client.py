@@ -38,8 +38,11 @@ from dubtool.llm.base import (
     LLMError,
     LLMProvider,
     NetworkLLMError,
+    QuotaExhaustedError,
     RateLimitError,
     RateLimitExhausted,
+    RequestTooLargeError,
+    SchemaRejectedError,
     ServerErrorLLMError,
     OverloadFallbackFast,
     SplitRequiredError,
@@ -63,6 +66,18 @@ BACKOFF_BASE_S = 2.0
 RATE_LIMIT_BASE_WAIT_S = 30.0
 DEFAULT_SERVER_BACKOFF_S = [10.0, 30.0, 90.0]
 DEFAULT_STAGE_BUDGET_S = 600.0
+
+# Which (provider, model) rejected its structured schema this process — a
+# degraded pair goes back to JSON-only prompting for the rest of the run.
+_SCHEMA_DEGRADED: set[tuple[str, str]] = set()
+
+
+def schema_degraded(provider_name: str, model: str) -> bool:
+    return (provider_name, model) in _SCHEMA_DEGRADED
+
+
+def reset_schema_degradations() -> None:  # tests only
+    _SCHEMA_DEGRADED.clear()
 
 
 def _waiting_text(elapsed: int) -> str:
@@ -312,16 +327,16 @@ class LLMClient:
 
     def _maybe_split(self, exc: Exception) -> None:
         """Update 12 2.1: ONLY a latency or request-size signal splits —
-        504 DEADLINE, a client timeout, or a 400 for size (a reply cut by
-        MAX_TOKENS). A 503 (capacity) never splits. The split happens once,
-        into two halves, and only when the chunk is larger than
-        `split_min_chars`/`split_min_units` (small chunks and halves are
-        never split)."""
+        504 DEADLINE, a client timeout, or a 400/413 for size (a reply cut
+        by the output budget, Anthropic 413). A 503 (capacity) never
+        splits. The split happens once, into two halves, and only when the
+        chunk is larger than `split_min_chars`/`split_min_units` (small
+        chunks and halves are never split)."""
         if not bool(self.options.get("split_on_timeout", False)):
             return
         status = getattr(exc, "status", None)
         is_timeout = isinstance(exc, TimeoutLLMError) or status == 504
-        is_size = status == 400
+        is_size = status == 400 or status == 413 or isinstance(exc, RequestTooLargeError)
         if not (is_timeout or is_size):
             return
         if not self._split_eligible():
@@ -356,7 +371,9 @@ class LLMClient:
         self.consecutive_server_errors += 1
         self.consecutive_since_consult += 1
         status = getattr(exc, "status", None)
-        if status == 503:
+        if isinstance(exc, RequestTooLargeError):
+            _panel("llm.request_too_large", model=self.provider.model)
+        elif status == 503:
             _panel("llm.server_503", model=self.provider.model)
         elif status == 504:
             _panel("llm.server_504", model=self.provider.model)
@@ -402,9 +419,52 @@ class LLMClient:
     def _call_logged(self, provider_call, *args, **kwargs):
         """Wrap one provider.complete() with the elapsed-time log line."""
         started = time.monotonic()
-        text_result = provider_call(*args, **kwargs)
+        try:
+            text_result = provider_call(*args, **kwargs)
+        except TypeError as exc:
+            if "schema" in kwargs and "unexpected keyword argument 'schema'" in str(exc):
+                kwargs_without_schema = dict(kwargs)
+                kwargs_without_schema.pop("schema", None)
+                text_result = provider_call(*args, **kwargs_without_schema)
+            else:
+                raise
         self.last_request_elapsed_s = round(time.monotonic() - started, 2)
         return text_result
+
+    def _provider_complete(self, system: str, user: str, *, json_mode: bool,
+                           max_tokens: int, schema: dict | None):
+        """One provider.complete() with the structured schema attached only
+        when the provider guarantees it AND has not degraded. A schema
+        rejection (400 naming the format) degrades ONCE to JSON-only
+        prompting and is remembered for (provider, model) for the rest of
+        the run — never a silent accept of a shape the model can't hold."""
+        pid = getattr(self.provider, "name", "")
+        model = getattr(self.provider, "model", "")
+        if schema is not None and (
+            getattr(self.provider, "structured", None) != "json_schema"
+            or schema_degraded(pid, model)
+        ):
+            schema = None
+        if schema is None:
+            return self._call_logged(
+                self.provider.complete, system, user,
+                schema=None, json_mode=json_mode, max_tokens=max_tokens,
+            )
+        try:
+            return self._call_logged(
+                self.provider.complete, system, user,
+                schema=schema, json_mode=json_mode, max_tokens=max_tokens,
+            )
+        except SchemaRejectedError as exc:
+            _SCHEMA_DEGRADED.add((pid, model))
+            log.warning(
+                "llm %s/%s rejected the structured schema — JSON-only prompting "
+                "for the rest of the run", pid, model,
+            )
+            return self._call_logged(
+                self.provider.complete, system, user,
+                schema=None, json_mode=json_mode, max_tokens=max_tokens,
+            )
 
     def _consume_budget(self) -> None:
         """One slot per actual request attempt (retries count too). Raises
@@ -422,7 +482,8 @@ class LLMClient:
         """True for providers that own a KeyPool (gemini with api_keys) and
         take priority over the generic-ish wait/rotate fallback below."""
         return hasattr(self.provider, "handle_rate_limit") and hasattr(self.provider, "pool")
-    def _call(self, system: str, user: str, *, json_mode: bool = True, max_tokens: int = 8000):
+    def _call(self, system: str, user: str, *, json_mode: bool = True,
+              max_tokens: int = 8000, schema: dict | None = None):
         """Raw call with transient-error and rate-limit handling.
 
         Pool-capable providers (gemini + KeyPool): a 429 or an invalid key
@@ -432,7 +493,8 @@ class LLMClient:
         limited does the wrapper wait (honoring the cancel event).
         """
         if self._pool_capable():
-            return self._call_with_pool(system, user, json_mode=json_mode, max_tokens=max_tokens)
+            return self._call_with_pool(system, user, json_mode=json_mode,
+                                        max_tokens=max_tokens, schema=schema)
         # (the non-pool loop below re-raises InternalLLMError directly in the
         # same way — see the except clauses)
         import time as _time
@@ -454,9 +516,9 @@ class LLMClient:
                 self._request_started_log("complete", attempt_no)
 
                 with heartbeat.waiting(_waiting_text):
-                    result = self._call_logged(
-                        self.provider.complete,
-                        system, user, json_mode=json_mode, max_tokens=max_tokens,
+                    result = self._provider_complete(
+                        system, user, json_mode=json_mode,
+                        max_tokens=max_tokens, schema=schema,
                     )
                 self.total_calls += 1
                 self.consecutive_server_errors = 0
@@ -476,6 +538,35 @@ class LLMClient:
                     self.total_input_tokens, self.total_output_tokens,
                 )
                 return result.text
+            except QuotaExhaustedError as exc:
+                # Billing (insufficient_quota / credit balance too low for
+                # both openai and anthropic): NEVER retried, NEVER rotated
+                # across keys (the quota belongs to the org/project) — the
+                # overload policy decides; fallback_fast switches the model.
+                last_error = exc
+                self.consecutive_server_errors = 0
+                log.warning(
+                    "llm %s quota exhausted: %s — trying the fallback per "
+                    "policy", self.provider.name, exc,
+                )
+                _panel("llm.quota_exhausted", model=self.provider.model)
+                self._handle_overload(quota_gone=True)  # raises per policy
+                raise LLMError(
+                    f"paid quota exhausted for {self.provider.name} ({exc}) "
+                    "— no fallback switch happened; the run stays resumable"
+                ) from exc
+            except RequestTooLargeError as exc:
+                # A request the model cannot answer whole (context length
+                # or the reply cut by the output budget): same schedule as
+                # a latency failure, splitting once when the chunk allows.
+                last_error = exc
+                cap_attempts += 1
+                backoff = self._process_server_error(exc, cap_attempts, max_cap_attempts)
+                if cap_attempts >= max_cap_attempts:
+                    raise LLMError(
+                        f"giving up after {cap_attempts} attempts ({self.provider.name}): {exc}"
+                    ) from exc
+                self._sleep_backoff(backoff)
             except ServerErrorLLMError as exc:
                 # Update 12 2.1: model-wide capacity errors (503/500/502) —
                 # no key rotation; retry the SAME request with the bounded
@@ -549,7 +640,8 @@ class LLMClient:
                 slept = heartbeat.sleeping(BACKOFF_BASE_S * gen_attempts, _backoff_text, self.cancel)
                 self.stage_wait["waited_s"] = float(self.stage_wait.get("waited_s", 0.0)) + slept
 
-    def _call_with_pool(self, system: str, user: str, *, json_mode: bool, max_tokens: int):
+    def _call_with_pool(self, system: str, user: str, *, json_mode: bool,
+                        max_tokens: int, schema: dict | None = None):
         """The pool-aware retry loop (Update 12 taxonomy): immediate key
         switching on a daily 429 while another key exists, a global model
         pause (no rotation) on a per-minute 429, the bounded 503/504
@@ -570,9 +662,9 @@ class LLMClient:
                 attempt_no += 1
                 self._request_started_log("complete", attempt_no)
                 with heartbeat.waiting(_waiting_text):
-                    result = self._call_logged(
-                        self.provider.complete,
-                        system, user, json_mode=json_mode, max_tokens=max_tokens,
+                    result = self._provider_complete(
+                        system, user, json_mode=json_mode,
+                        max_tokens=max_tokens, schema=schema,
                     )
                 self.total_calls += 1
                 self.consecutive_server_errors = 0
@@ -592,6 +684,33 @@ class LLMClient:
                     self.total_input_tokens, self.total_output_tokens,
                 )
                 return result.text
+            except QuotaExhaustedError as exc:
+                # Billing exhaustion (openai/anthropic): never retried, never
+                # rotated across keys — the policy decides; with the default
+                # fallback_fast the run switches models (see _handle_overload).
+                last_error = exc
+                self.consecutive_server_errors = 0
+                log.warning(
+                    "llm %s quota exhausted: %s — trying the fallback per "
+                    "policy", self.provider.name, exc,
+                )
+                _panel("llm.quota_exhausted", model=self.provider.model)
+                self._handle_overload(quota_gone=True)
+                raise LLMError(
+                    f"paid quota exhausted for {self.provider.name} ({exc}) "
+                    "— no fallback switch happened; the run stays resumable"
+                ) from exc
+            except RequestTooLargeError as exc:
+                # Unable-to-answer-whole request (context length or a reply
+                # cut by the output budget): the latency/size schedule.
+                last_error = exc
+                cap_attempts += 1
+                backoff = self._process_server_error(exc, cap_attempts, max_cap_attempts)
+                if cap_attempts >= max_cap_attempts:
+                    raise LLMError(
+                        f"giving up after {cap_attempts} attempts ({self.provider.name}): {exc}"
+                    ) from exc
+                self._sleep_backoff(backoff)
             except ServerErrorLLMError as exc:
                 # Update 12: model-wide capacity errors — NO key rotation;
                 # the bounded backoff with the breaker, the policy triggers,
@@ -711,8 +830,23 @@ class LLMClient:
             f"giving up after {attempt_no} attempts ({self.provider.name}): {last_error}"
         ) from last_error
 
+    def _stage_schema(self, kind: str) -> dict | None:
+        """The stage's strict schema when the provider guarantees the shape
+        (json_schema) and has not degraded; None otherwise (the piped JSON
+        prompt stays, and the shared parser accepts both shapes)."""
+        from dubtool.llm import schemas
+
+        if getattr(self.provider, "structured", None) != "json_schema":
+            return None
+        return {
+            "translate": schemas.translate_schema,
+            "shorten": schemas.shorten_schema,
+            "shorten_batch": schemas.shorten_batch_schema,
+        }.get(kind, lambda: None)()
+
     def _call_and_validate(
-        self, system: str, user_base: str, validate: Callable[[str], object], error_note_builder
+        self, system: str, user_base: str, validate: Callable[[str], object],
+        error_note_builder, schema: dict | None = None,
     ):
         """AGU8 3.1: the OUTER loop catches ONLY reply-invalid (parse and
         validation) errors, at most MAX_VALIDATION_ATTEMPTS times. Transport,
@@ -724,7 +858,10 @@ class LLMClient:
         for attempt in range(1, MAX_VALIDATION_ATTEMPTS + 1):
             text = None
             try:
-                text = self._call(system, user_base + ("\n\n" + error_note if error_note else ""))
+                text = self._call(
+                    system, user_base + ("\n\n" + error_note if error_note else ""),
+                    schema=schema,
+                )
                 # _call returns text; only validate() raising below counts
                 # as a reply-invalid failure (a reply arrived but is bad).
                 try:
@@ -760,7 +897,7 @@ class LLMClient:
         ids = [s["id"] for s in segments]
 
         def validate(text: str) -> list[dict]:
-            return parsing.parse_json_array(text, ids)
+            return parsing.parse_json_items(text, ids)
 
         def note(exc: Exception) -> str:
             return (
@@ -776,6 +913,7 @@ class LLMClient:
             ),
             validate,
             note,
+            schema=self._stage_schema("translate"),
         )
 
     def shorten(self, english: str, current_vi: str, max_chars: int) -> str:
@@ -790,6 +928,7 @@ class LLMClient:
             render_shorten_user(english, current_vi, max_chars),
             parsing.parse_shortened,
             note,
+            schema=self._stage_schema("shorten"),
         )
 
     def shorten_batch(self, items: list[dict], policy: str | None = None) -> list[dict]:
@@ -810,6 +949,7 @@ class LLMClient:
             render_shorten_batch_user(items, policy=policy),
             validate,
             note,
+            schema=self._stage_schema("shorten_batch"),
         )
 
 

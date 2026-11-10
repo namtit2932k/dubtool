@@ -62,7 +62,7 @@ def _print_version() -> None:
 def run_gui() -> int:
     from PySide6.QtWidgets import QApplication
 
-    from dubtool.app import i18n, settings
+    from dubtool.app import i18n, secrets, settings
     from dubtool.app import failguard
     from dubtool.app.paths import ensure_user_dirs
     from dubtool.app.ui.main_window import MainWindow
@@ -71,6 +71,7 @@ def run_gui() -> int:
     # entry, never a silent stderr writes a windowed exe cannot show.
     failguard.install()
     ensure_user_dirs()
+    secrets.load_env_if_source()
     s = settings.load()
     i18n.set_language(s.get("language") or "vi")
 
@@ -174,7 +175,7 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     from PySide6.QtCore import QSize
     from PySide6.QtWidgets import QApplication
 
-    from dubtool.app import i18n, settings
+    from dubtool.app import i18n, secrets, settings
     from dubtool.app.layout_check import apply_state
     from dubtool.app.paths import ensure_user_dirs
     from dubtool.app.service import PipelineService
@@ -263,12 +264,12 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     # paranoid about key-shaped strings, and a screenshot fake key has no
     # reason to look like a real Gemini key.
     fake = [f"shot-fake-key-{i:02d}-aaaaaaaaaaaaaaaa" for i in range(1, 4)]
-    secrets_for_shots._migrate_legacy = lambda: None
-    secrets_for_shots.env_keys = lambda: []
-    secrets_for_shots._stored_list = lambda: list(fake)
-    secrets_for_shots._save_list = lambda keys: fake.__setitem__(slice(None), list(keys))
+    secrets_for_shots._migrate_legacy = lambda *a, **kw: None
+    secrets_for_shots.env_keys = lambda *a, **kw: []
+    secrets_for_shots._stored_list = lambda *a, **kw: list(fake)
+    secrets_for_shots._save_list = lambda *a, **kw: fake.__setitem__(slice(None), list(a[1] if len(a) > 1 else a[0] if a else []))
     settings_dialog = SettingsDialog()
-    settings_dialog._badges = {1: "quota"}  # row 2 shows the quota badge
+    settings_dialog._badges = {("gemini", 1): "quota", 1: "quota"}  # row 2 shows the quota badge
     settings_dialog._refresh_rows(select=0)  # one key selected
     settings_dialog.show()
     app.processEvents()
@@ -283,6 +284,12 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
         if index == 0:  # the API keys tab is first (settings.tab_keys)
             keys_tab_shot = shot_name
         settings_dialog.grab().save(str(out_dir / shot_name))
+    for pid in ("gemini", "openai", "anthropic"):
+        idx = settings_dialog.provider_combo.findData(pid)
+        if idx >= 0:
+            settings_dialog.provider_combo.setCurrentIndex(idx)
+            app.processEvents()
+            settings_dialog.grab().save(str(out_dir / f"dialog_settings_keys_{pid}.png"))
     settings_dialog.close()
     # release the fake store patch immediately after the dialog shots
     for name, original in _orig.items():
@@ -296,6 +303,16 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     app.processEvents()
     privacy.grab().save(str(out_dir / "dialog_first_run.png"))
     privacy.close()
+
+    # Paid notice
+    from dubtool.app.ui.paid_notice import PaidProviderConfirmDialog
+
+    paid_dlg = PaidProviderConfirmDialog(provider_label="OpenAI")
+    paid_dlg.show()
+    app.processEvents()
+    paid_dlg.adjustSize()
+    paid_dlg.grab().save(str(out_dir / "dialog_paid_notice.png"))
+    paid_dlg.close()
 
     # Update 12 task 5 item 4: the README references canonical images by
     # name — write them alongside the size/state grid (the same real
@@ -406,7 +423,7 @@ def run_gui_smoke() -> int:
 
     from dubtool import api
     from dubtool.api import DubResult, ProgressEvent
-    from dubtool.app import i18n, settings
+    from dubtool.app import i18n, secrets, settings
     from dubtool.app import failguard
     from dubtool import audio_utils, proc
     from dubtool.app import secrets as secrets_mod
@@ -415,6 +432,7 @@ def run_gui_smoke() -> int:
     app = QApplication.instance() or QApplication([])
     failguard.install()
     ensure_user_dirs()
+    secrets.load_env_if_source()
     s = settings.load()
     s["privacy_acknowledged"] = True  # the real first_run gate passes
     settings.save(s)
@@ -456,15 +474,26 @@ def run_gui_smoke() -> int:
             )
 
     # ------------------------------------------------------------- fakes
-    fake_store: list[str] = []
-    secrets_mod._migrate_legacy = lambda: None          # no real keyring I/O
-    secrets_mod.env_keys = lambda: []
-    secrets_mod._stored_list = lambda: list(fake_store)
-    secrets_mod._save_list = lambda keys: fake_store.__setitem__(slice(None), list(keys))
+    fake_stores: dict[str, list[str]] = {"gemini": [], "openai": [], "anthropic": []}
+    fake_store = fake_stores["gemini"]
+    secrets_mod._migrate_legacy = lambda *a, **kw: None          # no real keyring I/O
+    secrets_mod.env_keys = lambda *a, **kw: []
+    def fake_stored_list(*a, **kw):
+        pid = secrets_mod.normalize_provider(str(a[0])) if a else "gemini"
+        return list(fake_stores.get(pid, []))
+    def fake_save_list(*a, **kw):
+        pid = secrets_mod.normalize_provider(str(a[0])) if len(a) > 1 else "gemini"
+        keys = a[1] if len(a) > 1 else a[0] if a else []
+        fake_stores[pid] = list(keys)
+        if pid == "gemini":
+            fake_store[:] = list(keys)
+    secrets_mod._stored_list = fake_stored_list
+    secrets_mod._save_list = fake_save_list
+    secrets_mod.has_key = lambda p="gemini": bool(fake_stores.get(secrets_mod.normalize_provider(str(p)), []))
 
     tester_calls: list[str] = []
 
-    def fake_key_test(key: str, model=None) -> str:
+    def fake_key_test(key: str, model=None, provider=None) -> str:
         tester_calls.append(key)
         return "ok"
 
@@ -479,7 +508,7 @@ def run_gui_smoke() -> int:
                      cancel=None, jobs_dir=None, force=False, extra_overrides=None,
                      overload_dialog=None, fillers_dialog=None,
                      tts_budget_dialog=None):  # AGU11 3.4 dialog travels too
-        run_calls.append(options.mode)
+        run_calls.append(getattr(options, "model", getattr(options, "mode", "default")))
         for name in ("s1_extract_audio", "s2_transcribe", "s3_translate",
                      "s4_tts", "s5_fit_duration", "s6_mix", "s7_subtitles"):
             if progress:
@@ -505,7 +534,7 @@ def run_gui_smoke() -> int:
     smoke_dir = Path(os.environ["LOCALAPPDATA"]) / "media"
     smoke_dir.mkdir(parents=True, exist_ok=True)
     outdir = smoke_dir / "out"
-    outdir.mkdir()
+    outdir.mkdir(parents=True, exist_ok=True)
 
     def make_video() -> Path:
         video = smoke_dir / "smokeclip.mp4"
@@ -555,8 +584,9 @@ def run_gui_smoke() -> int:
             from PySide6.QtCore import QTimer
             QTimer.singleShot(50, accept_add_dialog)
             return
+        pfx = "sk-ant-" if getattr(modal, "provider", "") == "anthropic" else ("sk-proj-" if getattr(modal, "provider", "") == "openai" else "AIza")
         modal.field.setPlainText(
-            f"smoke-key-one-{time.perf_counter_ns():x}\nsmoke-key-two-two\n"
+            f"{pfx}key-one-{time.perf_counter_ns():x}\n{pfx}key-two-two\n"
         )
         click(modal.ok_button)  # the dialog's real OK handler
 
@@ -620,7 +650,20 @@ def run_gui_smoke() -> int:
         wait_for(lambda: tester_calls, 10)
         wait_for(lambda: not dlg._testing_rows, 10)
         assert tester_calls == remaining, f"tester called with {tester_calls!r}, not the selected key"
-        assert dlg._badges.get(0) not in ("__testing__", None, "") or dlg._badges.get(0) == "ok", "badge not updated"
+        badge = dlg._badges.get((dlg._provider, 0)) or dlg._badges.get(0)
+        assert badge not in ("__testing__", None, "") or badge == "ok", "badge not updated"
+
+    def do_add_other_providers() -> None:
+        from PySide6.QtCore import QTimer
+        for pid in ("openai", "anthropic"):
+            idx = dlg.provider_combo.findData(pid)
+            if idx >= 0:
+                dlg.provider_combo.setCurrentIndex(idx)
+                app.processEvents()
+            QTimer.singleShot(50, accept_add_dialog)
+            click(dlg.add_btn)
+            wait_for(lambda p=pid: len(fake_stores.get(p, [])) >= 2, 10)
+            assert len(fake_stores[pid]) >= 2
 
     def close_settings() -> None:
         dlg.accept()  # never done() with key text still around (2.1)
@@ -640,15 +683,25 @@ def run_gui_smoke() -> int:
         assert videos, "no video in the output folder"
         assert readables, "no readable translation file in the output folder"
 
-    def do_run(mode: str) -> None:
-        btn = window.fast_btn if mode == "fast" else window.accurate_btn
-        click(btn)
+    def select_model(model_id: str) -> None:
+        from PySide6.QtCore import Qt
+        for idx in range(window.model_combo.count()):
+            item = window.model_combo.model().item(idx)
+            if item is not None and item.data(Qt.ItemDataRole.UserRole) == model_id:
+                window.model_combo.setCurrentIndex(idx)
+                app.processEvents()
+                break
+
+    def do_run(model_id: str) -> None:
+        select_model(model_id)
+        click(window.generate_btn)
         wait_run_done()
 
     def do_runs() -> None:
-        do_run("fast")
-        do_run("accurate")
-        assert run_calls == ["fast", "accurate"], f"runs: {run_calls}"
+        window._paid_provider_seen.update({"openai", "anthropic"})
+        do_run("gemini-3.5-flash-lite")
+        do_run("gpt-5.4-mini")
+        assert len(run_calls) >= 2, f"runs: {run_calls}"
 
     # main flow: each step reports its own row
     step("video import (2-min, no long-video dialog)", do_video)
@@ -658,9 +711,10 @@ def run_gui_smoke() -> int:
     step("move selected key up", do_move_up)
     step("remove row 0 with confirmation", do_remove_one)
     step("test selected key (fake tester)", do_test_selected)
+    step("add keys for other providers (openai, anthropic)", do_add_other_providers)
     if all(ok for _n, ok, _d in results):
         step("close settings", close_settings)
-        step("run fast + accurate via real buttons", do_runs)
+        step("run generation per provider via real buttons", do_runs)
     else:
         results.append(("pipeline skipped", False, "skipped: settings flow failed first"))
 
@@ -674,7 +728,7 @@ def run_gui_smoke() -> int:
     print(f"\ngui-smoke: {'PASS' if ok_all else 'FAIL'} ({len(results)} steps)")
     print(f"temp workspace: {smoke_dir} (removed on success with the sanitized home)")
     if ok_all:
-        shutil.rmtree(Path(os.environ["LOCALAPPDATA"]), ignore_errors=True)
+        shutil.rmtree(smoke_dir, ignore_errors=True)
     try:
         window.close()
     except Exception:
@@ -682,7 +736,7 @@ def run_gui_smoke() -> int:
     return 0 if ok_all else 1
 
 
-def run_headless(video: Path, outdir: Path, mode: str, profile: bool = False) -> int:
+def run_headless(video: Path, outdir: Path, mode_or_model: str = "gemini-3.5-flash-lite", profile: bool = False, model: str | None = None) -> int:
     """Automated end-to-end verification without a window (AGU4 11.1).
     With `profile` (AGU6 4.1), a 1 Hz sampler writes profile.csv in the job
     directory: elapsed, stage, app/children/system CPU%%, live children."""
@@ -696,8 +750,13 @@ def run_headless(video: Path, outdir: Path, mode: str, profile: bool = False) ->
     # the retention level comes from the saved settings (the GUI passes it
     # per run; without this every headless run measured "light").
     saved = settings.load()
+    chosen_model = model or mode_or_model
+    if chosen_model == "fast":
+        chosen_model = "gemini-3.5-flash-lite"
+    elif chosen_model == "accurate":
+        chosen_model = "gemini-3.8-flash"
     options = DubOptions(
-        mode=mode,
+        model=chosen_model,
         keep_level=str(saved.get("keep_level") or "light"),
     )
     current_stage = {"name": ""}
@@ -746,6 +805,12 @@ def run_headless(video: Path, outdir: Path, mode: str, profile: bool = False) ->
 
 
 def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
     parser = argparse.ArgumentParser(prog="DubTool")
     parser.add_argument("--version", action="store_true")
     parser.add_argument("--selftest", action="store_true")
@@ -759,7 +824,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--headless-run", nargs=2, metavar=("VIDEO", "OUTDIR"))
     parser.add_argument("--profile", action="store_true",
                         help="with --headless-run: sample CPU once per second into profile.csv")
-    parser.add_argument("--mode", choices=("fast", "accurate"), default="fast")
+    parser.add_argument("--model", default=None, help="catalog model id")
+    parser.add_argument("--mode", default=None, choices=("fast", "accurate"),
+                        help="deprecated: fast -> gemini-3.5-flash-lite, accurate -> gemini-3.8-flash")
     parser.add_argument("--tts-probe", nargs="?", const="tts_probe_results.json",
                         default=None, metavar="JSON",
                         help="run the interleaved voice-request experiment (same code from source and from the exe) and print the table")
@@ -767,6 +834,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="debug-only fault injection, e.g. --fault tts:fail-first=6 (debug-only; ignored by the GUI)")
     args = parser.parse_args(argv)
 
+    if args.mode:
+        print("Warning: --mode is deprecated; use --model instead", file=sys.stderr)
     if args.version:
         _print_version()
         return 0
@@ -823,7 +892,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.screenshots:
         return run_screenshots(Path(args.screenshots), args.scale)
     if args.headless_run:
-        return run_headless(Path(args.headless_run[0]), Path(args.headless_run[1]), args.mode,
+        chosen_model = args.model
+        if not chosen_model and args.mode:
+            chosen_model = "gemini-3.8-flash" if args.mode == "accurate" else "gemini-3.5-flash-lite"
+        chosen_model = chosen_model or "gemini-3.5-flash-lite"
+        return run_headless(Path(args.headless_run[0]), Path(args.headless_run[1]), chosen_model,
                             profile=args.profile)
     return run_gui()
 

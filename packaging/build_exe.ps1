@@ -69,6 +69,7 @@ huggingface_hub>=0.20
 certifi
 edge-tts>=6.1
 google-genai>=2.33.0,<3
+openai>=1.0
 anthropic>=0.40
 pydub>=0.25
 audioop-lts

@@ -43,6 +43,49 @@ class RateLimitError(LLMError):
         # legacy wait-then-retry behavior.
 
 
+class QuotaExhaustedError(LLMError):
+    """The account/project's paid quota is gone (OpenAI insufficient_quota
+    / credit_balance_exhausted; Anthropic low credit balance). NEVER
+    retried, NEVER rotated across keys (openai/anthropic limits belong
+    to the organization or project, not to a single key) — the provider
+    layer raises it and the client goes straight to the fallback."""
+
+    def __init__(self, message: str, *, reason: str | None = None):
+        super().__init__(message)
+        self.reason = reason
+
+
+# Name used in the policy table and tests.
+QuotaExhausted = QuotaExhaustedError
+
+
+class RequestTooLargeError(LLMError):
+    """A request the model cannot answer whole: OpenAI 400
+    context_length_exceeded / a reply truncated by the output budget,
+    Anthropic 413 request_too_large or stop_reason==max_tokens.
+    Carries the HTTP status when known and whether it truncated a reply;
+    the client treats either as the once-per-chunk split signal."""
+
+    def __init__(self, message: str, *, status: int | None = None, cut: bool = False):
+        super().__init__(message)
+        self.status = status
+        self.cut = cut
+
+
+# Name used in the policy table and tests.
+RequestTooLarge = RequestTooLargeError
+
+
+class SchemaRejectedError(LLMError):
+    """The provider answered 400 naming the schema/format itself — the
+    shared client degrades once to JSON-only prompting and remembers
+    that (provider, model) for the rest of the run."""
+
+    def __init__(self, message: str, *, status: int | None = 400):
+        super().__init__(message)
+        self.status = status
+
+
 class MissingKeyError(LLMError):
     """The selected provider is not configured (e.g. no API key)."""
 
@@ -83,9 +126,20 @@ class TimeoutLLMError(LLMError):
 
 class ServerErrorLLMError(LLMError):
     """AGU8 task 2: a model-wide server failure (503 UNAVAILABLE,
-    504 DEADLINE_EXCEEDED, or any other 5xx). These are retried with the
-    server_error_backoff_s schedule WITHOUT rotating keys — rotating keys
-    cannot help a 503 — and count toward the overload policy."""
+    504 DEADLINE_EXCEEDED, 529 (Anthropic overloaded), 500 or 502). These
+    are retried with the server_error_backoff_s schedule WITHOUT rotating
+    keys — rotating keys cannot help a 503 — and count toward the
+    overload policy."""
+
+    def __init__(self, message: str, *, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
+
+class Transient5xxError(LLMError):
+    """A 5xx-class error the provider mapped but prefers the caller to
+    treat as its own class (alias behaviour of ServerErrorLLMError with
+    backoff, never a whole-chunk split on 503). Carries its own status."""
 
     def __init__(self, message: str, *, status: int | None = None):
         super().__init__(message)
@@ -94,16 +148,17 @@ class ServerErrorLLMError(LLMError):
 
 class OverloadFallbackFast(RuntimeError):
     """NOT an LLMError: raised by the overload-policy callback when the
-    policy says 'use the Fast model for the rest' (AGU8 3.4). It must pass
-    untouched through the wrapper's except clauses (they catch
+    policy says 'use the one fallback model for the rest' (AGU8 3.4). It
+    must pass untouched through the wrapper's except clauses (they catch
     LLMError/ConnectionError/OSError only)."""
 
-    def __init__(self, from_model: str):
+    def __init__(self, from_model: str, to_model: str | None = None):
         super().__init__(
             f"overload policy: switching the rest of the run from {from_model!r} "
-            "to the Fast model"
+            + (f"to {to_model!r}" if to_model else "to the one fallback model")
         )
         self.from_model = from_model
+        self.to_model = to_model
 
 
 class SplitRequiredError(LLMError):
@@ -305,6 +360,7 @@ class LLMProvider(Protocol):
         system: str,
         user: str,
         *,
+        schema: dict | None = None,
         json_mode: bool = True,
         max_tokens: int = 8000,
     ) -> LLMResult: ...

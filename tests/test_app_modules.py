@@ -12,7 +12,7 @@ import zipfile
 
 import pytest
 
-from dubtool.app import i18n, modes, secrets, settings
+from dubtool.app import i18n, secrets, settings
 
 
 # ---------------------------------------------------------------- settings
@@ -22,7 +22,7 @@ def test_settings_defaults_and_roundtrip(tmp_path, monkeypatch):
     s = settings.load()
     assert s["language"] == "vi"
     assert s["burn_subtitles"] is True
-    assert s["mode_models"] == {}
+    assert s["model_id"] == "gemini-3.5-flash-lite"
     s["original_gain_db"] = -20
     settings.save(s)
     assert settings.load()["original_gain_db"] == -20
@@ -135,29 +135,38 @@ def test_secrets_env_fallback_is_read_only(fake_keyring, monkeypatch):
     assert not fake_keyring.store
 
 
-# ---------------------------------------------------------------- modes
-def test_modes_load_defaults_and_override(tmp_path, monkeypatch):
+# ---------------------------------------------------------------- catalog & migration
+def test_catalog_load_and_defaults(tmp_path, monkeypatch):
+    from dubtool.llm import catalog
     import dubtool.app.paths as paths
 
     monkeypatch.setattr(paths, "bundle_root", lambda: tmp_path)
     (tmp_path / "packaging").mkdir()
-    (tmp_path / "packaging" / "modes.yaml").write_text(
-        "fast:\n  label_key: mode.fast\n  provider: gemini\n"
-        "  model: from-yaml\n  translate_concurrency: 1\n"
-        "accurate:\n  label_key: mode.accurate\n  provider: gemini\n"
-        "  model: acc-from-yaml\n  translate_concurrency: 3\n",
+    (tmp_path / "packaging" / "models.yaml").write_text(
+        "custom-test-model:\n"
+        "  provider: openai\n"
+        "  label: Custom Test Model\n"
+        "  paid: true\n"
+        "  structured: json_schema\n",
         encoding="utf-8",
     )
-    data = modes.load({"mode_models": {"fast": "user-model"}})
-    assert data["fast"]["model"] == "user-model"
-    assert data["accurate"]["model"] == "acc-from-yaml"
+    cats = catalog.load(tmp_path / "packaging" / "models.yaml")
+    assert "custom-test-model" in cats
+    assert cats["custom-test-model"].provider == "openai"
+    assert cats["custom-test-model"].paid is True
+    # Shipped fallbacks are present
+    assert "gemini-3.5-flash-lite" in cats
 
-    import dubtool.app.settings as settings_mod
 
-    monkeypatch.setattr(settings_mod, "path", lambda: tmp_path / "settings.json")
-    modes.reset_to_defaults()
-    data = modes.load(settings_mod.load())
-    assert data["fast"]["model"] == "from-yaml"
+def test_settings_migrates_legacy_modes(tmp_path, monkeypatch):
+    """AGENT_UPDATE_13.md 2.3: saved last_mode / mode_models are ignored; model_id defaults to gemini-3.5-flash-lite."""
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"mode_models": {"fast": "old-fast"}, "last_mode": "accurate"}), encoding="utf-8")
+    monkeypatch.setattr(settings, "path", lambda: p)
+    loaded = settings.load()
+    assert loaded["model_id"] == "gemini-3.5-flash-lite"
+    assert "mode_models" not in loaded
+    assert "last_mode" not in loaded
 
 
 # ---------------------------------------------------------------- i18n
@@ -165,7 +174,7 @@ def test_i18n_vi_en_have_same_keys():
     vi = set(i18n.STRINGS["vi"])
     en = set(i18n.STRINGS["en"])
     assert vi == en
-    assert i18n.tr("mode.fast") != "mode.fast"  # every key resolves
+    assert i18n.tr("run.generate") != "run.generate"  # every key resolves
 
 
 def test_i18n_no_gendered_second_person_by_default():

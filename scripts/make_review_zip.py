@@ -44,7 +44,7 @@ ALLOWLIST_TOP_LEVEL_FILES = [
 # AGU11 item 4: docs/ travels in the review zip too (WORKSPACE.md,
 # docs/images/ - the README's screenshots - so the images can be checked).
 ALLOWLIST_DIRS = ["src", "tests", "scripts", "packaging", "eval",
-                  "docs"]  # AGU9 10.3: the eval-translation file travels too
+                  "docs", "agent"]  # AGU9 10.3: the eval-translation file travels too; AGU13: agent/ travels too
 
 SOURCE_SUFFIXES = (".py", ".yaml", ".yml", ".md", ".toml", ".json", ".cfg", ".txt")
 NEVER_SUFFIXES = (".mp4", ".mov", ".mkv", ".wav", ".mp3", ".m4a", ".zip", ".pt", ".model")
@@ -56,6 +56,7 @@ NEVER_DIR_PATTERNS = [
 KEY_PATTERNS = [
     re.compile(r"\bsk-ant-[A-Za-z0-9_\-]{8,}\b"),
     re.compile(r"\bAIza[0-9A-Za-z_\-]{10,}\b"),
+    re.compile(r"\bsk-proj-[A-Za-z0-9_\-]{15,}\b"),
     re.compile(r"ghp_[A-Za-z0-9]{20,}\b"),
 ]
 REDACTED = "[REDACTED]"
@@ -67,7 +68,14 @@ def collect_secret_values(root: Path | None = None) -> list[str]:
     """Secret values in memory only — never printed, never written raw."""
     root = root or PROJECT_ROOT
     values: list[str] = []
-    for name in ("GEMINI_API_KEY", "ANTHROPIC_API_KEY"):
+    for name in (
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "OPENAI_API_KEY",
+        "GPT_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_API_KEY",
+    ):
         env_value = os.environ.get(name, "")
         if env_value.strip():
             values.append(env_value.strip())

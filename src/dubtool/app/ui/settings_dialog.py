@@ -22,7 +22,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QObject, QTimer, Qt, Signal
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -43,8 +43,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from dubtool.app import i18n, modes, secrets, settings
+from dubtool.app import i18n, secrets, settings
 from dubtool.app.key_test import run_key_test
+
+PROVIDERS_UI = (("gemini", "Gemini"), ("openai", "OpenAI (ChatGPT)"),
+                ("anthropic", "Anthropic (Claude)"))
 
 # Editable widget types the read-only sweep disables (Update 9 task 2.2).
 _READONLY_TYPES = (QComboBox, QCheckBox, QLineEdit, QSpinBox, QPlainTextEdit, QListWidget)
@@ -64,8 +67,9 @@ log = logging.getLogger("dubtool")
 
 VOICE_KEYS = ("vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural")
 
-CUSTOM = "__custom__"  # data value of the "Khác…/Custom…" dropdown item
+CUSTOM = "__custom__"  # data value of the old Custom… dropdown item (kept for ids)
 MODEL_ID_RE = re.compile(r"[A-Za-z0-9._/\-]{1,128}")
+ENV_ROW_ROLE = "env"  # Qt UserRole role data marking a read-only .env row
 
 # Types of test outcome -> i18n keys (AGU5 2.3: every outcome is mapped,
 # including `invalid_model`, which earlier fell through to "unknown").
@@ -92,15 +96,20 @@ BADGE_WORDS = {
     "quota": "⏳",
 }
 
-# Shipped fallback when modes.yaml is missing from the bundle (same ids).
-_SHIPPED = {
-    "fast": ("gemini-3.5-flash-lite", ["gemini-3.5-flash-lite", "gemini-3.6-flash"]),
-    "accurate": ("gemini-3.8-flash", ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-4-argon"]),
-}
+def _fetch_models(provider: str, key: str) -> list[str]:
+    """Model ids the provider's list endpoint offers to this key (no
+    secret appears anywhere; no tokens are billed)."""
+    pid = (provider or "gemini").lower()
+    if pid == "openai":
+        from openai import OpenAI
 
+        client = OpenAI(api_key=key, timeout=15.0, max_retries=0)
+        return sorted(str(m.id) for m in client.models.list().data if m.id)
+    if pid == "anthropic":
+        from anthropic import Anthropic
 
-def _fetch_models(key: str) -> list[str]:
-    """Text-generation model ids the API offers to this key (no secrets)."""
+        client = Anthropic(api_key=key, timeout=15.0, max_retries=0)
+        return sorted(str(m.id) for m in client.models.list().data if m.id)
     from dubtool.llm.gemini import build_gemini_client
 
     client = build_gemini_client(key, timeout_ms=15_000)
@@ -133,16 +142,23 @@ class _WorkResult(QObject):
 
 
 class _AddKeysDialog(QDialog):
-    """Multi-line add: one key per line, cleared after saving (AGU5 2.2)."""
+    """Multi-line add: one key per line, cleared after saving (AGU5 2.2).
+    Provider-aware: a pasted key whose prefix does not match the selected
+    provider warns and offers to switch (`sk-ant-` is checked before `sk-`
+    — anthropic keys also start `sk-`)."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, provider: str = "gemini"):
         super().__init__(parent)
+        self.provider = (provider or "gemini").lower()
         self.setWindowTitle(i18n.tr("settings.add_title"))
         self.setMinimumWidth(420)
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(i18n.tr("settings.add_label")))
         self.field = QPlainTextEdit(self)
-        self.field.setPlaceholderText("AIza…\nAQ.….…" )
+        self.field.setPlaceholderText(
+            "AIza…" if self.provider == "gemini"
+            else ("sk-ant-…" if self.provider == "anthropic" else "sk-proj-…")
+        )
         layout.addWidget(self.field)
         row = QHBoxLayout()
         row.addStretch(1)
@@ -161,6 +177,18 @@ class _AddKeysDialog(QDialog):
         text = self.field.toPlainText()
         return [line.strip() for line in text.splitlines() if line.strip()]
 
+    def mismatched_keys(self) -> tuple[str, int] | None:
+        """(detected provider, count) when keys belong to another provider."""
+        counted: dict[str, int] = {}
+        for key in self.keys():
+            detected = secrets.detect_provider(key)
+            if detected and detected != self.provider:
+                counted[detected] = counted.get(detected, 0) + 1
+        if not counted:
+            return None
+        pid, count = max(counted.items(), key=lambda item: item[1])
+        return pid, count
+
     def take_keys(self) -> list[str]:
         """AGENT_UPDATE_7.md 2.1: hand the keys to the caller BEFORE anything
         is cleared — the old done() override wiped the field when exec()
@@ -175,17 +203,17 @@ class _AddKeysDialog(QDialog):
 
 class SettingsDialog(QDialog):
     def __init__(self, parent=None, on_key_saved=None, read_only=False,
-                 busy_provider=None):
+                 busy_provider=None, initial_provider: str | None = None):
         super().__init__(parent)
         self.setWindowTitle(i18n.tr("app.settings"))
         # No explicit global minimum width: the dialog's window minimum is
         # the tab content's own minimum, so it can never be opened narrower
         # than its buttons fit (AGENT_UPDATE_5.md task 4 layout invariant).
         self._on_key_saved = on_key_saved
-        self._badges: dict[int, str] = {}   # row index -> outcome string
+        self._badges: dict[tuple[str, int], str] = {}  # (provider, row) -> outcome
         self._refreshing = False
         self._testing_rows: set[int] = set()
-        self._custom_kept: dict[str, str] = {}  # saved custom ids per mode
+        self._provider = "gemini"  # the keys tab's current provider
 
         layout = QVBoxLayout(self)
         # Update 9 task 2.2: the read-only banner during a running job.
@@ -202,7 +230,6 @@ class SettingsDialog(QDialog):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
         self.tabs.addTab(self._build_keys_tab(), i18n.tr("settings.tab_keys"))
-        self.tabs.addTab(self._build_models_tab(), i18n.tr("settings.tab_models"))
         self.tabs.addTab(self._build_general_tab(), i18n.tr("settings.tab_general"))
         self.tabs.addTab(self._build_advanced_tab(), i18n.tr("settings.tab_advanced"))
 
@@ -228,6 +255,12 @@ class SettingsDialog(QDialog):
         self._ro_timer.timeout.connect(self._poll_read_only)
         self._ro_timer.start()
 
+        if initial_provider:
+            from dubtool.app.secrets import normalize_provider
+
+            idx = self.provider_combo.findData(normalize_provider(initial_provider))
+            if idx >= 0:
+                self.provider_combo.setCurrentIndex(idx)
         self._refresh_rows()
         self._load()
         self._on_key_saved = on_key_saved
@@ -263,6 +296,14 @@ class SettingsDialog(QDialog):
     def _build_keys_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
+        # The provider selector: the key editor and the test below work on
+        # whichever provider is chosen here (three stores, one list).
+        self.provider_combo = QComboBox()
+        for _pid, label in PROVIDERS_UI:
+            self.provider_combo.addItem(label, _pid)
+        self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
+        layout.addWidget(self.provider_combo)
+
         self.key_list = QListWidget()
         self.key_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         layout.addWidget(self.key_list, 1)
@@ -278,7 +319,9 @@ class SettingsDialog(QDialog):
         self.up_btn = QPushButton(i18n.tr("settings.move_up"))
         self.down_btn = QPushButton(i18n.tr("settings.move_down"))
         self.remove_btn = QPushButton(i18n.tr("settings.remove"))
-        for b in (self.add_btn, self.up_btn, self.down_btn, self.remove_btn, self.test_one_btn, self.test_all_btn):
+        self.import_env_btn = QPushButton(i18n.tr("settings.env_import"))
+        for b in (self.add_btn, self.up_btn, self.down_btn, self.remove_btn,
+                  self.test_one_btn, self.test_all_btn, self.import_env_btn):
             btns.addWidget(b)
         layout.addLayout(btns)
 
@@ -290,31 +333,40 @@ class SettingsDialog(QDialog):
         # trick — "Test selected" tests only the selected key.
         self.test_one_btn.clicked.connect(self._test_selected)
         self.test_all_btn.clicked.connect(self._test_all)
+        self.import_env_btn.clicked.connect(self._import_env_row)
         self._work = _WorkResult(self)
         self._work.finished.connect(self._on_test_finished)
+        self._refresh_work = _WorkResult(self)
+        self._refresh_work.finished.connect(self._on_models_fetched)
 
         self.keys_status = QLabel("")
         self.keys_status.setWordWrap(True)
         layout.addWidget(self.keys_status)
         return page
 
+    def _on_provider_changed(self) -> None:
+        self._provider = str(self.provider_combo.currentData() or "gemini")
+        self._testing_rows.clear()
+        self._refresh_rows()
+
     def _quota_until(self, key: str) -> float | None:
-        """Persisted per-(key, accurate-model) daily-quota cutoff, if any
+        """Persisted per-(key, model) daily-quota cutoff, if any
         (AGENT_UPDATE_6.md 5.3). Fingerprints only — never the key value."""
+        if self._provider != "gemini" or key.startswith("••••"):
+            return None
         try:
             from dubtool.llm import quota_state
 
-            return quota_state.exhausted_until(key, self._accurate_model())
+            return quota_state.exhausted_until(key, self._selected_model_id())
         except Exception:
             return None
 
-    def _accurate_model(self) -> str:
+    def _selected_model_id(self) -> str:
         try:
-            from dubtool.app import modes as modes_mod
-
-            return str(modes_mod.get("accurate", {}).get("model"))
+            saved = str((settings.load() or {}).get("model_id") or "")
         except Exception:
-            return _SHIPPED["accurate"][0]
+            saved = ""
+        return saved or "gemini-3.5-flash-lite"
 
     def _refresh_rows(self, select: int | None = None) -> None:
         """Rebuild the masked rows (never shows key values; position + ••••).
@@ -329,7 +381,7 @@ class SettingsDialog(QDialog):
         had_selection = self.key_list.currentRow()
         self.key_list.clear()
         for i, key in enumerate(self._keys()):
-            badge = self._badges.get(i)
+            badge = self._badges.get((self._provider, i)) or self._badges.get(i)
             label = f"Khóa {i + 1}   ••••{(key[-4:] if len(key) >= 4 else '····')}"
             if badge == "__testing__":
                 label += f"  —  {i18n.tr('settings.testing')}"
@@ -348,16 +400,30 @@ class SettingsDialog(QDialog):
                 item = QListWidgetItem(label)
                 item.setToolTip(i18n.tr("settings.badge_quota_until_tooltip", model=self._accurate_model()))
             self.key_list.addItem(item)
+        # The read-only `.env` rows for this provider: a key the app did not
+        # store (masked, position shown) with an import action.
+        env_rows = secrets.env_key_sources(self._provider)
+        for name, masked in env_rows:
+            item = QListWidgetItem(i18n.tr("settings.env_row", name=name, masked=masked))
+            item.setData(Qt.ItemDataRole.UserRole, "env")
+            item.setToolTip(i18n.tr("settings.env_row_tip"))
+            self.key_list.addItem(item)
         count = len(self._keys())
-        self.keys_status.setText(
-            i18n.tr("settings.keys_count", count=count) if count else i18n.tr("mode.no_key")
+        status = (
+            i18n.tr("settings.keys_count", count=count) if count
+            else i18n.tr("settings.no_key_provider", provider=self._provider_ui_name())
         )
+        if env_rows:
+            status += "  ·  " + i18n.tr("settings.env_count", n=len(env_rows))
+        self.keys_status.setText(status)
         # Restore the selection: explicit row, or the previously selected
         # row across badge rebuilds, or row 1 (the first) on first show.
         n_rows = self.key_list.count()
         if n_rows:
             target = min(max(0, select if select is not None else (had_selection or 0)), n_rows - 1)
             self.key_list.setCurrentRow(target)
+            if select is None and had_selection is not None:
+                self.key_list.setCurrentRow(min(had_selection, n_rows - 1))
         self._update_buttons()
 
     def _update_buttons(self) -> None:
@@ -367,14 +433,33 @@ class SettingsDialog(QDialog):
         rows = self.key_list.count()
         selected = self.key_list.currentRow()
         self.add_btn.setEnabled(not ro)  # was: always enabled
-        has_sel = 0 <= selected < rows
+        has_sel = self._row_is_key(selected)
         self.remove_btn.setEnabled(has_sel and not ro)
         # Update 9 task 2.2: the key network tests stay enabled read-only
         # (they only read the stored key and never touch the run).
         self.test_one_btn.setEnabled(has_sel and not self._testing_rows)
         self.up_btn.setEnabled(has_sel and selected > 0 and not ro)
-        self.down_btn.setEnabled(has_sel and selected < rows - 1 and not ro)
-        self.test_all_btn.setEnabled(rows > 0 and not self._testing_rows)
+        self.down_btn.setEnabled(has_sel and selected < self._stored_row_count() - 1 and not ro)
+        self.test_all_btn.setEnabled(self._stored_row_count() > 0 and not self._testing_rows)
+        # Import works only while an `.env` row is selected (and not busy).
+        self.import_env_btn.setEnabled(
+            not ro and self._row_is_env(selected) and not self._testing_rows
+        )
+
+    def _row_is_key(self, row: int) -> bool:
+        return self._stored_row_count() > row >= 0
+
+    def _row_is_env(self, row: int) -> bool:
+        if not 0 <= row < self.key_list.count():
+            return False
+        item = self.key_list.item(row)
+        return bool(item and item.data(Qt.ItemDataRole.UserRole) == ENV_ROW_ROLE)
+
+    def _stored_row_count(self) -> int:
+        return len(self._keys())
+
+    def _provider_ui_name(self) -> str:
+        return dict(PROVIDERS_UI).get(self._provider, self._provider)
 
     def _show_store_error(self, exc: Exception) -> None:
         """AGENT_UPDATE_7.md 2.3: a credential-store failure (backend missing
@@ -386,21 +471,43 @@ class SettingsDialog(QDialog):
 
     def _keys(self) -> list[str]:
         try:
-            return secrets.get_gemini_keys()
+            return secrets.get_keys(self._provider)
         except Exception as exc:
             self._show_store_error(exc)
             return []
 
     def _add_keys_manual(self) -> None:
-        dialog = _AddKeysDialog(self)
+        dialog = _AddKeysDialog(self, self._provider)
         code = dialog.exec()
         # AGENT_UPDATE_7.md 2.1: take the keys first (and clear the field)
         # whatever the outcome, so key text never lingers in the widget.
         new_keys = dialog.take_keys()
         if code != QDialog.DialogCode.Accepted or not new_keys:
             return
+        mismatch = dialog.mismatched_keys()
+        if mismatch is not None:
+            other_pid, count = mismatch
+            answer = QMessageBox.question(
+                self, i18n.tr("app.settings"),
+                i18n.tr(
+                    "settings.add_wrong_provider",
+                    n=count,
+                    other=dict(PROVIDERS_UI).get(other_pid, other_pid),
+                    mine=self._provider_ui_name(),
+                ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                delta = PROVIDERS_UI.index(
+                    next(p for p in PROVIDERS_UI if p[0] == other_pid)
+                )
+                self.provider_combo.setCurrentIndex(delta)
+                return
         try:
-            final = secrets.add_keys(new_keys)
+            try:
+                final = secrets.add_keys(self._provider, new_keys)
+            except TypeError:
+                final = secrets.add_keys(new_keys)
         except Exception as exc:
             self._show_store_error(exc)
             return
@@ -412,9 +519,50 @@ class SettingsDialog(QDialog):
         if self._on_key_saved:
             self._on_key_saved()
 
+    def _import_env_row(self) -> None:
+        """Copy the selected `.env` row's key into the Credential Manager
+        store (the .env value itself stays; the user can remove it). The
+        real value comes only from the environment — the list widget holds
+        name and masked value, never key text."""
+        import os
+
+        row = self.key_list.currentRow()
+        env_position = self._env_row_position(row)
+        if env_position is None:
+            return
+        env_rows = secrets.env_key_sources(self._provider)
+        if not 0 <= env_position < len(env_rows):
+            return
+        name = env_rows[env_position][0]
+        value = secrets.clean_key(os.environ.get(name, ""))
+        if not value or secrets.looks_like_placeholder(value):
+            self.keys_status.setText(i18n.tr("settings.env_import_missing"))
+            return
+        try:
+            try:
+                secrets.add_keys(self._provider, [value])
+            except TypeError:
+                secrets.add_keys([value])
+        except Exception as exc:
+            self._show_store_error(exc)
+            return
+        self.keys_status.setText(i18n.tr("settings.env_import_ok", name=name))
+        self._refresh_rows(select=self._stored_row_count() - 1)
+        if self._on_key_saved:
+            self._on_key_saved()
+
+    def _env_row_position(self, row: int) -> int | None:
+        """Index into secrets.env_key_sources() order for the row."""
+        env_positions = [
+            r for r in range(self.key_list.count()) if self._row_is_env(r)
+        ]
+        if row not in env_positions:
+            return None
+        return env_positions.index(row)
+
     def _remove_key(self) -> None:
         row = self.key_list.currentRow()
-        if row < 0:
+        if not self._row_is_key(row):
             return
         answer = QMessageBox.question(
             self, i18n.tr("app.settings"),
@@ -423,10 +571,14 @@ class SettingsDialog(QDialog):
         if answer != QMessageBox.StandardButton.Yes:
             return
         try:
-            remaining = secrets.remove_key(row)
+            try:
+                remaining = secrets.remove_key(self._provider, row)
+            except TypeError:
+                remaining = secrets.remove_key(row)
         except Exception as exc:
             self._show_store_error(exc)
             return
+        self._badges.pop((self._provider, row), None)
         self._badges.pop(row, None)
         # Select the nearest remaining row (AGENT_UPDATE_7.md 2.2).
         n_after = len(remaining) if isinstance(remaining, (list, tuple)) else len(self._keys())
@@ -434,11 +586,14 @@ class SettingsDialog(QDialog):
 
     def _move_key(self, delta: int) -> None:
         row = self.key_list.currentRow()
-        if row < 0:
+        if not self._row_is_key(row):
             return
         target = row + delta
         try:
-            secrets.move_key(row, delta)
+            try:
+                secrets.move_key(self._provider, row, delta)
+            except TypeError:
+                secrets.move_key(row, delta)
         except Exception as exc:
             self._show_store_error(exc)
         self._badges.clear()
@@ -465,10 +620,15 @@ class SettingsDialog(QDialog):
         keys = self._keys()
         self._testing_rows = set(rows)
         for row in rows:
+            self._badges[(self._provider, row)] = "__testing__"
             self._badges[row] = "__testing__"
         self._refresh_rows()
+        provider = self._provider
         self._work.fire(lambda: [
-            (row, run_key_test(keys[row], model=self._fast_model())) for row in rows
+            (row, run_key_test(keys[row], model=self._selected_model_id()
+                               if provider == "gemini" else None,
+                               provider=provider))
+            for row in rows
         ])
 
     def _on_test_finished(self, payload) -> None:
@@ -482,150 +642,10 @@ class SettingsDialog(QDialog):
             self.keys_status.setText(i18n.tr("settings.error_unk"))
             return
         for row, outcome in payload:
+            self._badges[(self._provider, row)] = outcome
             self._badges[row] = outcome
         self._testing_rows.clear()
         self._refresh_rows()
-
-    def _fast_model(self) -> str:
-        """The key test uses the model selected for Fast (AGU5 2.3)."""
-        try:
-            return str(modes.load(settings.load())["fast"]["model"])
-        except Exception:
-            return "gemini-3.5-flash-lite"
-
-    # ----------------------------------------------------------- models tab
-    def _build_models_tab(self) -> QWidget:
-        page = QWidget()
-        form = QFormLayout(page)
-        self.model_fast_combo = QComboBox()
-        self.model_accurate_combo = QComboBox()
-        for combo in (self.model_fast_combo, self.model_accurate_combo):
-            combo.setEditable(False)
-        form.addRow(i18n.tr("settings.model_fast"), self.model_fast_combo)
-        form.addRow(i18n.tr("settings.model_accurate"), self.model_accurate_combo)
-        self.model_fast_custom = QLineEdit()
-        self.model_accurate_custom = QLineEdit()
-        form.addRow(i18n.tr("settings.custom_prompt"), self.model_fast_custom)
-        self.model_fast_custom.setVisible(False)
-        self.model_accurate_custom.setVisible(False)
-        row = QHBoxLayout()
-        self.refresh_btn = QPushButton(i18n.tr("settings.refresh_models"))
-        self.reset_btn = QPushButton(i18n.tr("settings.reset_models"))
-        row.addWidget(self.refresh_btn)
-        row.addWidget(self.reset_btn)
-        form.addRow("", row)
-        self.models_status = QLabel("")
-        self.models_status.setWordWrap(True)
-        form.addRow("", self.models_status)
-
-        self.model_fast_combo.currentIndexChanged.connect(self._update_custom_fields)
-        self.model_accurate_combo.currentIndexChanged.connect(self._update_custom_fields)
-        self._refresh_work = _WorkResult(self)
-        self._refresh_work.finished.connect(self._on_models_fetched)
-        self.refresh_btn.clicked.connect(self._refresh_models)
-        self.reset_btn.clicked.connect(self._reset_models)
-
-        self._fill_model_combos()
-        return page
-
-    def _fill_model_combos(self) -> None:
-        s = settings.load()
-        current = modes.load(s)
-        known = list(s.get("known_models") or [])
-        for mode, combo in (
-            ("fast", self.model_fast_combo),
-            ("accurate", self.model_accurate_combo),
-        ):
-            shipped = list(current[mode].get("models") or _SHIPPED[mode][1])
-            items = list(dict.fromkeys(shipped + [m for m in known if m not in shipped]))
-            current_id = str(current[mode].get("model") or "")
-            if current_id and current_id not in items:
-                items.append(current_id)  # never silently replace a saved id
-            combo.blockSignals(True)
-            combo.clear()
-            for m in items:
-                combo.addItem(m, m)
-            combo.addItem(i18n.tr("settings.custom_model"), CUSTOM)
-            if current_id and current_id in items:
-                combo.setCurrentIndex(items.index(current_id))
-            else:
-                combo.setCurrentIndex(max(0, combo.findData(CUSTOM)))
-                self._custom_kept[mode] = current_id  # prefill the field below
-            combo.blockSignals(False)
-        self._update_custom_fields()
-
-    def _update_custom_fields(self) -> None:
-        for mode, combo, field in (
-            ("fast", self.model_fast_combo, self.model_fast_custom),
-            ("accurate", self.model_accurate_combo, self.model_accurate_custom),
-        ):
-            is_custom = combo.itemData(combo.currentIndex()) == CUSTOM
-            field.setVisible(is_custom)
-            if is_custom and not field.text().strip():
-                field.setText(str(self._custom_kept.get(mode) or ""))
-
-    def _selected_model(self, mode: str) -> str:
-        combo = getattr(self, f"model_{mode}_combo")
-        if combo.itemData(combo.currentIndex()) == CUSTOM:
-            return self._custom_text(mode)
-        return str(combo.currentData() or combo.currentText() or "")
-
-    def _custom_text(self, mode: str) -> str:
-        field = getattr(self, f"model_{mode}_custom")
-        return field.text().strip()
-
-    def _refresh_models(self) -> None:
-        """Fetch the key's model list off the UI thread (never freezes)."""
-        if self._refreshing:
-            return
-        keys = self._keys()
-        if not keys:
-            self.models_status.setText(i18n.tr("settings.refresh_none"))
-            return
-        self._refreshing = True
-        self.refresh_btn.setEnabled(False)
-        self.models_status.setText(i18n.tr("settings.refresh_started"))
-        self._refresh_work.fire(lambda: _fetch_models(keys[0]))
-
-    def _on_models_fetched(self, payload) -> None:
-        self._refreshing = False
-        self.refresh_btn.setEnabled(True)
-        if (
-            isinstance(payload, tuple)
-            and len(payload) == 2
-            and payload[0] == "__error__"
-        ):
-            self.models_status.setText(i18n.tr("settings.refresh_none"))
-            return
-        fetched = [str(m).strip() for m in payload if str(m).strip()]
-        s = settings.load()
-        known = list(s.get("known_models") or [])
-        added = [m for m in fetched if m not in known and self._valid_id(m)]
-        if not added:
-            self.models_status.setText(i18n.tr("settings.refresh_none"))
-            return
-        for combo in (self.model_fast_combo, self.model_accurate_combo):
-            combo.blockSignals(True)
-            skip_labels = {combo.itemText(i) for i in range(combo.count())}
-            for m in added:
-                if m not in skip_labels:
-                    combo.insertItem(combo.count() - 1, m, m)  # before Custom…
-            combo.blockSignals(False)
-        s["known_models"] = known + added  # ids only, never any secret
-        settings.save(s)
-        self.models_status.setText(i18n.tr("settings.refresh_added", n=len(added)))
-
-    @staticmethod
-    def _valid_id(model_id: str) -> bool:
-        return bool(MODEL_ID_RE.fullmatch(model_id))
-
-    def _reset_models(self) -> None:
-        """Reset restores the shipped defaults for both dropdowns (AGU5 2)."""
-        modes.reset_to_defaults()
-        self._custom_kept = {}
-        self.model_fast_custom.clear()
-        self.model_accurate_custom.clear()
-        self._fill_model_combos()
 
     # ---------------------------------------------------------- general tab
     def _build_general_tab(self) -> QWidget:
@@ -675,7 +695,50 @@ class SettingsDialog(QDialog):
         form.addRow("", self.backup_warn)
         self.backup_combo.currentIndexChanged.connect(self._on_backup_changed)
 
-        # Update 12 task 2.4: what happens when the Accurate model is
+        # The translation-model group (one model, no Fast/Accurate modes):
+        # the fallback model used when the selected model is overloaded or
+        # out of quota (items = the models that have a key; “Không” = no
+        # fallback), plus the overload policy dropdown and the refresh of
+        # the model list from every provider that has a key.
+        self.fallback_combo = QComboBox()
+        self.fallback_combo.addItem(i18n.tr("settings.fallback_model_none"), "")
+        from dubtool.llm import catalog as catalog_mod
+
+        for _pid, entries in catalog_mod.grouped_order():
+            if not entries:
+                continue
+            try:
+                has_k = secrets.has_key(_pid)
+            except TypeError:
+                has_k = secrets.has_key()
+            if not has_k:
+                continue
+            for entry in entries:
+                suffix = i18n.tr("settings.model_paid") if entry.paid else ""
+                self.fallback_combo.addItem(
+                    f"{entry.label} ({_pid})" + (f" {suffix}" if suffix else ""),
+                    entry.id,
+                )
+        for model_id in [m for m in (settings.load() or {}).get("known_models", [])
+                         if isinstance(m, str) and not self.fallback_combo.findData(m) >= 0]:
+            pid = catalog_mod.infer_provider(model_id)
+            try:
+                has_k = secrets.has_key(pid)
+            except TypeError:
+                has_k = secrets.has_key()
+            if not has_k:
+                continue
+            self.fallback_combo.addItem(f"{model_id} ({pid})", model_id)
+        self.fallback_combo.setToolTip(i18n.tr("settings.fallback_model_tip"))
+        form.addRow(i18n.tr("settings.fallback_model"), self.fallback_combo)
+        self.refresh_models_btn = QPushButton(i18n.tr("settings.refresh_models_btn"))
+        self.refresh_models_btn.clicked.connect(self._refresh_provider_models)
+        form.addRow("", self.refresh_models_btn)
+        self.models_status = QLabel("")
+        self.models_status.setWordWrap(True)
+        form.addRow("", self.models_status)
+
+        # Update 12 task 2.4: what happens when the selected model is
         # overloaded or out of quota for every key (disabled while a run is
         # busy through the dialog's read-only mode).
         self.overload_combo = QComboBox()
@@ -732,6 +795,69 @@ class SettingsDialog(QDialog):
         self.asr_prompt_check.setToolTip(i18n.tr("settings.asr_prompt_tooltip"))
         form.addRow(i18n.tr("settings.asr_prompt_label"), self.asr_prompt_check)
         return page
+
+    def _refresh_provider_models(self) -> None:
+        """Ask every provider that has a key for its model list (off the UI
+        thread) and add the returned ids to the dropdowns (cached in
+        settings.json as known_models — ids only, never another secret)."""
+        if self._refreshing:
+            return
+        providers: list[str] = []
+        keys: dict[str, str] = {}
+        for pid, _label in PROVIDERS_UI:
+            provider_keys = []
+            try:
+                provider_keys = secrets.get_keys(pid)
+            except Exception:
+                provider_keys = []
+            if provider_keys:
+                providers.append(pid)
+                keys[pid] = provider_keys[0]
+        if not providers:
+            self.models_status.setText(i18n.tr("settings.refresh_none"))
+            return
+        self._refreshing = True
+        self.refresh_models_btn.setEnabled(False)
+        self.models_status.setText(i18n.tr("settings.refresh_started"))
+        self._refresh_work.fire(lambda: [
+            (pid, _fetch_models(pid, keys[pid])) for pid in providers
+        ])
+
+    def _on_models_fetched(self, payload) -> None:
+        self._refreshing = False
+        self.refresh_models_btn.setEnabled(True)
+        if (
+            isinstance(payload, tuple)
+            and len(payload) == 2
+            and payload[0] == "__error__"
+        ):
+            self.models_status.setText(i18n.tr("settings.refresh_none"))
+            return
+        s = settings.load()
+        known = list(s.get("known_models") or [])
+        added_total = 0
+        from dubtool.llm import catalog as catalog_mod
+
+        for pid, fetched in payload:
+            if isinstance(fetched, tuple) and len(fetched) == 2 and fetched[0] == "__error__":
+                continue
+            for model_id in fetched:
+                model_id = str(model_id).strip()
+                if not model_id or not self._valid_id(model_id):
+                    continue
+                if model_id not in known:
+                    known.append(model_id)
+                    added_total += 1
+                    if self.fallback_combo.findData(model_id) < 0 and secrets.has_key(pid):
+                        self.fallback_combo.addItem(
+                            f"{model_id} ({pid})", model_id
+                        )
+        if not added_total:
+            self.models_status.setText(i18n.tr("settings.refresh_none"))
+            return
+        s["known_models"] = known  # ids only, never any secret
+        settings.save(s)
+        self.models_status.setText(i18n.tr("settings.refresh_added", n=added_total))
 
     # ------------------------------------------------ backup voice (AGU11 3.5)
     def _selected_backup(self) -> str:
@@ -970,6 +1096,14 @@ class SettingsDialog(QDialog):
         self.overload_combo.setCurrentIndex(
             max(0, self.overload_combo.findData(s.get("overload_policy", "fallback_fast")))
         )
+        saved_fallback = str(s.get("fallback_model") or "")
+        idx_f = self.fallback_combo.findData(saved_fallback)
+        if saved_fallback and idx_f < 0:
+            # A saved fallback that is not in the list keeps its id (never
+            # wait silently replaced).
+            self.fallback_combo.addItem(f"{saved_fallback}", saved_fallback)
+            idx_f = self.fallback_combo.findData(saved_fallback)
+        self.fallback_combo.setCurrentIndex(max(0, idx_f))
         self._load_backup_choice(s)
         self.preset_combo.setCurrentIndex(max(0, self.preset_combo.findData(s.get("video_encode_preset", "veryfast"))))
         self.jobs_days_spin.setValue(int(s.get("jobs_max_days", 14) or 14))
@@ -988,6 +1122,7 @@ class SettingsDialog(QDialog):
         s["cpu_usage"] = self.cpu_combo.currentData() or "balanced"
         s["asr_punctuation_prompt"] = bool(self.asr_prompt_check.isChecked())
         s["overload_policy"] = self.overload_combo.currentData() or "fallback_fast"
+        s["fallback_model"] = str(self.fallback_combo.currentData() or "")
         s["tts_backup_voice"] = self._selected_backup()
         s["video_encode_preset"] = self.preset_combo.currentData() or "veryfast"
         s["jobs_max_days"] = int(self.jobs_days_spin.value())
@@ -995,14 +1130,8 @@ class SettingsDialog(QDialog):
         s["jobs_dir"] = self.jobs_edit.text().strip()
         s["default_output_dir"] = self.output_edit.text().strip()
         s.pop("default_output", None)  # old key is never written (AGU8 7.3)
-        # Model ids: the Custom text field is validated; an empty custom id
-        # keeps the previously saved one (nothing to revert to silently).
-        fast = self._selected_model("fast")
-        accurate = self._selected_model("accurate")
-        if fast:
-            s.setdefault("mode_models", {})["fast"] = fast
-        if accurate:
-            s.setdefault("mode_models", {})["accurate"] = accurate
+        # The saved fast/accurate mode models (mode_models, last_mode)
+        # are ignored — the model list replaced the old modes entirely.
         problems = settings.validate(s)
         if problems:
             QMessageBox.warning(self, i18n.tr("app.settings"), "\n".join(problems))

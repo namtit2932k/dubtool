@@ -60,7 +60,7 @@ _txt_version = _tmp_spec_dir / "version-info.txt"
 _txt_version.write_text(str(_vinfo), encoding="utf-8")
 
 datas = [
-    (str(ROOT / "packaging" / "modes.yaml"), "packaging"),
+    (str(ROOT / "packaging" / "models.yaml"), "packaging"),
 ]
 
 # AGU9 task 8: vendor/ is listed file-by-file, NOT as a directory entry —
@@ -92,6 +92,9 @@ hiddenimports += collect_submodules("keyring.backends")
 hiddenimports += ["keyring.backends.Windows"]
 hiddenimports += collect_submodules("faster_whisper")
 hiddenimports += collect_submodules("edge_tts")
+hiddenimports += collect_submodules("openai")
+hiddenimports += collect_submodules("anthropic")
+hiddenimports += ["pydantic", "httpx"]
 # python-docx + its lxml dependency (readable translation export, AGU7 5.6)
 hiddenimports += ["docx", "docx.oxml", "docx.oxml.ns", "lxml", "lxml.etree"]
 

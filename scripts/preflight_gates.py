@@ -24,7 +24,8 @@ def _git(*args: str, **kw) -> str:
 
 PATTERNS = [
     ("google-key", re.compile(r"AIza[0-9A-Za-z_-]{20,}")),
-    ("anthropic-key", re.compile(r"sk-ant-")),
+    ("anthropic-key", re.compile(r"sk-ant-[0-9A-Za-z_-]{20,}")),
+    ("openai-key", re.compile(r"sk-proj-[0-9A-Za-z_-]{20,}")),
     ("private-key", re.compile(r"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----")),
     ("github-token", re.compile(r"ghp_[A-Za-z0-9]{20,}")),
     ("github-pat", re.compile(r"github_pat_")),

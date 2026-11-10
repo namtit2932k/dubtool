@@ -197,11 +197,11 @@ def run(cmd: list[str], *, cwd=None, capture: bool = True, timeout: float | None
                     # communicate() can finish and the pipes close.
                 if cancel_seen:
                     try:
-                        proc.communicate(timeout=3)
+                        proc.communicate(timeout=0.5)
                     except subprocess.TimeoutExpired:
                         proc.kill()
                         try:
-                            proc.communicate(timeout=3)
+                            proc.communicate(timeout=0.5)
                         except subprocess.TimeoutExpired:
                             pass
                     if proc.poll() is None:

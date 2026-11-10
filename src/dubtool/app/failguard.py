@@ -173,7 +173,8 @@ def install() -> None:
                     handle_slot_exception(RuntimeError(message))
                 except Exception:
                     log.exception("failguard Qt handler failed")
-            sys.stderr.write(f"Qt: {message}\n")
+            if sys.stderr is not None:
+                sys.stderr.write(f"Qt: {message}\n")
 
         qInstallMessageHandler(_qt_handler)
     except Exception:  # Qt not present (headless unit runs)

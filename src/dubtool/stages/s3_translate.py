@@ -470,25 +470,31 @@ def _completeness_pass(job, entries, config, client, cancel) -> list[dict]:
 
 
 def fast_model_id(config) -> str | None:
-    """The Fast mode's model id from packaging/modes.yaml plus the user's
-    settings override (used by every mechanical LLM step and the overload
-    fallback — mechanical steps always use the Fast model, AGU8 rule 4)."""
+    """The cheap mechanical-step model: the user's configured fallback
+    model when one is set, else the shipped default
+    (gemini-3.5-flash-lite) — mechanical steps (punctuation, fillers,
+    completeness, shorten) always use it."""
     try:
-        from dubtool.app import modes as modes_mod
+        from dubtool.app import settings as settings_mod
 
-        try:
-            from dubtool.app import settings as app_settings_mod
-            overrides = app_settings_mod.load()
-        except Exception:
-            overrides = None
-        return (modes_mod.load(overrides or {}) or {}).get("fast", {}).get("model")
+        fallback = str((settings_mod.load() or {}).get("fallback_model") or "").strip()
+        if fallback:
+            return fallback
     except Exception as exc:
-        log.debug("s3: Fast mode model lookup failed (%s)", exc)
-        return None
+        log.debug("s3: fallback model lookup failed (%s)", exc)
+    from dubtool.llm.catalog import DEFAULT_MODEL_ID
+
+    return DEFAULT_MODEL_ID
+
+
+def _selected_model(config) -> str | None:
+    """The model id the run selected (api.run_dub stores it in
+    config.llm_model); None keeps the provider's configured model."""
+    return getattr(config, "llm_model", None) or None
 
 
 def fast_client(config, pid: str, api_keys, cancel, on_overload=None):
-    """A Fast-model LLMClient for the mechanical steps (punctuation,
+    """A cheap-model LLMClient for the mechanical steps (punctuation,
     re-translation); its requests count in the shared run budget."""
     llm_cfg = getattr(config, "llm", {}) or {}
     options = {
@@ -496,9 +502,13 @@ def fast_client(config, pid: str, api_keys, cancel, on_overload=None):
         "overload_after": llm_cfg.get("overload_after", 2),
         "overload_policy": "wait",  # mechanical steps never switch models
     }
+    from dubtool.llm import catalog as catalog_mod
+
+    mech_model = fast_model_id(config)
+    mech_pid = catalog_mod.require(mech_model).provider
     provider = get_provider(
-        config, pid, api_keys=api_keys, cancel=cancel, mode="fast",
-        model_override=fast_model_id(config),
+        config, mech_pid, api_keys=api_keys, cancel=cancel,
+        model_override=mech_model,
     )
     return LLMClient(provider, cancel=cancel, options=options, on_overload=on_overload)
 
@@ -811,7 +821,10 @@ def run(
     llm_cfg = getattr(config, "llm", {}) or {}
     mode = getattr(config, "llm_mode", None)
     interactive = bool(getattr(config, "llm_interactive", False))
-    provider = get_provider(config, pid, api_keys=api_keys, cancel=cancel, mode=mode)
+    provider = get_provider(
+        config, pid, api_keys=api_keys, cancel=cancel,
+        model_override=_selected_model(config),
+    )
     translate_cfg = config.translate or {}
     concurrency = max(1, int(translate_cfg.get("concurrency", 1)))
     pronouns = {k: v for k, v in (translate_cfg.get("pronouns") or {}).items() if v}
@@ -882,20 +895,42 @@ def run(
             "fallback_fast", "fallback-fast"
         ) else "wait"
 
+    def _fallback_choice() -> tuple[str, str] | None:
+        """(provider, model) of the configured fallback model — None when
+        the user chose no fallback (the overload path then waits/gives up
+        instead of switching to the same or an unusable model)."""
+        fallback_model = str(getattr(config, "llm_fallback_model", "") or "").strip()
+        if not fallback_model:
+            return None
+        if fallback_model == provider.model:
+            return None  # no point switching to the already-failing model
+        from dubtool.llm import catalog as catalog_mod
+
+        return catalog_mod.require(fallback_model).provider, fallback_model
+
     def switch_to_fast_model(_from_model: str) -> None:
-        fast_provider = get_provider(
-            config, pid, api_keys=api_keys, cancel=cancel,
-            mode="fast", model_override=fast_model_id(config),
+        choice = _fallback_choice()
+        if choice is None:
+            from dubtool.llm.base import LLMError
+
+            raise LLMError(
+                "overload policy wants to switch models but no fallback model "
+                "is configured (Settings → General → Mô hình dịch)"
+            )
+        fallback_pid, fallback_model = choice
+        fallback_provider = get_provider(
+            config, fallback_pid, api_keys=api_keys, cancel=cancel,
+            model_override=fallback_model,
         )
         holder["client"] = LLMClient(
-            fast_provider, cancel=cancel, options=client_options,
+            fallback_provider, cancel=cancel, options=client_options,
             on_overload=_overload_callback,
         )
         stats["fallback"] = True
-        stats["fast_model"] = fast_provider.model
+        stats["fast_model"] = fallback_provider.model
         log.info(
-            "s3: overload policy switched the rest of stage 3 to the Fast model %s",
-            fast_provider.model,
+            "s3: overload policy switched the rest of stage 3 to the fallback "
+            "model %s", fallback_provider.model,
         )
         try:
             from dubtool.app import i18n

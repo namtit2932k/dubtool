@@ -13,7 +13,9 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
+    QListWidgetItem,
     QApplication,
     QBoxLayout,
     QCheckBox,
@@ -36,7 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from dubtool import api, proc
-from dubtool.app import diagnostics, errors, i18n, modes, paths, secrets, settings
+from dubtool.app import diagnostics, errors, i18n, paths, secrets, settings
 from dubtool.app.coalesce import ProgressGate
 from dubtool.app.service import PipelineService
 from dubtool.app.ui import first_run
@@ -200,11 +202,11 @@ class OptionsWidget(QGroupBox):
         grid.addWidget(QLabel(i18n.tr("options.voice")), 5, 0)
         grid.addWidget(self.voice_combo, 5, 1, 1, 2)
 
-    def to_options(self, mode: str, brief: str) -> api.DubOptions:
+    def to_options(self, model: str, brief: str) -> api.DubOptions:
         from dubtool.brief import normalize_brief
 
         return api.DubOptions(
-            mode=mode,
+            model=model,
             burn_subtitles=self.burn_check.isChecked(),
             save_srt=self.srt_check.isChecked(),
             original_gain_db=float(self.gain_slider.value()),
@@ -634,18 +636,19 @@ class MainWindow(QMainWindow):
         self.options = OptionsWidget()
         self.left_layout.addWidget(self.options)
 
-        # 5. Generate buttons (AGU4 7.5) in a horizontal row
+        # 5. Generate row (AGU4 7.5): the model dropdown and ONE Tạo button
         self.buttons_row = QWidget()
         self.buttons_row.setObjectName("buttons_row")
         buttons_row = QHBoxLayout(self.buttons_row)
         buttons_row.setContentsMargins(0, 0, 0, 0)
-        self.fast_btn = QPushButton(i18n.tr("mode.fast"))
-        self.accurate_btn = QPushButton(i18n.tr("mode.accurate"))
+        self.model_combo = QComboBox()
+        self.model_combo.setEditable(False)
+        self.model_combo.setToolTip("")
+        self.generate_btn = QPushButton(i18n.tr("run.generate"))
+        self.generate_btn.clicked.connect(self.start_run)
         self._update_mode_tips()
-        self.fast_btn.clicked.connect(lambda: self.start_run("fast"))
-        self.accurate_btn.clicked.connect(lambda: self.start_run("accurate"))
-        buttons_row.addWidget(self.fast_btn)
-        buttons_row.addWidget(self.accurate_btn)
+        buttons_row.addWidget(self.model_combo, 1)
+        buttons_row.addWidget(self.generate_btn, 0)
         self.left_layout.addWidget(self.buttons_row)
 
         # 6. Progress (AGU4 7.6, compact per AGENT_UPDATE_5.md task 4)
@@ -670,6 +673,14 @@ class MainWindow(QMainWindow):
             self.progress_group.log.set_open(True)
         self._set_details_persist(saved.get("details_open", False))
         self.progress_group.log.openChanged.connect(self._persist_details)
+
+    @property
+    def fast_btn(self) -> QPushButton:
+        return self.generate_btn
+
+    @property
+    def accurate_btn(self) -> QPushButton:
+        return self.generate_btn
 
     def _persist_details(self, open_: bool) -> None:
         """Remember the details area state across runs (Update 9 task 3.1)."""
@@ -726,18 +737,108 @@ class MainWindow(QMainWindow):
         self._refresh_section_layout()
 
     def _update_mode_tips(self) -> None:
-        """Generate-button tooltips must show the currently selected model
-        id (AGENT_UPDATE_5.md task 1)."""
-        try:
-            current = modes.load(settings.load())
-            fast = str(current["fast"]["model"])
-            accurate = str(current["accurate"]["model"])
-        except Exception:
-            fast = accurate = ""
-        self.fast_btn.setToolTip(i18n.tr("mode.fast.tip") + (f"\n{fast}" if fast else ""))
-        self.accurate_btn.setToolTip(
-            i18n.tr("mode.accurate.tip") + (f"\n{accurate}" if accurate else "")
+        """The dropdown lists the catalog's models, grouped by provider with
+        non-selectable headers: "Gemini", "OpenAI (ChatGPT)", "Anthropic
+        (Claude)". A provider's items are disabled ("(cần khóa API)") when
+        no key exists for it; the default selection is gemini-3.5-flash-
+        lite and the last choice is remembered (settings.json: model_id).
+        The Tạo button's tooltip names the provider, the model id, and
+        "trả phí" when the provider is paid."""
+        from dubtool.llm import catalog as catalog_mod
+
+        saved = str(settings.load().get("model_id") or catalog_mod.DEFAULT_MODEL_ID)
+        self._paid_provider_seen: set[str] = getattr(
+            self, "_paid_provider_seen", set()
         )
+        combo = self.model_combo
+        combo.blockSignals(True)
+        combo.clear()
+        _PAID_SFX = i18n.tr("run.model_paid")
+        _NO_KEY_SFX = i18n.tr("run.model_no_key")
+        headers = {
+            "gemini": i18n.tr("run.provider_gemini"),
+            "openai": i18n.tr("run.provider_openai"),
+            "anthropic": i18n.tr("run.provider_anthropic"),
+            "ollama": "Ollama",
+        }
+        default_index = -1
+        saved_index = -1
+        for pid, entries in catalog_mod.grouped_order():
+            if not entries:
+                continue
+            header_item = QStandardItem(headers.get(pid, pid))
+            header_item.setEnabled(False)
+            header_item.setSelectable(False)
+            font = header_item.font()
+            font.setBold(True)
+            header_item.setFont(font)
+            combo.model().appendRow(header_item)
+            try:
+                has_key = secrets.has_key(pid)
+            except TypeError:
+                has_key = secrets.has_key()
+            for entry in entries:
+                label = entry.display_label
+                if entry.paid:
+                    label += f" {_PAID_SFX}"
+                if not has_key:
+                    label += f" {_NO_KEY_SFX}"
+                item = QStandardItem(label)
+                item.setData(entry.id, Qt.ItemDataRole.UserRole)
+                if not has_key:
+                    item.setEnabled(False)
+                    item.setToolTip(i18n.tr(
+                        "run.model_no_key_tip", provider=headers.get(pid, pid)
+                    ))
+                elif entry.paid:
+                    item.setToolTip(i18n.tr(
+                        "run.model_tip_paid",
+                        provider=headers.get(pid, pid), id=entry.id,
+                    ))
+                else:
+                    item.setToolTip(i18n.tr(
+                        "run.model_tip", provider=headers.get(pid, pid), id=entry.id,
+                    ))
+                combo.model().appendRow(item)
+                index = combo.count() - 1
+                if entry.id == catalog_mod.DEFAULT_MODEL_ID:
+                    default_index = index
+                if entry.id == saved:
+                    saved_index = index
+        combo.setCurrentIndex(saved_index if saved_index >= 0 else max(0, default_index))
+        combo.blockSignals(False)
+        self._update_generate_tip()
+
+    def _selected_model_entry(self):
+        """The catalog entry of the dropdown's model id (None safe)."""
+        model_id = self._selected_model_id()
+        from dubtool.llm import catalog as catalog_mod
+
+        return catalog_mod.get(model_id)
+
+    def _selected_model_id(self) -> str:
+        item = self.model_combo.model().item(self.model_combo.currentIndex())
+        if item is not None and item.data(Qt.ItemDataRole.UserRole):
+            return str(item.data(Qt.ItemDataRole.UserRole))
+        from dubtool.llm import catalog as catalog_mod
+
+        return catalog_mod.DEFAULT_MODEL_ID
+
+    def _update_generate_tip(self) -> None:
+        model_id = self._selected_model_id()
+        entry = self._selected_model_entry()
+        provider_name = {
+            "gemini": i18n.tr("run.provider_gemini"),
+            "openai": i18n.tr("run.provider_openai"),
+            "anthropic": i18n.tr("run.provider_anthropic"),
+            "ollama": "Ollama",
+        }.get(entry.provider.lower(), entry.provider) if entry else ""
+        tip = i18n.tr(
+            "run.model_tip_paid" if (entry and entry.paid) else "run.model_tip",
+            provider=provider_name, id=model_id,
+        )
+        self.model_combo.setToolTip(tip)
+        self.generate_btn.setToolTip(tip)
 
     # ------------------------------------------------------------ video
     def choose_video(self) -> None:
@@ -849,8 +950,8 @@ class MainWindow(QMainWindow):
             self.video_path and self.output_dir
             and not self.service.running and not self._busy
         )
-        self.fast_btn.setEnabled(ready)
-        self.accurate_btn.setEnabled(ready)
+        self.generate_btn.setEnabled(ready)
+        self.model_combo.setEnabled(ready)
 
     # --------------------------------------------------- busy state (AGU9 2)
     def _busy_widgets(self) -> list:
@@ -861,7 +962,7 @@ class MainWindow(QMainWindow):
         The enumerate test in tests/test_app_ui.py sweeps the window for
         widgets forgotten here."""
         out = [self.drop_zone, self.output_btn, self.options,
-               self.fast_btn, self.accurate_btn]
+               self.generate_btn, self.model_combo]
         if getattr(self, "file_card", None) is not None:
             out.append(self.file_card)
         return out
@@ -880,18 +981,40 @@ class MainWindow(QMainWindow):
     def is_busy(self) -> bool:
         return bool(getattr(self, "_busy", False))
 
-    def start_run(self, mode: str, force: bool = False) -> None:
-        if not secrets.has_key():
-            QMessageBox.information(self, i18n.tr("app.settings"), i18n.tr("mode.no_key"))
-            self.open_settings()
+    def start_run(self, _checked: bool = False, force: bool = False) -> None:
+        model_id = self._selected_model_id()
+        entry = self._selected_model_entry()
+        provider = (entry.provider if entry else "gemini").lower()
+        if not secrets.has_key(provider):
+            QMessageBox.information(
+                self, i18n.tr("app.settings"),
+                i18n.tr("run.no_key", provider=self._provider_label(provider)),
+            )
+            self.open_settings(provider)
             return
+        if entry and entry.paid and provider not in self._paid_provider_seen:
+            s = settings.load()
+            already_ok = provider in list(s.get("paid_notice_ok", []))
+            if already_ok:
+                self._paid_provider_seen.add(provider)
+            elif self._paid_provider_confirm(provider):
+                return
+            else:
+                self._paid_provider_seen.add(provider)
         if not first_run.ensure_shown(self):
             return
         self._validate_output()
         if self.output_warn.text():
             QMessageBox.warning(self, i18n.tr("output.header"), self.output_warn.text())
             return
-        options = self.options.to_options(mode, brief=self.brief_edit.toPlainText())
+        options = self.options.to_options(model_id, brief=self.brief_edit.toPlainText())
+        # The selected model id persists for the next run.
+        try:
+            s = settings.load()
+            s["model_id"] = model_id
+            settings.save(s)
+        except OSError:
+            pass
         if options.description:
             # Remember per-video descriptions in app data (briefs.json keyed
             # by a hash of the video path) — nothing is written into the
@@ -899,7 +1022,7 @@ class MainWindow(QMainWindow):
             from dubtool.brief import save_video_brief
 
             save_video_brief(self.video_path, options.description)
-        self.progress_group._last_mode = mode
+        self.progress_group._last_mode = "generate"
         self.progress_group.show_running()
         self.set_busy(True)
         from dubtool.app.ui.fillers_dialog import (
@@ -918,12 +1041,9 @@ class MainWindow(QMainWindow):
             return bridge.call(lambda: FillersDialog(suggestions, parent=self, defaults=defaults_map).result_choices())
 
         def _overload_dialog(info: dict | None = None):
-            from dubtool.app.modes import get as mode_get
-
             # AGU11 2.3: the dialog names the currently failing model and
             # how long it has been trying.
-            model = str((info or {}).get("model")
-                        or (mode_get(mode, settings.load()) or {}).get("model"))
+            model = str((info or {}).get("model") or options.model)
             waited = int(float((info or {}).get("waited_s") or 0))
             return bridge.call(
                 lambda: OverloadDialog(model=model, parent=self, waited_s=waited).choice
@@ -989,7 +1109,7 @@ class MainWindow(QMainWindow):
                 i18n.tr("generate.conflict") + f"\n{result.out_video}",
             )
             if answer == QMessageBox.StandardButton.Yes:
-                self.start_run(self.progress_group._last_mode, force=True)
+                self.start_run(force=True)
         elif not result.ok and result.code != "cancelled":
             # Update 9 task 3.1: a run ending in error opens the details
             # panel automatically.
@@ -1035,7 +1155,7 @@ class MainWindow(QMainWindow):
             if dialog.clickedButton() == settings_btn:
                 self.open_settings()
             elif dialog.clickedButton() == resume_btn:
-                self.start_run(self.progress_group._last_mode, force=False)
+                self.start_run(force=False)
             return
         dialog.setText(errors.message_for_code(result.code))
         if result.code == "internal":
@@ -1054,16 +1174,45 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     # ------------------------------------------------------------ menu
-    def open_settings(self) -> None:
+    def open_settings(self, provider: str | None = None) -> None:
         # Update 9 task 2.2: during a run the dialog opens read-only with a
         # banner, and re-enables itself if the run ends while it is open.
+        # `provider` (when given) opens Settings at that provider's keys.
         dialog = SettingsDialog(
             self,
             read_only=self._busy,
             busy_provider=None if not self._busy else self.is_busy,
+            initial_provider=provider,
         )
         dialog.exec()
         self._update_mode_tips()
+
+    def _provider_label(self, provider: str) -> str:
+        return {
+            "gemini": i18n.tr("run.provider_gemini"),
+            "openai": i18n.tr("run.provider_openai"),
+            "anthropic": i18n.tr("run.provider_anthropic"),
+            "ollama": "Ollama",
+        }.get(provider, provider)
+
+    def _paid_provider_confirm(self, provider: str) -> bool:
+        """The one confirmation before the first paid-provider run: what is
+        sent (the video's English text), what it costs (tokens, on the
+        user's own account), and a 'Không hỏi lại' checkbox. True = abort
+        the run; (True, checked) is folded into _paid_provider_seen."""
+        from dubtool.app.ui.paid_notice import PaidProviderConfirmDialog
+
+        dialog = PaidProviderConfirmDialog(self, self._provider_label(provider))
+        result = dialog.exec()
+        remember = bool(dialog.dont_ask.isChecked())
+        if remember:
+            s = settings.load()
+            seen = list(s.get("paid_notice_ok", []))
+            if provider not in seen:
+                seen.append(provider)
+                s["paid_notice_ok"] = seen
+                settings.save(s)
+        return result != 1  # 1 = run; anything else = abort
 
     def export_diagnostics(self) -> None:
         default = Path.home() / "Desktop" / "dubtool-diagnostics.zip"

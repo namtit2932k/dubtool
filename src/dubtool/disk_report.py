@@ -213,6 +213,15 @@ def hf_cache_candidates() -> list[Path]:
     return out
 
 
+def _safe_is_dir(p: Path | None) -> bool:
+    if p is None:
+        return False
+    try:
+        return p.is_dir()
+    except (PermissionError, OSError):
+        return False
+
+
 def outside_rows() -> list[tuple[str, int, int]]:
     """(label, size_bytes, file_count) for the locations outside the
     project. The Hugging Face cache expands into one line per model
@@ -224,33 +233,49 @@ def outside_rows() -> list[tuple[str, int, int]]:
     for base, label in ((local, "LOCALAPPDATA"), (appdata, "APPDATA")):
         if not base:
             continue
-        d = base / "DubTool"
-        if d.is_dir():
-            size, files = tree_stats(d)
-            rows.append((f"%{label}%\\DubTool (app data)", size, files))
-            hedgehog = d / "jobs"
-            if hedgehog.is_dir():
-                jsize, jfiles = tree_stats(hedgehog)
-                rows.append((f"%{label}%\\DubTool\\jobs", jsize, jfiles))
-    for cache in hf_cache_candidates():
-        if cache.is_dir():
-            size, files = tree_stats(cache)
-            rows.append((f"HF cache: {cache}", size, files))
-            for model in sorted(cache.glob("models--*"), key=lambda p: p.name):
-                msize, mfiles = tree_stats(model)
-                if msize:
-                    rows.append((f"HF model: {model.name}", msize, mfiles))
-    pip = local / "pip" / "Cache" if local else None
-    if pip and pip.is_dir():
-        size, files = tree_stats(pip)
-        rows.append((f"%LOCALAPPDATA%\\pip\\Cache", size, files))
-    if temp.is_dir():
-        for child in sorted(temp.iterdir()):
-            if not _is_broken_entry(child) and ("dubtool" in child.name.lower()
-                                                or "DubToolProbe" in child.name):
-                size, files = tree_stats(child) if child.is_dir() else (child.stat().st_size, 1)
-                if size:
-                    rows.append((f"%TEMP%\\{child.name}", size, files))
+        try:
+            d = base / "DubTool"
+            if _safe_is_dir(d):
+                size, files = tree_stats(d)
+                rows.append((f"%{label}%\\DubTool (app data)", size, files))
+                hedgehog = d / "jobs"
+                if _safe_is_dir(hedgehog):
+                    jsize, jfiles = tree_stats(hedgehog)
+                    rows.append((f"%{label}%\\DubTool\\jobs", jsize, jfiles))
+        except (PermissionError, OSError):
+            continue
+    try:
+        for cache in hf_cache_candidates():
+            if _safe_is_dir(cache):
+                size, files = tree_stats(cache)
+                rows.append((f"HF cache: {cache}", size, files))
+                for model in sorted(cache.glob("models--*"), key=lambda p: p.name):
+                    if _safe_is_dir(model):
+                        msize, mfiles = tree_stats(model)
+                        if msize:
+                            rows.append((f"HF model: {model.name}", msize, mfiles))
+    except (PermissionError, OSError):
+        pass
+    try:
+        pip = local / "pip" / "Cache" if local else None
+        if _safe_is_dir(pip):
+            size, files = tree_stats(pip)
+            rows.append((f"%LOCALAPPDATA%\\pip\\Cache", size, files))
+    except (PermissionError, OSError):
+        pass
+    try:
+        if _safe_is_dir(temp):
+            for child in sorted(temp.iterdir()):
+                try:
+                    if not _is_broken_entry(child) and ("dubtool" in child.name.lower()
+                                                        or "DubToolProbe" in child.name):
+                        size, files = tree_stats(child) if _safe_is_dir(child) else (child.stat().st_size, 1)
+                        if size:
+                            rows.append((f"%TEMP%\\{child.name}", size, files))
+                except (PermissionError, OSError):
+                    continue
+    except (PermissionError, OSError):
+        pass
     return rows
 
 

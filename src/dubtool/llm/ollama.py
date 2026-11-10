@@ -18,14 +18,17 @@ NOT_RUNNING_MESSAGE = (
 
 class OllamaProvider:
     name = "ollama"
+    structured = "none"
 
     def __init__(self, model: str, host: str = "http://localhost:11434", timeout_sec: int = 300):
         self.model = model
         self.host = host.rstrip("/")
         self.timeout_sec = timeout_sec
+        self._timeout_s = float(timeout_sec)
 
     def complete(
-        self, system: str, user: str, *, json_mode: bool = True, max_tokens: int = 8000
+        self, system: str, user: str, *, schema: dict | None = None,
+        json_mode: bool = True, max_tokens: int = 8000,
     ) -> LLMResult:
         payload = {
             "model": self.model,
@@ -37,6 +40,8 @@ class OllamaProvider:
             "options": {"num_predict": max_tokens, "temperature": 0.3},
         }
         if json_mode:
+            # JSON-only prompting (no schema guarantee from Ollama; when a
+            # schema was requested the prompt's JSON instruction stays).
             payload["format"] = "json"
         request = urllib.request.Request(
             f"{self.host}/api/chat",

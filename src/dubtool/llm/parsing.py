@@ -31,6 +31,28 @@ def _load_json(cleaned: str, original_hint: str) -> Any:
         raise LLMError(f"invalid JSON ({original_hint}): {exc}") from exc
 
 
+def parse_json_items(text: str, expected_ids: list[int]) -> list[dict[str, Any]]:
+    """Parse a translation batch that may arrive wrapped: structured
+    output returns the object root ({"items": [...]}) while the plain
+    JSON prompt returns the array directly. Both validate as the array
+    parse does."""
+    if not text or not text.strip():
+        raise LLMError("response was empty")
+    cleaned = strip_code_fences(text)
+    data = _load_json(cleaned, "translation")
+    if not isinstance(data, list):
+        from dubtool.llm.schemas import unwrap_items
+
+        data = unwrap_items(data)
+    if not isinstance(data, list):
+        raise LLMError(
+            f"expected a JSON array (possibly under 'items'), got {type(data).__name__}"
+        )
+    import json as _json
+
+    return parse_json_array(_json.dumps(data, ensure_ascii=False), expected_ids)
+
+
 def parse_json_array(text: str, expected_ids: list[int]) -> list[dict[str, Any]]:
     """Parse and validate a JSON array of {"id","vi"} objects."""
     if not text or not text.strip():
@@ -68,10 +90,15 @@ def parse_shortened(text: str) -> str:
 
 
 def parse_batch_shortened(text: str, expected_ids: list[int]) -> list[dict[str, Any]]:
-    """Parse the one-time max_chars enforcement batch response."""
+    """Batch shortening (one-time max_chars enforcement), tolerating the
+    structured-object wrapper."""
     if not text or not text.strip():
         raise LLMError("response was empty")
     data = _load_json(strip_code_fences(text), "shorten batch")
+    if not isinstance(data, list):
+        from dubtool.llm.schemas import unwrap_items
+
+        data = unwrap_items(data)
     if not isinstance(data, list):
         raise LLMError(f"expected a JSON array, got {type(data).__name__}")
     seen = [item.get("id") for item in data if isinstance(item, dict)]

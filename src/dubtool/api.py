@@ -27,12 +27,13 @@ from dubtool.job import STAGE_ORDER, StageCancelled
 
 
 class SecretsProvider(Protocol):
-    def get_gemini_key(self) -> str | None: ...
+    def get_keys(self, provider: str = "gemini") -> list[str]: ...
 
 
 @dataclass
 class DubOptions:
-    mode: str = "fast"                 # "fast" | "accurate"
+    model: str = "gemini-3.5-flash-lite"  # catalog model id (any provider)
+    provider: str | None = None            # forced provider when ambiguous
     burn_subtitles: bool = True
     save_srt: bool = False
     original_gain_db: float = -14.0
@@ -46,6 +47,14 @@ class DubOptions:
     # AGENT_UPDATE_7.md task 4: the customer-readable translation file.
     export_readable: bool = True
     readable_format: str = "docx"      # docx | txt
+    mode: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.mode:
+            if self.mode == "accurate":
+                self.model = "gemini-3.8-flash"
+            elif self.mode == "fast":
+                self.model = "gemini-3.5-flash-lite"
 
 
 @dataclass
@@ -127,7 +136,7 @@ def _stable_job_id(video: Path, options: DubOptions) -> str:
         str(video.resolve()),
         str(video.stat().st_size),
         str(int(video.stat().st_mtime)),
-        options.mode,
+        (options.provider or "") + ":" + options.model,
         "burn" if options.burn_subtitles else "noburn",
         "srt" if options.save_srt else "nosrt",
         f"{options.original_gain_db}",
@@ -288,37 +297,50 @@ def run_dub(
         # the CLI path builds its list from the env itself). They are handed
         # to the pipeline explicitly (AGENT_UPDATE_5.md 2.4): no os.environ,
         # so a deleted key cannot survive in the process environment and no
-        # child process inherits a key.
-        keys: list[str] = []
+        # child process inherits a key. Each provider's keys travel with the
+        # provider's name (single-provider secrets objects are accepted).
+        keys: dict[str, list[str]] = {}
         if secrets is not None:
-            getter = getattr(secrets, "get_gemini_keys", None)
-            if callable(getter):
-                keys = [k for k in (getter() or []) if k]
-            else:
-                single = secrets.get_gemini_key()
-                if single:
-                    keys = [single]
-        if not keys:
-            return DubResult(code="invalid_key", error="no Gemini API key (set it in Settings)")
+            from dubtool.app.secrets import normalize_provider
 
-        # Mode -> provider/model (packaging/modes.yaml, AGU4 6.4) resolved
-        # WITH the user's settings so the Models tab takes effect
-        # (AGENT_UPDATE_5.md task 1).
-        from dubtool.app import modes as modes_mod
+            for pid in ("gemini", "openai", "anthropic"):
+                getter = getattr(secrets, "get_keys", None)
+                provider_keys: list[str] = []
+                if callable(getter):
+                    provider_keys = [k for k in (getter(pid) or []) if k]
+                else:
+                    legacy = getattr(secrets, "get_gemini_keys", None)
+                    legacy_one = getattr(secrets, "get_gemini_key", None)
+                    if callable(legacy) and pid == "gemini":
+                        provider_keys = [k for k in (legacy() or []) if k]
+                    elif callable(legacy_one) and pid == "gemini":
+                        one = legacy_one()
+                        if one:
+                            provider_keys = [one]
+                if provider_keys:
+                    keys[normalize_provider(pid)] = provider_keys
+        if not any(keys.values()):
+            return DubResult(code="invalid_key", error="no API key (set it in Settings)")
+
+        # Model -> provider + per-model defaults from the catalog
+        # (packaging/models.yaml); the selected model replaces the old
+        # fast/accurate modes entirely.
+        from dubtool.llm import catalog as catalog_mod
 
         user_settings = _user_settings()
-        mode_cfg: dict[str, Any] = modes_mod.get(options.mode, user_settings)
-        pid = str(mode_cfg.get("provider", "gemini"))
+        selected_model = str(options.model or catalog_mod.DEFAULT_MODEL_ID)
+        info = catalog_mod.require(selected_model)
+        pid = str(options.provider or info.provider).lower()
         overrides: dict[str, Any] = {
             "llm_provider": pid,
-            "llm": {pid: {"model": mode_cfg.get("model")}},
+            "llm": {pid: {"model": selected_model}},
             "tts_voice": options.voice,
             "mix": {"original_gain_db": float(options.original_gain_db)},
             "subtitles": {"burn": options.burn_subtitles},
             "translate": {"concurrency": int(
                 options.translate_concurrency
                 if options.translate_concurrency is not None
-                else mode_cfg.get("translate_concurrency", 1)
+                else info.translate_concurrency
             )},
         }
         # AGU8 6.3: the Settings → General fidelity preset rides inside
@@ -354,9 +376,10 @@ def run_dub(
                 overrides.setdefault(k, {}).update(v) if isinstance(v, dict) else overrides.update({k: v})
 
         llm_volatility: dict[str, Any] = {
-            # AGU8 3.5: which mode is running (per-mode request timeout) —
-            # read through getattr in the stages so the CLI keeps None.
-            "llm_mode": options.mode,
+            # The selected model id (request logs and the run summary name
+            # it); the per-model request timeout now comes from the catalog.
+            "llm_model": selected_model,
+            "llm_fallback_model": str(user_settings.get("fallback_model") or ""),
             "llm_interactive": interactive,
             "llm_overload_dialog": overload_dialog,
             # AGU8 task 4: the filler suggestions dialog (called at most once
@@ -386,7 +409,8 @@ def run_dub(
         # AGU8 task-2 LLM state shared with the stages (per-mode timeout,
         # the interactive flag and the overload dialog callback). Plain
         # attributes: they are run-scoped, never hashed into resume state.
-        cfg.llm_mode = llm_volatility["llm_mode"]
+        cfg.llm_model = llm_volatility["llm_model"]
+        cfg.llm_fallback_model = llm_volatility["llm_fallback_model"]
         cfg.llm_interactive = llm_volatility["llm_interactive"]
         cfg.llm_overload_dialog = llm_volatility["llm_overload_dialog"]
         cfg.fillers_dialog = llm_volatility["fillers_dialog"]
@@ -577,8 +601,8 @@ def run_dub(
 
             prune_none(job.dir)
         elif keep_level == "light":
-            # AGU10 5.2 'Giữ bản dịch và nhật ký': keep the small
-            # translation files and logs, delete the bulky ones.
+        # AGU10 5.2: 'Giữ bản dịch và nhật ký': keep the small
+        # translation files and logs, delete the bulky ones.
             from dubtool.job import prune_light
 
             prune_light(job.dir)

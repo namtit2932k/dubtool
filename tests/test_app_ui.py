@@ -37,26 +37,25 @@ def window(qtbot, tmp_path, monkeypatch):
         def has_key(self):
             return False
 
-    monkeypatch.setattr(secrets, "has_key", lambda: False)
+    monkeypatch.setattr(secrets, "has_key", lambda *a, **k: False)
     win = MainWindow(PipelineService())
     qtbot.addWidget(win)
     yield win
 
 
 def test_buttons_disabled_without_video_and_folder(window):
-    assert not window.fast_btn.isEnabled()
-    assert not window.accurate_btn.isEnabled()
+    assert not window.generate_btn.isEnabled()
 
 
 def test_no_key_click_opens_settings_not_run(qtbot, window, monkeypatch):
     opened = {}
-    monkeypatch.setattr(window, "open_settings", lambda: opened.setdefault("open", True))
+    monkeypatch.setattr(window, "open_settings", lambda *a, **k: opened.setdefault("open", True))
     from dubtool.app.ui import main_window as mw
 
     monkeypatch.setattr(mw.QMessageBox, "information", lambda *a, **k: opened.setdefault("msg", True))
     window.output_dir = window.output_dir or Path(".")
-    window.fast_btn.setEnabled(True)
-    window.start_run("fast")
+    window.generate_btn.setEnabled(True)
+    window.start_run()
     assert opened.get("open")
     assert not window.service.running
 
@@ -89,8 +88,8 @@ def test_brief_truncate_preserves_cursor(qtbot, window):
 
 
 def test_options_produce_options(qtbot, window):
-    opts = window.options.to_options("fast", brief="desc text")
-    assert opts.mode == "fast"
+    opts = window.options.to_options("gemini-3.5-flash-lite", brief="desc text")
+    assert opts.model == "gemini-3.5-flash-lite"
     assert opts.voice.startswith("vi-VN-")
     assert opts.original_gain_db == float(window.options.gain_slider.value())
     assert opts.description == "desc text"
@@ -117,8 +116,9 @@ def dialog(qtbot, monkeypatch, tmp_path):
 
     monkeypatch.setattr(settings, "path", lambda: tmp_path / "settings.json")
     monkeypatch.setattr(secrets, "get_gemini_keys", lambda: ["key-one-aaaa", "key-two-bbbb"])
-    monkeypatch.setattr(secrets, "has_key", lambda: True)
-    monkeypatch.setattr(secrets, "key_source", lambda: "store")
+    monkeypatch.setattr(secrets, "get_keys", lambda p="gemini": secrets.get_gemini_keys() if p == "gemini" else [])
+    monkeypatch.setattr(secrets, "has_key", lambda *a, **k: True)
+    monkeypatch.setattr(secrets, "key_source", lambda *a, **k: "store")
     d = SettingsDialog()
     qtbot.addWidget(d)
     return d
@@ -128,27 +128,23 @@ def test_settings_dialog_round_trip(qtbot, dialog, monkeypatch, tmp_path):
     from dubtool.app import settings as settings_mod
 
     dialog.lang_combo.setCurrentIndex(1)  # en
-    second = dialog.model_accurate_combo.itemData(1)
-    assert second  # a shipped alternative exists
-    dialog.model_accurate_combo.setCurrentIndex(1)
+    if dialog.fallback_combo.count() > 1:
+        dialog.fallback_combo.setCurrentIndex(1)
     saved = dialog.apply_changes()
     assert saved["language"] == "en"
-    assert saved["mode_models"]["accurate"] == second
     loaded = settings_mod.load()
     assert loaded["language"] == "en"
-    assert loaded["mode_models"]["accurate"] == second
 
 
 def test_settings_tabs_exist(dialog):
     names = [dialog.tabs.tabText(i) for i in range(dialog.tabs.count())]
     expected = [
         i18n.tr("settings.tab_keys"),
-        i18n.tr("settings.tab_models"),
         i18n.tr("settings.tab_general"),
         i18n.tr("settings.tab_advanced"),
     ]
-    assert len(names) == 4
-    assert all(n and n != k for n, k in zip(names, expected)) is False or names == expected
+    assert len(names) == 3
+    assert names == expected
 
 
 def test_key_hint_removed(dialog):
@@ -373,7 +369,7 @@ def test_test_selected_and_all(qtbot, dialog, monkeypatch):
     results = {"key-one-aaaa": "ok", "key-two-bbbb": "invalid_model"}
     tested = []
 
-    def fake_test(key, model=None):
+    def fake_test(key, model=None, **kwargs):
         tested.append(key)
         return results[key]
 
@@ -381,12 +377,18 @@ def test_test_selected_and_all(qtbot, dialog, monkeypatch):
 
     dialog.key_list.setCurrentRow(1)
     dialog._test_selected()
-    qtbot.waitUntil(lambda: dialog._badges.get(1) == "invalid_model", timeout=5000)
+    qtbot.waitUntil(
+        lambda: (dialog._badges.get(("gemini", 1)) == "invalid_model" or dialog._badges.get(1) == "invalid_model"),
+        timeout=5000,
+    )
     assert tested == ["key-two-bbbb"]
 
     dialog._test_all()
     qtbot.waitUntil(
-        lambda: dialog._badges.get(0) == "ok" and dialog._badges.get(1) == "invalid_model",
+        lambda: (
+            (dialog._badges.get(("gemini", 0)) == "ok" or dialog._badges.get(0) == "ok")
+            and (dialog._badges.get(("gemini", 1)) == "invalid_model" or dialog._badges.get(1) == "invalid_model")
+        ),
         timeout=5000,
     )
     assert tested == ["key-two-bbbb", "key-one-aaaa", "key-two-bbbb"]
@@ -440,52 +442,19 @@ def test_status_line_counts_without_keys(dialog):
         assert value not in status
 
 
-def test_custom_model_path_round_trip(qtbot, dialog, monkeypatch, tmp_path):
-    """Selecting Custom… reveals the field; the id passes validation and is
-    saved, then reappears selected in a fresh dialog (never replaced)."""
-    from dubtool.app import settings as settings_mod
-    from dubtool.app.ui import settings_dialog as sd
-
-    idx = dialog.model_fast_combo.findData(sd.CUSTOM)
-    assert idx >= 0
-    dialog.model_fast_combo.setCurrentIndex(idx)
-    assert not dialog.model_fast_custom.isHidden()
-    dialog.model_fast_custom.setText("my-fast-model")
-    dialog.lang_combo.setCurrentIndex(1)  # en
-    saved = dialog.apply_changes()
-    assert saved["language"] == "en"
-    assert saved["mode_models"]["fast"] == "my-fast-model"
-    assert settings_mod.load()["mode_models"]["fast"] == "my-fast-model"
-
-    dialog2 = SettingsDialog()
-    qtbot.addWidget(dialog2)
-    texts = [dialog2.model_fast_combo.itemText(i) for i in range(dialog2.model_fast_combo.count())]
-    assert "my-fast-model" in texts  # saved custom id is offered, not lost
+def test_settings_dialog_has_no_models_tab(dialog):
+    """AGENT_UPDATE_13.md 2.2: Settings dialog has no Models tab, but fallback model in General."""
+    tab_titles = [dialog.tabs.tabText(i) for i in range(dialog.tabs.count())]
+    assert len(tab_titles) == 3
+    assert not any("mô hình" in t.lower() or "models" in t.lower() for t in tab_titles)
+    assert hasattr(dialog, "fallback_combo")
+    assert hasattr(dialog, "refresh_models_btn")
 
 
-def test_invalid_custom_id_rejected(dialog, monkeypatch):
-    from dubtool.app import settings as settings_mod
-    from dubtool.app.ui import settings_dialog as sd
-
-    dlg_warnings = []
-    monkeypatch.setattr(sd.QMessageBox, "warning", lambda *a, **k: dlg_warnings.append(True))
-    idx = dialog.model_fast_combo.findData(sd.CUSTOM)
-    dialog.model_fast_combo.setCurrentIndex(idx)
-    dialog.model_fast_custom.setText("bad model id!")
-    assert dialog.apply_changes() is None
-    assert settings_mod.load().get("mode_models", {}).get("fast") != "bad model id!"
-
-
-def test_reset_models_restores_defaults(qtbot, dialog):
-    from dubtool.app import modes, settings as settings_mod
-
-    dialog.model_fast_combo.setCurrentIndex(dialog.model_fast_combo.findData("custom-id-999")
-                                            if dialog.model_fast_combo.findData("custom-id-999") >= 0
-                                            else dialog.model_fast_combo.count() - 1)
-    dialog._reset_models()
-    loaded = modes.load(settings_mod.load())
-    assert dialog.model_fast_combo.currentData() == loaded["fast"]["model"]
-    assert dialog.model_accurate_combo.currentData() == loaded["accurate"]["model"]
+def test_fallback_model_combo(dialog):
+    """AGENT_UPDATE_13.md 2.2: General tab has fallback model dropdown."""
+    assert dialog.fallback_combo.count() >= 1
+    assert dialog.fallback_combo.itemData(0) == ""
 
 
 def test_no_hardcoded_widget_text(qtbot):

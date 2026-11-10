@@ -28,15 +28,13 @@ def stub_pipeline(monkeypatch, tmp_path):
     """Replace the seven stage functions with recorders; config points at tmp."""
     calls: list[tuple[str, bool]] = []
 
-    import dubtool.app.modes as modes_mod
     import dubtool.app.paths as paths_mod
 
     root = tmp_path / "project"
     root.mkdir()
     (root / "packaging").mkdir()
-    (root / "packaging" / "modes.yaml").write_text(
-        "fast:\n  provider: gemini\n  model: m-fast\n  translate_concurrency: 1\n"
-        "accurate:\n  provider: gemini\n  model: m-acc\n  translate_concurrency: 3\n",
+    (root / "packaging" / "models.yaml").write_text(
+        "gemini-3.5-flash-lite:\n  provider: gemini\n  model: m-fast\n  translate_concurrency: 1\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(paths_mod, "bundle_root", lambda: root)
@@ -90,7 +88,7 @@ def test_run_dub_produces_output_and_no_key_on_disk(tmp_path, stub_pipeline):
     events: list[ProgressEvent] = []
     result = api.run_dub(
         video, outdir,
-        options=DubOptions(mode="fast"),
+        options=DubOptions(model="gemini-3.5-flash-lite"),
         secrets=FakeSecrets(),
         progress=events.append,
         cancel=threading.Event(),
@@ -249,7 +247,7 @@ def test_run_dub_explicit_keys_no_environment(tmp_path, stub_pipeline, monkeypat
     try:
         result = api.run_dub(
             video, outdir,
-            options=DubOptions(mode="fast"),
+            options=DubOptions(model="gemini-3.5-flash-lite"),
             secrets=MultiSecrets(),
             progress=lambda e: None,
             cancel=threading.Event(),

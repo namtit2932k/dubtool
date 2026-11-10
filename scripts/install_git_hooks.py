@@ -17,12 +17,12 @@ git_root=$(git rev-parse --show-toplevel) || exit 0
 if command -v python >/dev/null 2>&1; then
   PY=python
 elif command -v py >/dev/null 2>&1; then
-  PY="py -3"
+  PY=py
 else
   echo "pre-commit: no python found; skipping the guard" >&2
   exit 0
 fi
-PYTHONIOENCODING=utf-8 "$PY" "$git_root/scripts/git_guard.py"
+PYTHONPATH="$git_root/src" PYTHONIOENCODING=utf-8 "$PY" "$git_root/scripts/git_guard.py"
 """
 
 

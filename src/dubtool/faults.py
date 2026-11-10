@@ -19,7 +19,7 @@ log = logging.getLogger("dubtool")
 
 ENV_NAME = "DUBTOOL_FAULTS"
 _SPEC_RE = re.compile(r"^\s*(tts|llm)\s*:\s*(fail-first|503-first|504-first|timeout-first|hang)\s*=\s*(\d+)\s*$")
-_FLAG_RE = re.compile(r"^\s*(llm)\s*:\s*(429-day)\s*$")
+_FLAG_RE = re.compile(r"^\s*(llm)\s*:\s*(429-day)(?:=\d+)?\s*$")
 _IDS_RE = re.compile(r"^\s*(tts|llm)\s*:\s*refuse-ids\s*=\s*(\d+(?:\s*,\s*\d+)*)\s*$")
 
 
@@ -54,7 +54,19 @@ def parse_env() -> dict[str, dict[str, int]]:
     if not raw.strip():
         return {}
     try:
-        return parse_specs(raw.split(","))
+        if ";" in raw:
+            items = [s.strip() for s in raw.split(";") if s.strip()]
+        else:
+            items = []
+            for token in raw.split(","):
+                token = token.strip()
+                if ":" in token or not items:
+                    items.append(token)
+                elif "refuse-ids=" in items[-1]:
+                    items[-1] += f",{token}"
+                else:
+                    items.append(token)
+        return parse_specs(items)
     except ValueError:
         log.warning("DUBTOOL_FAULTS value ignored (bad format): %r", raw)
         return {}
@@ -64,11 +76,15 @@ def set_faults(specs: list[str] | None) -> dict[str, dict[str, int]]:
     """Install parsed CLI faults into the environment (the stages read them
     through get()). Returns the parsed dict so callers can reject GUI usage."""
     faults = parse_specs(specs)
-    os.environ[ENV_NAME] = ",".join(
-        f"{stage}:{kind}={value}"
-        for stage, kinds in faults.items()
-        for kind, value in kinds.items()
-    )
+    parts: list[str] = []
+    for stage, kinds in faults.items():
+        for kind, value in kinds.items():
+            if isinstance(value, list):
+                val_str = ",".join(str(v) for v in value)
+            else:
+                val_str = str(value)
+            parts.append(f"{stage}:{kind}={val_str}")
+    os.environ[ENV_NAME] = ";".join(parts)
     return faults
 
 

@@ -1,0 +1,123 @@
+# Model catalog, shipped in the exe and user-extendable (add an entry with
+# the same keys; the loader is tolerant of extra keys and of entries being
+# plain scalar maps). `paid` only tells the UI to ask before the first paid
+# run — no price is stored anywhere. `structured`: json_schema (answer shape
+# guaranteed by the provider) | json_object (JSON-only prompt) | none.
+# `reasoning`: the model spends tokens reasoning before answering (no
+# temperature/top_p sent, larger output budget). Defaults come with the
+# entry: translate_concurrency, request_timeout_s, chunk_max_chars,
+# max_output_tokens. NO PRICES HERE.
+gemini-3.5-flash-lite:
+  provider: gemini
+  label: Gemini 3.5 Flash-Lite
+  paid: false
+  structured: json_schema
+  reasoning: false
+  translate_concurrency: 3
+  request_timeout_s: 90
+  chunk_max_chars: 1200
+  max_output_tokens: 8000
+  verified: ai.google.dev/gemini-api/docs/models (2026-10-26)
+gemini-3.8-flash:
+  provider: gemini
+  label: Gemini 3.8 Flash
+  paid: false
+  structured: json_schema
+  reasoning: false
+  translate_concurrency: 2
+  request_timeout_s: 180
+  chunk_max_chars: 1200
+  max_output_tokens: 8000
+  verified: ai.google.dev/gemini-api/docs/models (2026-10-26)
+gemini-3.6-flash:
+  provider: gemini
+  label: Gemini 3.6 Flash
+  paid: false
+  structured: json_schema
+  reasoning: false
+  translate_concurrency: 2
+  request_timeout_s: 180
+  chunk_max_chars: 1200
+  max_output_tokens: 8000
+  verified: ai.google.dev/gemini-api/docs/models (2026-10-26)
+gpt-5.4-nano:
+  provider: openai
+  label: GPT-5.4 nano (tra phi)
+  paid: true
+  structured: json_schema
+  reasoning: true
+  reasoning_effort: low
+  translate_concurrency: 2
+  request_timeout_s: 120
+  chunk_max_chars: 1200
+  max_output_tokens: 16000
+  verified: platform.openai.com/docs/models (2026-11-05)
+gpt-5.4-mini:
+  provider: openai
+  label: GPT-5.4 mini (tra phi)
+  paid: true
+  structured: json_schema
+  reasoning: true
+  reasoning_effort: low
+  translate_concurrency: 2
+  request_timeout_s: 120
+  chunk_max_chars: 1200
+  max_output_tokens: 16000
+  verified: platform.openai.com/docs/models (2026-11-05)
+gpt-5.4:
+  provider: openai
+  label: GPT-5.4 (tra phi)
+  paid: true
+  structured: json_schema
+  reasoning: true
+  reasoning_effort: low
+  translate_concurrency: 2
+  request_timeout_s: 120
+  chunk_max_chars: 1200
+  max_output_tokens: 16000
+  verified: platform.openai.com/docs/models (2026-11-05)
+gpt-5.5:
+  provider: openai
+  label: GPT-5.5 (tra phi)
+  paid: true
+  structured: json_schema
+  reasoning: true
+  reasoning_effort: low
+  translate_concurrency: 2
+  request_timeout_s: 120
+  chunk_max_chars: 1200
+  max_output_tokens: 16000
+  verified: platform.openai.com/docs/models (2026-11-05)
+claude-haiku-5-5:
+  provider: anthropic
+  label: Claude Haiku 5.5 (tra phi)
+  paid: true
+  structured: json_schema
+  reasoning: false
+  translate_concurrency: 2
+  request_timeout_s: 180
+  chunk_max_chars: 1200
+  max_output_tokens: 8000
+  verified: docs.anthropic.com/en/docs/about-claude/models (2026-11-05)
+claude-sonnet-5-5:
+  provider: anthropic
+  label: Claude Sonnet 5.5 (tra phi)
+  paid: true
+  structured: json_schema
+  reasoning: false
+  translate_concurrency: 2
+  request_timeout_s: 180
+  chunk_max_chars: 1200
+  max_output_tokens: 16000
+  verified: docs.anthropic.com/en/docs/about-claude/models (2026-11-05)
+claude-opus-5-5:
+  provider: anthropic
+  label: Claude Opus 5.5 (tra phi)
+  paid: true
+  structured: json_schema
+  reasoning: false
+  translate_concurrency: 2
+  request_timeout_s: 180
+  chunk_max_chars: 1200
+  max_output_tokens: 16000
+  verified: docs.anthropic.com/en/docs/about-claude/models (2026-11-05)

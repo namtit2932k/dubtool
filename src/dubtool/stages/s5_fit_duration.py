@@ -179,7 +179,10 @@ def run(job, config, force: bool = False, cancel=None, api_keys: list[str] | Non
             except Exception as exc:
                 log.warning("s5: no LLM provider available for shortening: %s", exc)
                 return None
-        from dubtool.app import modes as modes_mod
+        # The 5.3 fallback: the configured fallback model (a saved fallback
+        # model id; the catalog tells its provider). None when there is no
+        # usable fallback configured — the caller runs without LLM.
+        import copy as _copy2
 
         try:
             from dubtool.app import settings as settings_mod  # noqa: B950
@@ -187,23 +190,24 @@ def run(job, config, force: bool = False, cancel=None, api_keys: list[str] | Non
             user_settings = settings_mod.load()
         except Exception:
             user_settings = {}
-        try:
-            mode_cfg = modes_mod.get(mode, user_settings)
-        except Exception as exc:
-            log.info("s5: fallback mode %r unavailable: %s", mode, exc)
+        fallback_model = str(user_settings.get("fallback_model") or "").strip()
+        if not fallback_model:
+            log.info("s5: no fallback model configured — shortening runs without LLM")
             return None
-        pid = str(mode_cfg.get("provider", "gemini"))
-        cfg2 = _copy.copy(config)
+        from dubtool.llm import catalog as catalog_mod
+
+        pid = catalog_mod.require(fallback_model).provider
+        cfg2 = _copy2.copy(config)
         llm_overrides = dict(getattr(config, "llm", {}) or {})
         pid_cfg = dict(llm_overrides.get(pid, {}) or {})
-        pid_cfg["model"] = mode_cfg.get("model") or pid_cfg.get("model")
+        pid_cfg["model"] = fallback_model
         llm_overrides[pid] = pid_cfg
         cfg2.llm = llm_overrides
         try:
             provider = get_provider(cfg2, provider_id=pid, api_keys=api_keys, cancel=cancel)
             return LLMClient(provider, cancel=cancel)
         except Exception as exc:
-            log.info("s5: fallback provider for mode %r failed: %s", mode, exc)
+            log.info("s5: fallback model %r failed: %s", fallback_model, exc)
             return None
 
     llm: LLMClient | None = None

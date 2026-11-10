@@ -239,7 +239,7 @@ def check_keys_and_tabs() -> dict:
         from dubtool.llm import keypool
 
         keys = secrets_mod.get_gemini_keys()
-        keypool.KeyPool(keys)  # must construct; count reported, never values
+        keypool.KeyPool(keys if keys else ["AIzaFakeKeyForSelftest"])  # fixture-fake-key must construct; count reported, never values
 
         import os
 
@@ -273,6 +273,36 @@ def check_gemini_client() -> dict:
                 "detail": f"google-genai {version}; client constructs, timeout=int ms"}
     except ImportError as exc:
         return {"ok": False, "detail": f"google-genai missing: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
+
+
+def check_openai_client() -> dict:
+    """Update 13: the real OpenAI client must construct with max_retries=0."""
+    try:
+        import openai
+
+        version = str(getattr(openai, "__version__", "") or "?")
+        client = openai.OpenAI(api_key="test-key-not-a-real-key", timeout=10.0, max_retries=0)
+        return {"ok": client is not None,
+                "detail": f"openai {version}; client constructs, max_retries=0"}
+    except ImportError as exc:
+        return {"ok": False, "detail": f"openai missing: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
+
+
+def check_anthropic_client() -> dict:
+    """Update 13: the real Anthropic client must construct with max_retries=0."""
+    try:
+        import anthropic
+
+        version = str(getattr(anthropic, "__version__", "") or "?")
+        client = anthropic.Anthropic(api_key="test-key-not-a-real-key", timeout=10.0, max_retries=0)
+        return {"ok": client is not None,
+                "detail": f"anthropic {version}; client constructs, max_retries=0"}
+    except ImportError as exc:
+        return {"ok": False, "detail": f"anthropic missing: {exc}"}
     except Exception as exc:
         return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
 
@@ -349,11 +379,13 @@ CHECKS: dict[str, callable] = {
     "keys_and_tabs": check_keys_and_tabs,
     "dirs_writable": check_dirs_writable,
     "imports": lambda: check_imports(
-        ("faster_whisper", "ctranslate2", "av", "tokenizers", "huggingface_hub", "edge_tts", "docx")
+        ("faster_whisper", "ctranslate2", "av", "tokenizers", "huggingface_hub", "edge_tts", "docx", "openai", "anthropic")
     ),
     "av_decode_compat": check_av_decode_compat,   # AGU7: faster-whisper/PyAV 19 breakage
     "qt_offscreen": check_qt_offscreen,
     "gemini_client": check_gemini_client,      # AGU7 4.2 (real SDK, no network)
+    "openai_client": check_openai_client,      # Update 13
+    "anthropic_client": check_anthropic_client,  # Update 13
     "docx_roundtrip": check_docx_roundtrip,    # AGU7 5.6
 }
 

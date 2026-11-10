@@ -14,6 +14,10 @@ FILENAME = "settings.json"
 
 DEFAULTS: dict = {
     "language": "vi",            # vi | en
+    "model_id": "gemini-3.5-flash-lite",
+    "fallback_model": "",
+    "overload_policy": "fallback_fast",
+    "known_models": [],
     "whisper_model": "small",
     "whisper_device": "auto",    # auto | cpu | cuda
     "burn_subtitles": True,
@@ -23,7 +27,6 @@ DEFAULTS: dict = {
     "keep_level": "light",       # none | light | full (AGU10 5.2)
     "default_output_dir": "",
     "jobs_dir": "",              # empty = app default
-    "mode_models": {},           # {"fast": "<model id>", "accurate": "<model id>"}
     "privacy_acknowledged": False,
     "export_readable": True,     # AGU7 task 4: write <name>_vi_translation next to the video
     "readable_format": "docx",   # docx | txt
@@ -50,7 +53,14 @@ def load(raw_path: Path | None = None) -> dict:
             data = {}
     merged = dict(DEFAULTS)
     merged.update({k: v for k, v in (data or {}).items() if v is not None or k in ("privacy_acknowledged",)})
-    merged["mode_models"] = dict(data.get("mode_models") or {})
+    # AGU13 2.3: Settings migration: a saved last_mode or mode_models is
+    # ignored; the model becomes the default gemini-3.5-flash-lite.
+    if "last_mode" in (data or {}) or "mode_models" in (data or {}):
+        import logging
+        logging.getLogger("dubtool").info("migrating legacy modes settings: resetting model to default gemini-3.5-flash-lite")
+        merged["model_id"] = "gemini-3.5-flash-lite"
+    merged.pop("last_mode", None)
+    merged.pop("mode_models", None)
     # AGU8 task 7.3: one key for the output folder. Migrate the old
     # `default_output` value to `default_output_dir` on load.
     legacy_out = str(data.get("default_output") or "").strip()
@@ -111,15 +121,9 @@ def validate(settings: dict) -> list[str]:
     days = settings.get("jobs_max_days", 14)
     if not isinstance(days, int) or not (1 <= days <= 365):
         problems.append("jobs_max_days must be an integer between 1 and 365")
-    for mode, model in (settings.get("mode_models") or {}).items():
-        if mode not in ("fast", "accurate"):
-            problems.append(f"unknown mode override: {mode}")
-            continue
-        model_id = str(model).strip()
-        if not model_id:
-            problems.append(f"model override for {mode} is empty")
-        elif not re.fullmatch(r"[A-Za-z0-9._/\-]{1,128}", model_id):
-            problems.append(
-                f"model id for {mode} has characters outside A-Z a-z 0-9 . _ - /: {model_id[:40]}"
-            )
+    model_id = str(settings.get("model_id") or "").strip()
+    if model_id and not re.fullmatch(r"[A-Za-z0-9._/\-]{1,128}", model_id):
+        problems.append(
+            f"model_id has characters outside A-Z a-z 0-9 . _ - /: {model_id[:40]}"
+        )
     return problems

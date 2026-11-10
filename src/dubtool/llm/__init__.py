@@ -23,13 +23,21 @@ log = logging.getLogger("dubtool")
 _FAULT_STAGE = "llm"
 
 from dubtool.llm.client import LLMClient
-from dubtool.llm.parsing import parse_json_array, parse_shortened, parse_batch_shortened, strip_code_fences
+from dubtool.llm.parsing import (
+    parse_batch_shortened,
+    parse_json_array,
+    parse_json_items,
+    parse_shortened,
+    strip_code_fences,
+)
 
-PROVIDERS = ("gemini", "ollama", "anthropic")
+PROVIDERS = ("gemini", "openai", "anthropic", "ollama")
 
-# Default chunk sizes / models per provider (AGENT_UPDATE.md 3.3 / 4).
+# Default chunk sizes / models per provider (AGENT_UPDATE.md 3.3 / 4);
+# per-model detail now lives in the catalog (packaging/models.yaml).
 PROVIDER_DEFAULTS = {
     "gemini": {"model": "gemini-3.5-flash-lite", "chunk_size": 25},
+    "openai": {"model": "gpt-5.4-nano", "chunk_size": 40},
     "ollama": {"model": "gemma3:12b", "chunk_size": 20, "host": "http://localhost:11434", "timeout_sec": 300},
     "anthropic": {"model": "claude-sonnet-5-5", "chunk_size": 40},
 }
@@ -57,8 +65,8 @@ class _FaultProvider:
     def __getattr__(self, name):
         return getattr(self._inner, name)
 
-    def complete(self, system: str, user: str, *, json_mode: bool = True,
-                 max_tokens: int = 8000):
+    def complete(self, system: str, user: str, *, schema: dict | None = None,
+                 json_mode: bool = True, max_tokens: int = 8000):
         from dubtool.llm.base import (
             RateLimitError,
             ServerErrorLLMError,
@@ -98,8 +106,14 @@ class _FaultProvider:
                     getattr(self._inner, "model", "?"),
                 )
                 raise exc_factory(n)
-        return self._inner.complete(system, user, json_mode=json_mode,
-                                    max_tokens=max_tokens)
+        try:
+            return self._inner.complete(system, user, schema=schema,
+                                        json_mode=json_mode, max_tokens=max_tokens)
+        except TypeError as exc:
+            if "schema" in str(exc):
+                return self._inner.complete(system, user,
+                                            json_mode=json_mode, max_tokens=max_tokens)
+            raise
 
 
 def _faults_active() -> dict[str, int]:
@@ -118,7 +132,7 @@ def _reset_llm_faults() -> None:
 
 
 def get_provider(config, provider_id: str | None = None,
-                 api_keys: list[str] | None = None, cancel=None,
+                 api_keys: list[str] | dict | None = None, cancel=None,
                  mode: str | None = None, model_override: str | None = None) -> LLMProvider:
     """Build the provider for `provider_id`. `api_keys` gives the Gemini
     provider an explicit pool (AGENT_UPDATE_5.md 2.4): the app passes the
@@ -134,8 +148,22 @@ def get_provider(config, provider_id: str | None = None,
     pid = (provider_id or getattr(config, "llm_provider", None) or "gemini").lower()
     if pid not in PROVIDERS:
         raise LLMError(f"unknown llm provider: {pid!r} (choose from {', '.join(PROVIDERS)})")
-    cfg = getattr(config, "llm", {}).get(pid, {}) or {}
+    if isinstance(api_keys, dict):
+        api_keys = api_keys.get(pid)
+    llm_cfg_root = getattr(config, "llm", {}) or {}
+    cfg = llm_cfg_root.get(pid, {}) or {}
     model = model_override or cfg.get("model") or PROVIDER_DEFAULTS[pid]["model"]
+    from dubtool.llm import catalog as catalog_mod
+
+    info = catalog_mod.get(model)
+    timeout_s = None
+    if info is not None:
+        timeout_s = float(info.request_timeout_s)
+    paid_cap = None
+    try:
+        paid_cap = int(llm_cfg_root.get("paid_request_cap", 0) or 0)
+    except (TypeError, ValueError):
+        paid_cap = 0
     if pid == "gemini":
         from dubtool.llm.gemini import GeminiProvider
 
@@ -155,6 +183,19 @@ def get_provider(config, provider_id: str | None = None,
             cancel=cancel,
         )
         return _wrap_faults(provider)
+    if pid == "openai":
+        from dubtool.llm.openai import OpenAIProvider
+
+        provider = OpenAIProvider(
+            model=model,
+            api_keys=api_keys,
+            timeout_s=timeout_s or float(cfg.get("timeout_s") or 120.0),
+            reasoning=(info.reasoning if info is not None else None),
+            reasoning_effort=str(getattr(info, "reasoning_effort", "low") or "low"),
+            max_output_tokens=(info.max_output_tokens if info is not None else None),
+        )
+        provider.paid_request_cap = paid_cap
+        return _wrap_faults(provider)
     if pid == "ollama":
         from dubtool.llm.ollama import OllamaProvider
 
@@ -164,9 +205,18 @@ def get_provider(config, provider_id: str | None = None,
             timeout_sec=int(cfg.get("timeout_sec") or PROVIDER_DEFAULTS[pid]["timeout_sec"]),
         )
         return _wrap_faults(provider)
-    from dubtool.llm.anthropic import AnthropicProvider
+    if pid == "anthropic":
+        from dubtool.llm.anthropic import AnthropicProvider
 
-    return _wrap_faults(AnthropicProvider(model=model))
+        provider = AnthropicProvider(
+            model=model,
+            api_keys=api_keys,
+            timeout_s=timeout_s or float(cfg.get("timeout_s") or 180.0),
+            max_tokens=(info.max_output_tokens if info is not None else None),
+        )
+        provider.paid_request_cap = paid_cap
+        return _wrap_faults(provider)
+    raise LLMError(f"unhandled llm provider: {pid!r}")
 
 
 def _wrap_faults(provider: LLMProvider) -> LLMProvider:
@@ -228,10 +278,14 @@ __all__ = [
     "RateLimitExhausted",
     "InvalidKeyError",
     "KeyExhaustedError",
+    "QuotaExhaustedError",
+    "RequestTooLargeError",
+    "SchemaRejectedError",
     "classify_rate_limit",
     "PROVIDERS",
     "PROVIDER_DEFAULTS",
     "parse_json_array",
+    "parse_json_items",
     "parse_shortened",
     "parse_batch_shortened",
     "strip_code_fences",

@@ -61,6 +61,7 @@ def build_gemini_client(api_key: str, timeout_ms: int | None = None):
 
 class GeminiProvider:
     name = "gemini"
+    structured = "json_object"   # JSON-only prompting keeps the behavior
 
     def __init__(
         self,
@@ -240,11 +241,15 @@ class GeminiProvider:
         return types
 
     def complete(
-        self, system: str, user: str, *, json_mode: bool = True, max_tokens: int = 8000,
+        self, system: str, user: str, *, schema: dict | None = None,
+        json_mode: bool = True, max_tokens: int = 8000,
         thinking_level: str | None = None,
     ) -> LLMResult:
-        """thinking_level, when given, is passed as the official thinking
-        control (ai.google.dev); None keeps the model default."""
+        """`schema` is accepted for interface parity: Gemini already constrains
+        replies with `response_mime_type: application/json` (json_object),
+        which stays the baseline behavior. thinking_level, when given, is
+        passed as the official thinking control (ai.google.dev); None keeps
+        the model default."""
         types = self._types
         used_key = self.pool.acquire()
         config = types.GenerateContentConfig(
