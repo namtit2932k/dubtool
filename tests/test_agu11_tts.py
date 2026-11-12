@@ -453,3 +453,220 @@ def test_first_pass_stays_under_unit_budget_x_failing(tmp_path, monkeypatch):
 
     records = read_json(tmp_path / "tts_failures.json")
     assert records, "the refusals were not recorded"
+
+
+def test_failure_log_attempts_increment_by_one(tmp_path, monkeypatch):
+    """Failed attempts record sequential numbers (1, 2, ...), not 2, 4."""
+    from dubtool.job import read_json
+    from dubtool.tts.base import TTSUnavailableError
+
+    s4 = _stage_module()
+    _wired_build_tts(monkeypatch, s4, tmp_path, _RefusingProvider())
+    monkeypatch.setattr(s4.heartbeat, "sleeping", lambda s, text=None, cancel=None: 0.0)
+
+    cfg = _cfg_stub(tmp_path, retry_rounds=1)
+    job = _JobStub(tmp_path, 1)
+    with pytest.raises(TTSUnavailableError):
+        s4.run(job, cfg)
+
+    records = read_json(job.dir / "tts_failures.json")
+    assert [r["attempt"] for r in records] == [1, 2]
+
+
+def test_limiter_disables_provider_internal_cooldown(tmp_path, monkeypatch):
+    """When VoiceRequestLimiter paces s4_tts, EdgeTTSProvider does not stack
+    extra un-cancellable cooldown sleeps inside synthesize()."""
+    from dubtool.tts.base import TTSUnavailableError
+
+    s4 = _stage_module()
+    seen_providers = []
+    real_build = s4.build_tts
+
+    def fake_build(config, cache_dir, media_cache=None):
+        tts = real_build(config, cache_dir, media_cache=media_cache)
+        seen_providers.append(tts.provider)
+        monkeypatch.setattr(
+            tts.provider, "_synthesize_once",
+            lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("refused")),
+        )
+        return tts
+
+    monkeypatch.setattr(s4.audio_utils, "require_ffmpeg", lambda: None)
+    monkeypatch.setattr(s4, "build_tts", fake_build)
+    monkeypatch.setattr(s4.heartbeat, "sleeping", lambda s, text=None, cancel=None: 0.0)
+
+    cfg = _cfg_stub(tmp_path, max_rps=1.0, max_cooldown_s=30.0, pacing_delay_s=0.3, retry_rounds=0)
+    job = _JobStub(tmp_path, 1)
+    with pytest.raises(TTSUnavailableError):
+        s4.run(job, cfg)
+
+    assert len(seen_providers) == 1
+    assert seen_providers[0].max_cooldown_s == 0.0
+    assert seen_providers[0].rate_limit_s == 0.0
+
+
+def test_healthy_pass_time_does_not_starve_retry_rounds(tmp_path, monkeypatch):
+    """Successful segments exceeding stage_budget_s must not skip retry_rounds."""
+    import wave
+
+    from tests.fake_clock import fast_clock
+
+    s4 = _stage_module()
+    calls: dict[str, int] = {}
+
+    class _SlowHealthyFirstFailSecond:
+        def synthesize(self, text: str, voice: str, out_path) -> None:
+            n = calls[text] = calls.get(text, 0) + 1
+            if "0" in text:
+                clock.sleep(100.0)  # healthy slow work > stage_budget_s=50
+            elif n == 1:
+                clock.sleep(1.0)
+                raise TTSFailure("transient drop")
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with wave.open(str(out_path), "wb") as f:
+                f.setnchannels(1)
+                f.setsampwidth(2)
+                f.setframerate(24000)
+                f.writeframes(b"\x00\x00" * 2400)
+
+    _wired_build_tts(monkeypatch, s4, tmp_path, _SlowHealthyFirstFailSecond())
+    with fast_clock(monkeypatch=monkeypatch) as clock:
+        monkeypatch.setattr(
+            s4.heartbeat, "sleeping",
+            lambda s, text=None, cancel=None: (clock.sleep(float(s)), float(s))[1],
+        )
+        cfg = _cfg_stub(tmp_path, stage_budget_s=50.0, retry_rounds=1, round_cooldown_s=[1.0])
+        job = _JobStub(tmp_path, 2)
+        s4.run(job, cfg)
+
+    assert calls["câu 1"] == 2  # retry round ran and recovered the transient failure
+
+
+def test_budget_fallback_remaining_synthesizes_only_missing_units(tmp_path, monkeypatch):
+    """Choosing fallback_remaining must generate ONLY missing units with backup."""
+    import wave
+
+    from dubtool.job import read_json
+    import dubtool.tts.fallback as fallback_mod
+
+    s4 = _stage_module()
+    seen_primary: list[str] = []
+    seen_backup: list[str] = []
+
+    def _wav(path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(path), "wb") as f:
+            f.setnchannels(1)
+            f.setsampwidth(2)
+            f.setframerate(24000)
+            f.writeframes(b"\x00\x00" * 2400)
+
+    class _PartialPrimary:
+        def synthesize(self, text: str, voice: str, out_path) -> None:
+            seen_primary.append(text)
+            if "3" in text:
+                raise TTSFailure("primary refused unit 3")
+            _wav(out_path)
+
+    class _Backup:
+        name = "windows_winrt"
+        label = "Microsoft An (vi-VN)"
+
+        def synthesize(self, text: str, voice: str, out_path) -> None:
+            seen_backup.append(text)
+            _wav(out_path)
+
+    _wired_build_tts(monkeypatch, s4, tmp_path, _PartialPrimary())
+    monkeypatch.setattr(s4.heartbeat, "sleeping", lambda s, text=None, cancel=None: 0.0)
+    monkeypatch.setattr(fallback_mod, "build_backup", lambda config: _Backup())
+
+    prompts = []
+
+    def dialog(missing, waited, fallback_ok, voice=None):
+        prompts.append((missing, waited, fallback_ok, voice))
+        return "fallback_remaining"
+
+    cfg = _cfg_stub(tmp_path, retry_rounds=1, budget_policy="ask")
+    cfg.tts_budget_dialog = dialog
+    job = _JobStub(tmp_path, 4)
+    s4.run(job, cfg)
+
+    assert prompts and prompts[0][0] == 1 and prompts[0][2] is True
+    assert prompts[0][3] == "Microsoft An (vi-VN)"
+    assert seen_backup == ["câu 3"]
+    assert "câu 0" in seen_primary
+    entries = read_json(job.translated_path)
+    assert [e["voice"] for e in entries] == [
+        cfg.tts_voice, cfg.tts_voice, cfg.tts_voice, "Microsoft An (vi-VN)",
+    ]
+    assert read_json(job.dir / "state.json")["voice"] == cfg.tts_voice
+
+
+def test_budget_fallback_remaining_partial_failure_restores_primary_voice(tmp_path, monkeypatch):
+    """Still-missing entries keep primary voice metadata when partial backup fails."""
+    import wave
+
+    from dubtool.job import read_json
+    from dubtool.tts.base import TTSUnavailableError
+    import dubtool.tts.fallback as fallback_mod
+
+    s4 = _stage_module()
+
+    def _wav(path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(path), "wb") as f:
+            f.setnchannels(1)
+            f.setsampwidth(2)
+            f.setframerate(24000)
+            f.writeframes(b"\x00\x00" * 2400)
+
+    class _OnlyZeroPrimary:
+        def synthesize(self, text: str, voice: str, out_path) -> None:
+            if "0" not in text:
+                raise TTSFailure("primary refused")
+            _wav(out_path)
+
+    class _HalfBackup:
+        name = "windows_winrt"
+        label = "Microsoft An (vi-VN)"
+
+        def synthesize(self, text: str, voice: str, out_path) -> None:
+            if "2" in text:
+                raise TTSFailure("backup failed on 2")
+            _wav(out_path)
+
+    _wired_build_tts(monkeypatch, s4, tmp_path, _OnlyZeroPrimary())
+    monkeypatch.setattr(s4.heartbeat, "sleeping", lambda s, text=None, cancel=None: 0.0)
+    monkeypatch.setattr(fallback_mod, "build_backup", lambda config: _HalfBackup())
+
+    cfg = _cfg_stub(tmp_path, retry_rounds=0, budget_policy="fallback_remaining")
+    job = _JobStub(tmp_path, 3)
+    with pytest.raises(TTSUnavailableError) as exc_info:
+        s4.run(job, cfg)
+
+    assert exc_info.value.ids == [2]
+    assert exc_info.value.finished == 2
+    entries = read_json(job.translated_path)
+    assert entries[0]["voice"] == cfg.tts_voice
+    assert entries[1]["voice"] == "Microsoft An (vi-VN)"
+    assert entries[2].get("tts_voice") in (None, cfg.tts_voice)
+
+
+def test_winrt_voice_detection_and_build_backup_overrides(tmp_path, monkeypatch):
+    """WinRT enumerator orders vi-VN first and build_backup constructs WindowsWinRtProvider."""
+    import dubtool.tts.fallback as fallback_mod
+
+    monkeypatch.setattr(
+        fallback_mod, "_powershell",
+        lambda script: "Microsoft Zira|en-US\nMicrosoft An|vi-VN\n",
+    )
+    voices = fallback_mod.detect_winrt_voices()
+    assert voices == [("Microsoft An", "vi-VN"), ("Microsoft Zira", "en-US")]
+
+    overrides = fallback_mod.tts_overrides_for_backup("windows_winrt:Microsoft An")
+    assert overrides == {"fallback": "windows_winrt", "winrt_voice": "Microsoft An"}
+
+    cfg = _cfg_stub(tmp_path, **overrides)
+    provider = fallback_mod.build_backup(cfg)
+    assert isinstance(provider, fallback_mod.WindowsWinRtProvider)
+    assert provider.label == "Microsoft An (vi-VN)"

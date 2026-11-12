@@ -16,11 +16,13 @@ quota is per day+model, and those are different things.
 from __future__ import annotations
 
 import contextvars
+import threading
 from typing import Any
 
 from dubtool.llm.base import LLMError
 
-DEFAULT_MAX_REQUESTS_PER_RUN = 40
+DEFAULT_MAX_REQUESTS_PER_RUN = 120
+DEFAULT_MAX_KEY_MULTIPLIER = 4
 
 
 class BudgetExhausted(LLMError):
@@ -31,23 +33,34 @@ class RequestBudget:
     def __init__(self, limit: int = DEFAULT_MAX_REQUESTS_PER_RUN):
         self.limit = max(1, int(limit))
         self.used = 0
+        self._lock = threading.Lock()
+        self._logged_exhausted = False
 
     @property
     def remaining(self) -> int:
-        return max(0, self.limit - self.used)
+        with self._lock:
+            return max(0, self.limit - self.used)
 
     @property
     def exhausted(self) -> bool:
-        return self.used >= self.limit
+        with self._lock:
+            return self.used >= self.limit
 
     def try_consume(self, what: str = "request") -> bool:
-        """Consume one slot; False (and no request made) when exhausted."""
-        if self.exhausted:
-            return False
-        self.used += 1
-        if self.used == self.limit:
-            pass  # the last request still goes through; the next one fails
-        return True
+        """Consume one slot atomically; False (no request made) when exhausted."""
+        with self._lock:
+            if self.used >= self.limit:
+                return False
+            self.used += 1
+            return True
+
+    def claim_exhausted_log(self) -> bool:
+        """Return True once per exhausted budget so parallel workers don't spam."""
+        with self._lock:
+            if self._logged_exhausted:
+                return False
+            self._logged_exhausted = True
+            return True
 
 
 _current_budget: contextvars.ContextVar[RequestBudget | None] = contextvars.ContextVar(
@@ -68,13 +81,14 @@ def current() -> RequestBudget | None:
     return _current_budget.get()
 
 
-def from_config(config) -> RequestBudget:
+def from_config(config, key_count: int = 1) -> RequestBudget:
     llm_cfg = getattr(config, "llm", {}) or {}
-    limit = int(
+    base = int(
         llm_cfg.get("max_requests_per_run", DEFAULT_MAX_REQUESTS_PER_RUN)
         or DEFAULT_MAX_REQUESTS_PER_RUN
     )
-    return RequestBudget(limit)
+    scale = max(1, min(int(key_count or 1), DEFAULT_MAX_KEY_MULTIPLIER))
+    return RequestBudget(base * scale)
 
 
 def raise_if_exhausted() -> None:

@@ -60,6 +60,7 @@ _txt_version = _tmp_spec_dir / "version-info.txt"
 _txt_version.write_text(str(_vinfo), encoding="utf-8")
 
 datas = [
+    (str(ROOT / "config.yaml"), "."),
     (str(ROOT / "packaging" / "models.yaml"), "packaging"),
 ]
 

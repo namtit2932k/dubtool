@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 import statistics
+import threading
 import time
 from pathlib import Path
 
@@ -51,6 +52,7 @@ def _edge_tts_version() -> str:
 class TTSFailureLog:
     def __init__(self, job_dir: Path):
         self.path = Path(job_dir) / "tts_failures.json"
+        self._lock = threading.Lock()
         self.records: list[dict] = []
         if self.path.exists():
             try:
@@ -94,11 +96,13 @@ class TTSFailureLog:
         }
         if details:
             record.update({k: v for k, v in details.items() if k not in record})
-        self.records.append(record)
-        self.save()
+        with self._lock:
+            self.records.append(record)
+            write_json(self.path, list(self.records))
 
     def save(self) -> None:
-        write_json(self.path, self.records)
+        with self._lock:
+            write_json(self.path, list(self.records))
 
     # ------------------------------------------------------------ summaries
     @staticmethod

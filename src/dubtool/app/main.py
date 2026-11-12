@@ -399,12 +399,27 @@ def _prepare_sanitized_home(run_id: str) -> Path:
     return home
 
 
+def _is_sanitized_env_active() -> bool:
+    """True only when APPDATA and LOCALAPPDATA both point to a verified .../tmp/sanitized/<id> dir."""
+    from dubtool import workspace
+
+    appdata = os.environ.get("APPDATA", "").strip()
+    local = os.environ.get("LOCALAPPDATA", "").strip()
+    if not appdata or not local:
+        return False
+    p_app = Path(os.path.normcase(os.path.realpath(os.path.abspath(appdata))))
+    p_loc = Path(os.path.normcase(os.path.realpath(os.path.abspath(local))))
+    if p_app != p_loc:
+        return False
+    return workspace.is_sanitized_subpath(p_loc)
+
+
 def run_gui_smoke() -> int:
     """AGENT_UPDATE_7.md section 8: the real widgets driven with real events
     while every side effect is faked (credential store, key test, pipeline).
-    Works from source and from the packaged exe. main() points APPDATA and
-    LOCALAPPDATA at a temp folder first, so nothing in this run touches the
-    real app data or the real Credential Manager.
+    Works from source and from the packaged exe. Enforces an isolated
+    sanitized home even if called directly without --gui-smoke, so nothing
+    in this run can ever touch or delete real APPDATA/LOCALAPPDATA.
 
     Steps:
       1. import a generated 2-minute video through the real handler;
@@ -416,6 +431,34 @@ def run_gui_smoke() -> int:
          and Generate buttons; the success state shows "Mở bản dịch" and
          both the video and the readable file exist.
     """
+    from dubtool import workspace
+
+    prev_env = {
+        var: os.environ.get(var)
+        for var in ("APPDATA", "LOCALAPPDATA", "HF_HOME", "HF_HUB_CACHE", "DUBTOOL_MODELS_DIR")
+    }
+    auto_home: Path | None = None
+    if not _is_sanitized_env_active():
+        auto_home = _prepare_sanitized_home("gui-smoke")
+    if not _is_sanitized_env_active():
+        raise RuntimeError(
+            "Refusing to run run_gui_smoke() without an isolated sanitized home "
+            "(APPDATA/LOCALAPPDATA must point under .../tmp/sanitized/<run_id>)."
+        )
+
+    try:
+        return _run_gui_smoke_body(workspace)
+    finally:
+        if auto_home is not None:
+            for var, old_val in prev_env.items():
+                if old_val is None:
+                    os.environ.pop(var, None)
+                else:
+                    os.environ[var] = old_val
+            workspace.safe_rmtree_sanitized(auto_home, ignore_errors=True)
+
+
+def _run_gui_smoke_body(workspace) -> int:
     import threading
     import time
 
@@ -478,6 +521,7 @@ def run_gui_smoke() -> int:
     fake_store = fake_stores["gemini"]
     secrets_mod._migrate_legacy = lambda *a, **kw: None          # no real keyring I/O
     secrets_mod.env_keys = lambda *a, **kw: []
+    secrets_mod.env_key_sources = lambda *a, **kw: []
     def fake_stored_list(*a, **kw):
         pid = secrets_mod.normalize_provider(str(a[0])) if a else "gemini"
         return list(fake_stores.get(pid, []))
@@ -728,9 +772,10 @@ def run_gui_smoke() -> int:
     print(f"\ngui-smoke: {'PASS' if ok_all else 'FAIL'} ({len(results)} steps)")
     print(f"temp workspace: {smoke_dir} (removed on success with the sanitized home)")
     if ok_all:
-        shutil.rmtree(smoke_dir, ignore_errors=True)
+        workspace.safe_rmtree_sanitized(smoke_dir, allow_media_child=True, ignore_errors=True)
     try:
-        window.close()
+        if window is not None:
+            window.close()
     except Exception:
         pass
     return 0 if ok_all else 1
@@ -887,7 +932,8 @@ def main(argv: list[str] | None = None) -> int:
                     keep = workspace.logs_dir() / "sanitized-failures"
                     keep.mkdir(parents=True, exist_ok=True)
                     _sh.copytree(app_logs, keep / home.name, dirs_exist_ok=True)
-            shutil.rmtree(home, ignore_errors=True)
+            from dubtool import workspace
+            workspace.safe_rmtree_sanitized(home, ignore_errors=True)
         return code
     if args.screenshots:
         return run_screenshots(Path(args.screenshots), args.scale)

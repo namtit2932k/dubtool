@@ -274,6 +274,6 @@ def test_anthropic_error_mapping():
 
 # ------------------------------------------------------------------ 7. Packaging & Version Consistency
 def test_version_1_0_13_consistency():
-    assert dubtool.__version__ == "1.0.13"
     update_num = (Path(__file__).resolve().parents[1] / "packaging" / "update_number.txt").read_text().strip()
-    assert update_num == "13"
+    assert int(update_num) >= 13
+    assert dubtool.__version__ == f"1.0.{update_num}"

@@ -176,8 +176,9 @@ def _classify_error(exc: Exception) -> tuple[str, str | None]:
     for e in _walk(exc):
         if isinstance(e, TTSUnavailableError):
             return "tts_unavailable", detail
+    from dubtool.llm.budget import BudgetExhausted
     for e in _walk(exc):
-        if isinstance(e, (RateLimitError, RateLimitExhausted)):
+        if isinstance(e, (RateLimitError, RateLimitExhausted, BudgetExhausted)):
             return "quota", detail
     kind = _transport_kind(exc)
     has_timeout = any(isinstance(e, TimeoutLLMError) for e in _walk(exc))
@@ -272,7 +273,7 @@ def run_dub(
     interactive: bool = True,
     overload_dialog: Callable[[], str] | None = None,
     fillers_dialog: Callable[[list], dict | None] | None = None,
-    tts_budget_dialog: Callable[[int, str, bool], str] | None = None,
+    tts_budget_dialog: Callable[..., str] | None = None,
 ) -> DubResult:
     """Run the full pipeline on one video. Never raises; returns a DubResult.
 
@@ -349,16 +350,12 @@ def run_dub(
         if prio in ("faithful", "timing"):
             overrides["translate"]["priority"] = prio
         # AGU11 3.5: the Settings → General backup voice rides into the TTS
-        # config (windows_sapi with its voice name, or a piper model path).
-        _backup = str(user_settings.get("tts_backup_voice", "") or "")
-        if _backup.startswith("windows_sapi:"):
-            overrides["tts"] = {
-                "fallback": "windows_sapi", "sapi_voice": _backup.split(":", 1)[1],
-            }
-        elif _backup.startswith("piper:"):
-            overrides["tts"] = {
-                "fallback": "piper", "piper_voice": _backup.split(":", 1)[1],
-            }
+        # config (windows_winrt, windows_sapi, or piper).
+        from dubtool.tts.fallback import tts_overrides_for_backup
+
+        _tts_backup = tts_overrides_for_backup(user_settings.get("tts_backup_voice", ""))
+        if _tts_backup:
+            overrides["tts"] = _tts_backup
         # AGU9 10.4: optional punctuation hint for stage 2 — present, not
         # decided; the default stays off (Update 8 measured 41.0% -> 52.5%
         # sentence-final segments on test2 with no extra time).
@@ -425,7 +422,10 @@ def run_dub(
         # stage's LLMClient shares the same counter.
         from dubtool.llm import budget as llm_budget
 
-        budget = llm_budget.from_config(cfg)
+        active_key_count = len(keys.get(pid) or []) or max(
+            (len(v) for v in keys.values()), default=1
+        )
+        budget = llm_budget.from_config(cfg, key_count=active_key_count)
         budget_token = llm_budget.bind(budget)
         # Update 9 task 3.3: bind the heartbeat emitter — while a stage
         # waits (model call outstanding, retry backoff, rate-limit

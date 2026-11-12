@@ -774,3 +774,84 @@ def test_clean_now_nothing_stored_shows_notice(qtbot, dialog, tmp_path, monkeypa
     dialog._clean_now()
     assert FakeBox.infos and FakeBox.infos[0] == i18n.tr("adv.nothing_to_delete")
     assert FakeBox.last is None
+
+
+def test_start_run_modal_dialogs_exec_and_tts_budget_accepts_backup_voice(qtbot, window, monkeypatch, tmp_path):
+    """MainWindow modal callbacks must call .exec() and pass backup_voice."""
+    from dubtool.app import secrets
+    from dubtool.app.ui import fillers_dialog as fd
+    from dubtool.app.ui import first_run
+    from dubtool.app.ui import main_window as mw
+
+    captured: dict = {}
+
+    def fake_start(**kwargs):
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(secrets, "has_key", lambda *a, **k: True)
+    monkeypatch.setattr(first_run, "ensure_shown", lambda *a, **k: True)
+    monkeypatch.setattr(window.service, "start", fake_start)
+
+    exec_calls: list[str] = []
+    monkeypatch.setattr(
+        fd.TtsBudgetDialog, "exec",
+        lambda self: (exec_calls.append("tts"), setattr(self, "choice", "wait10"), 1)[2],
+    )
+    monkeypatch.setattr(
+        fd.OverloadDialog, "exec",
+        lambda self: (exec_calls.append("overload"), setattr(self, "choice", "fallback_fast"), 1)[2],
+    )
+    monkeypatch.setattr(
+        fd.FillersDialog, "exec",
+        lambda self: (exec_calls.append("fillers"), self.accept(), 1)[2],
+    )
+    monkeypatch.setattr(mw.MainWindow, "_jobs_dir", lambda self: tmp_path)
+
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"mp4")
+    window.video_path = video
+    window.output_dir = tmp_path
+    window.generate_btn.setEnabled(True)
+    window.start_run()
+
+    assert captured["tts_budget_dialog"](12, "09:10", True, "Windows SAPI: Zira") == "wait10"
+    assert captured["overload_dialog"]({"model": "gemini-3.5-flash", "waited_s": 5}) == "fallback_fast"
+    assert captured["fillers_dialog"]([{"token": "girl", "count": 2}]) == {"girl": "drop"}
+    assert exec_calls == ["tts", "overload", "fillers"]
+
+
+def test_tts_budget_dialog_fallback_remaining_button_and_winrt_settings(qtbot, monkeypatch):
+    """TtsBudgetDialog offers fallback_remaining and Settings lists WinRT voices."""
+    from dubtool.app import settings as settings_mod
+    from dubtool.app.ui.fillers_dialog import TtsBudgetDialog
+    from dubtool.app.ui.settings_dialog import SettingsDialog
+    from dubtool.tts import fallback as fallback_mod
+
+    dlg_ok = TtsBudgetDialog(3, "10:00", True, backup_voice="Microsoft An (vi-VN)")
+    qtbot.addWidget(dlg_ok)
+    assert dlg_ok.fallback_remaining_btn.isEnabled()
+    assert dlg_ok.switch_btn.isEnabled()
+    assert "Microsoft An (vi-VN)" in dlg_ok.fallback_remaining_btn.text()
+    dlg_ok.fallback_remaining_btn.click()
+    assert dlg_ok.choice == "fallback_remaining"
+
+    dlg_no = TtsBudgetDialog(3, "10:00", False, backup_voice="")
+    qtbot.addWidget(dlg_no)
+    assert not dlg_no.fallback_remaining_btn.isEnabled()
+    assert not dlg_no.switch_btn.isEnabled()
+
+    monkeypatch.setattr(fallback_mod, "detect_winrt_voices", lambda: [("Microsoft An", "vi-VN")])
+    monkeypatch.setattr(fallback_mod, "detect_sapi_voices", lambda: [])
+    monkeypatch.setattr(fallback_mod.PiperTTSProvider, "detect_piper_voices", staticmethod(lambda: []))
+
+    sd = SettingsDialog()
+    qtbot.addWidget(sd)
+    idx = sd.backup_combo.findData("windows_winrt:Microsoft An")
+    assert idx > 0
+    sd.backup_combo.setCurrentIndex(idx)
+    assert sd._selected_backup() == "windows_winrt:Microsoft An"
+    assert not sd.backup_warn.isVisible()
+    saved = sd.apply_changes()
+    assert saved is not None
+    assert settings_mod.load()["tts_backup_voice"] == "windows_winrt:Microsoft An"

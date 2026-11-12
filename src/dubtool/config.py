@@ -47,21 +47,28 @@ SCHEDULE_DEFAULTS: dict = {
 # AGENT_UPDATE_8 task 1: TTS resilience.
 TTS_DEFAULTS: dict = {
     "retry_rounds": 3,
-    "round_cooldown_s": [30, 60, 120],  # AGU11 3.3: short cooldowns
-    "breaker_consecutive": 3,
+    "round_cooldown_s": [15, 30, 60],  # AGU11 3.3: short cooldowns
+    "breaker_consecutive": 6,
+    "breaker_pause_s": 15,
+    "breaker_pause_schedule_s": [10, 20, 30],
     "request_timeout_s": 45,     # AGU11 3.1: hard cap per edge-tts request
-    "attempt_delays_s": [2, 5],  # AGU11 3.3: waits between ladder steps
-    "max_chars_per_request": 90, # AGU11 3.3: ladder step 2 sentence chunking
+    "attempt_delays_s": [1.5, 4],  # AGU11 3.3: waits between ladder steps
+    "direct_retries": 1,         # quick retry for short <=max_chars segments
+    "max_chars_per_request": 200, # Update 12 task 3.3: split cap (one voice)
     "alt_voice": "vi-VN-NamMinhNeural",  # AGU11 3.3 ladder step 3
     "join_silence_s": 0.08,      # AGU11 3.3: silence between joined parts
     "unit_budget_s": 60,         # AGU11 3.3: minutes a segment may burn
     "stage_budget_s": 600,       # AGU11 3.4: failing-wait budget for the stage
-    "budget_policy": "ask",      # ask | fallback | stop
-    "pacing_delay_s": 0.3,
+    "budget_policy": "ask",      # ask | fallback_remaining | switch_all | stop
+    "concurrency": 2,            # staggered edge-tts workers (adaptive step-down on refusals)
+    "max_rps": 1.5,              # conservative global pacing to prevent burst NoAudioReceived
+    "limiter_floor_interval_s": 2.5,
+    "pacing_delay_s": 0.0,
     "max_delay_s": 2.0,
     "max_cooldown_s": 120.0,
-    "fallback": "none",  # none | windows_sapi | piper
-    "sapi_voice": "",    # AGU11 3.5: the detected Windows voice name
+    "fallback": "none",  # none | windows_winrt | windows_sapi | piper
+    "winrt_voice": "",   # local Windows WinRT (OneCore) voice display name
+    "sapi_voice": "",    # AGU11 3.5: legacy .NET System.Speech voice name
     "piper_voice": "",
 }
 
@@ -152,6 +159,7 @@ LLM_DEFAULTS: dict = {
     "overload_after": 2,
     "overload_policy": "ask",   # ask | fallback_fast | wait (CLI uses fallback_fast)
     "stage_budget_s": 600,      # AGU11 2.3: waiting budget per stage
+    "max_requests_per_run": 120,
     "request_timeout_s": 180,   # Accurate-mode per-request cap
     "request_timeout_s_fast": 90,
 }

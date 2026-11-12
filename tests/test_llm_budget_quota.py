@@ -326,3 +326,128 @@ def test_s5_falls_back_to_fallback_mode_on_quota_out(tmp_path, monkeypatch):
     entries = json.loads(job.translated_path.read_text(encoding="utf-8"))
     assert entries[0]["vi"] == "ok-short"       # the fallback batch applied
     assert calls["n"] == 2                      # selected-mode build + fallback build
+
+
+def test_from_config_scales_budget_with_key_count():
+    cfg = SimpleNamespace(llm={"max_requests_per_run": 120})
+    assert budget.from_config(cfg, key_count=1).limit == 120
+    assert budget.from_config(cfg, key_count=4).limit == 480
+    assert budget.from_config(cfg, key_count=10).limit == 120 * budget.DEFAULT_MAX_KEY_MULTIPLIER
+
+
+def test_budget_exhausted_fails_fast_without_retries_single_and_pooled(caplog):
+    import logging
+
+    from dubtool.llm.base import LLMResult
+    from dubtool.llm.client import LLMClient
+    from dubtool.llm.keypool import KeyPool
+
+    class _SingleProvider:
+        name = "fake"
+        model = "fake-m"
+
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, system, user, *, schema=None, json_mode=True,
+                     max_tokens=8000, thinking_level=None):
+            self.calls += 1
+            return LLMResult(text="{}", input_tokens=1, output_tokens=1)
+
+    class _PooledProvider(_SingleProvider):
+        def __init__(self):
+            super().__init__()
+            self.pool = KeyPool(["fake-k1", "fake-k2"], model="fake-m")
+            self.switches = 0
+
+        @property
+        def api_key(self) -> str:
+            return self.pool.acquire()
+
+    for prov_cls in (_SingleProvider, _PooledProvider):
+        prov = prov_cls()
+        b = budget.RequestBudget(1)
+        tok = budget.bind(b)
+        client = LLMClient(prov)
+        caplog.clear()
+        try:
+            with caplog.at_level(logging.WARNING, logger="dubtool"):
+                client._call_and_validate("sys", "usr", validate=lambda d: True, error_note_builder=lambda e: str(e))
+                with pytest.raises(budget.BudgetExhausted):
+                    client._call_and_validate("sys", "usr", validate=lambda d: True, error_note_builder=lambda e: str(e))
+                with pytest.raises(budget.BudgetExhausted):
+                    client._call("sys", "usr")
+        finally:
+            budget.reset(tok)
+        assert prov.calls == 1, f"{prov_cls.__name__} must not call provider or retry after BudgetExhausted"
+        budget_logs = [r.getMessage() for r in caplog.records if "request budget used up" in r.getMessage()]
+        assert len(budget_logs) == 1
+
+
+def test_classify_error_maps_budget_exhausted_to_quota():
+    from dubtool.api import _classify_error
+
+    code, _detail = _classify_error(budget.BudgetExhausted("LLM request budget used up (40 requests this run)"))
+    assert code == "quota"
+
+
+def test_s3_translate_budget_exhausted_preserves_partial_work_and_reraises(tmp_path, monkeypatch):
+    from dubtool.config import Config
+    from dubtool.llm.base import LLMResult
+    from dubtool.stages import s3_translate as s3
+
+    job_dir = tmp_path / "job_budget"
+    job_dir.mkdir(parents=True)
+    long_sentence = ("This is a detailed explanatory sentence for splitting chunks cleanly. " * 22).strip()
+    transcript = [
+        {"id": 0, "start": 0.0, "end": 60.0, "text": f"{long_sentence} First part."},
+        {"id": 1, "start": 61.0, "end": 120.0, "text": f"{long_sentence} Second part."},
+    ]
+    (job_dir / "transcript.json").write_text(json.dumps(transcript), encoding="utf-8")
+
+    class _FakeJob:
+        dir = job_dir
+        transcript_path = job_dir / "transcript.json"
+        translated_path = job_dir / "translated.json"
+        units_path = job_dir / "units.json"
+        dub_units_path = job_dir / "dub_units.json"
+        translate_chunks_path = job_dir / "translate_chunks.json"
+
+    class _OneShotProvider:
+        name = "gemini"
+        model = "gemini-3.5-flash-lite"
+
+        def complete(self, system, user, *, schema=None, json_mode=True,
+                     max_tokens=8000, thinking_level=None):
+            return LLMResult(
+                text=json.dumps([{"id": 0, "vi": "Câu đầu tiên."}]),
+                input_tokens=1,
+                output_tokens=1,
+            )
+
+    monkeypatch.setattr("dubtool.stages.s3_translate.get_provider", lambda *a, **k: _OneShotProvider())
+    monkeypatch.setattr(
+        "dubtool.stages.s3_translate._filler_state",
+        lambda *a, **k: {"words": [], "settings": {}, "actions": {}, "policy": "", "count": 0},
+    )
+
+    cfg = Config()
+    cfg.llm_provider = "gemini"
+    cfg.translate = {**(cfg.translate or {}), "unit_mode": "sentence", "punctuate": False, "concurrency": 1}
+    cfg.units = {**(cfg.units or {}), "max_chars_per_chunk": 10, "max_units_per_chunk": 1}
+
+    b = budget.RequestBudget(1)
+    tok = budget.bind(b)
+    try:
+        with pytest.raises(budget.BudgetExhausted):
+            s3.run(_FakeJob(), cfg, force=False, api_keys=["fake-key"])
+    finally:
+        budget.reset(tok)
+
+    saved_entries = json.loads((job_dir / "translated.json").read_text(encoding="utf-8"))
+    assert saved_entries[0]["vi"] == "Câu đầu tiên."
+    assert not saved_entries[1].get("vi")
+    saved_dub_units = json.loads((job_dir / "dub_units.json").read_text(encoding="utf-8"))
+    assert len(saved_dub_units) == 2
+    assert saved_dub_units[0]["vi"] == "Câu đầu tiên."
+    assert not saved_dub_units[1].get("vi")

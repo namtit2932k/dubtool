@@ -23,7 +23,7 @@ llm:
   key_cooldown_s: 60           # 429 cooldown per key unless the API gives a hint
   max_all_keys_wait_s: 600     # give up after this total wait when ALL keys are limited
   # AGENT_UPDATE_6.md task 5 (quota/budget).
-  max_requests_per_run: 40     # one run stops calling the LLM after this many requests
+  max_requests_per_run: 120    # base calls/run (scales up to 4x when multiple API keys are saved)
   request_timeout_s: 180       # per-request cap (Accurate mode); Fast mode: request_timeout_s_fast
   request_timeout_s_fast: 90   # AGU8 3.5: Fast mode gets a tighter cap
   # Update 12 task 2: the bounded capacity retry schedule (503/500/502 —
@@ -114,25 +114,33 @@ dub:
 tts:
   retry_rounds: 3              # deferred retry rounds after the first pass
   round_cooldown_s:            # cooldowns before each retry round
-    - 30                       # AGU11 3.3: short cooldowns, the ladder replaces long waits
+    - 15                       # AGU11 3.3: short cooldowns, the ladder replaces long waits
+    - 30
     - 60
-    - 120
   request_timeout_s: 45        # AGU11 3.1: hard cap per edge-tts request
   attempt_delays_s:            # AGU11 3.3: waits between the repair-ladder steps
-    - 2
-    - 5
+    - 1.5
+    - 4
+  direct_retries: 1            # quick same-voice retry for short segments before counting toward breaker
   max_chars_per_request: 200   # Update 12 task 3.3: split cap (one voice)
   alt_voice: vi-VN-NamMinhNeural  # DEPRECATED (Update 12: one voice per video) — ignored
   join_silence_s: 0.08         # silence between the split pieces, same voice
   unit_budget_s: 60            # one unit's first-pass budget
   stage_budget_s: 600          # budget for failing waits before the budget dialog
-  budget_policy: stop          # headless: stop (default) | switch_all; the GUI shows the dialog
-  max_rps: 1.0                 # Update 12 task 5: global voice-request pacing
-  breaker_consecutive: 3       # stop calling the service after N failures in a row
-  pacing_delay_s: 0.3          # wait between requests; grows after failures
+  budget_policy: stop          # headless: stop (default) | fallback_remaining | switch_all; the GUI shows the dialog
+  concurrency: 2               # staggered edge-tts workers (drops to 1 automatically on throttling)
+  max_rps: 1.5                 # conservative start pacing to avoid initial burst refusals
+  limiter_floor_interval_s: 2.5 # slowest adaptive limiter interval on refusals
+  breaker_consecutive: 6       # tolerate sporadic NoAudioReceived before pausing stage
+  breaker_pause_s: 15
+  breaker_pause_schedule_s:    # graduated breaker pauses instead of flat 60 s stalls
+    - 10
+    - 20
+    - 30
+  pacing_delay_s: 0.0          # extra per-call sleep when limiter is disabled
   max_delay_s: 2               # pacing delay cap
   max_cooldown_s: 120          # provider cooldown cap (was 30)
-  fallback: none               # none | windows_sapi | piper (AGU8 2.3)
+  fallback: none               # none | windows_winrt | windows_sapi | piper (AGU8 2.3)
   piper_voice: ""              # path of the voice model when fallback: piper
 
 # AGENT_UPDATE_8 task 3.3: LLM punctuation restoration for the transcript.

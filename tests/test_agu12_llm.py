@@ -474,3 +474,78 @@ def test_panel_says_breaker_or_fallback(monkeypatch):
         or ("circuit" in message) or ("quá tải" in message)
         for message in events
     ), events[:20]
+
+
+def test_gemini_map_error_and_pool_rotation_on_minute_429(monkeypatch):
+    """Per-minute 429 carries kind='minute' + retryDelay and switches to another
+    idle key immediately without a 60s global pause; only when every key is
+    cooling down does the client pause globally."""
+    pytest.importorskip("google.genai")
+
+    from dubtool.llm.base import classify_rate_limit
+    from dubtool.llm.client import LLMClient
+    from dubtool.llm.gemini import GeminiProvider
+
+    prov = GeminiProvider(model="m", api_keys=["fake-k1", "fake-k2"])
+
+    class _Fake429(Exception):
+        code = 429
+        details = [
+            {"@type": "type.googleapis.com/google.rpc.QuotaFailure", "violations": [{"quotaId": "GenerateRequestsPerMinutePerProject"}]},
+            {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "35s"},
+        ]
+        message = "You exceeded your current quota. Please retry in 35.7s."
+
+    mapped = prov._map_error(_Fake429("quota"), "fake-k1")
+    assert isinstance(mapped, RateLimitError)
+    assert getattr(mapped, "kind", None) == "minute"
+    assert mapped.retry_after == 35.0
+    assert classify_rate_limit(RuntimeError("Please retry in 35.7s")) == ("per_minute", pytest.approx(35.7))
+
+    # Case 1: k1 hits per-minute 429 through real GeminiProvider.complete -> _map_error,
+    # k2 succeeds immediately -> switches without global pause.
+    from types import SimpleNamespace
+
+    seen_keys: list[str] = []
+
+    def _client_for_switch(key: str):
+        class _Models:
+            def generate_content(self, **_kw):
+                seen_keys.append(key)
+                if key == "fake-k1":
+                    raise _Fake429("You exceeded your current quota. Please retry in 35.7s.")
+                return SimpleNamespace(text="{\"ok\": true}", usage_metadata=None)
+
+        return SimpleNamespace(models=_Models())
+
+    prov.client_for = _client_for_switch  # type: ignore[method-assign]
+    client = LLMClient(prov)
+    res = client._call("sys", "usr")
+    assert res == "{\"ok\": true}"
+    assert seen_keys == ["fake-k1", "fake-k2"]
+    assert client.key_switches == 1
+    assert client.rate_pause_until == 0.0
+
+    # Case 2: BOTH keys hit per-minute 429 -> pauses globally only once both are limited,
+    # waits for pool cooldown via FakeClock, and retries cleanly without KeyExhaustedError.
+    attempts = {"n": 0}
+    with fast_clock(monkeypatch=monkeypatch):
+        prov2 = GeminiProvider(model="m", api_keys=["fake-k1", "fake-k2"])
+
+        def _client_for_all_busy(key: str):
+            class _Models:
+                def generate_content(self, **_kw):
+                    attempts["n"] += 1
+                    if attempts["n"] <= 2:
+                        raise _Fake429("per minute quota exceeded. retry in 2.0s")
+                    return SimpleNamespace(text="{\"ok\": 2}", usage_metadata=None)
+
+            return SimpleNamespace(models=_Models())
+
+        prov2.client_for = _client_for_all_busy  # type: ignore[method-assign]
+        client2 = LLMClient(prov2)
+        res2 = client2._call("sys", "usr")
+    assert res2 == "{\"ok\": 2}"
+    assert attempts["n"] == 3
+    assert client2.key_switches == 1
+    assert client2.rate_pause_until > 0.0

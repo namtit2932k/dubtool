@@ -1,4 +1,4 @@
-# DubTool Windows build (AGU4 11, extended by AGENT_UPDATE_5.md section 8,
+﻿# DubTool Windows build (AGU4 11, extended by AGENT_UPDATE_5.md section 8,
 # reworked for AGENT_UPDATE_6.md 6.4).
 # One command from the repo root:  powershell -File packaging/build_exe.ps1
 #  - the build root is OUTSIDE the project (DUBTOOL_BUILD_ROOT or
@@ -179,10 +179,10 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
     )
     Set-Content -Path (Join-Path $tmpAppDir "BUILD_INFO.txt") -Value $buildLines -Encoding UTF8
 
-    # 5. Verify the bundled ffmpeg/font landed. ffprobe.exe is deliberately
+    # 5. Verify the bundled ffmpeg/config.yaml landed. ffprobe.exe is deliberately
     #    NOT shipped since AGU9 task 8 (probing runs in-process via PyAV).
     Write-Host "== [5/6] structure check"
-    foreach ($p in @("_internal\vendor\ffmpeg.exe", "DubTool.exe")) {
+    foreach ($p in @("_internal\vendor\ffmpeg.exe", "_internal\config.yaml", "DubTool.exe")) {
         if (-not (Test-Path (Join-Path $tmpAppDir $p))) { throw "missing $p in the build" }
     }
     if (Test-Path (Join-Path $tmpAppDir "_internal\vendor\ffprobe.exe")) {

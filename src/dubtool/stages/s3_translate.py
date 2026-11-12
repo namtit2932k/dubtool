@@ -195,6 +195,8 @@ def run_chunks_parallel(
 
         # Apply successful results strictly in chunk order.
         flush_in_order()
+        if first_error is not None:
+            raise first_error
 
         if rate_limited and wait_hint > 0:
             # Sleep only until the hint expires or the user cancels.
@@ -204,8 +206,6 @@ def run_chunks_parallel(
                 step = min(1.0, remaining)
                 time.sleep(step)
                 remaining -= step
-        if first_error is not None:
-            raise first_error
     flush_in_order()
     if pending:
         raise RuntimeError(
@@ -629,6 +629,8 @@ def translate_resilient(
                 split_min_chars=split_min_chars, allow_split=False,
             ))
         return out
+    except BudgetExhausted:
+        raise
     except LLMError as exc:
         can_split = (
             allow_split and split_on_timeout and depth < 8
@@ -991,6 +993,7 @@ def run(
     from dubtool.llm.checkpoints import chunk_prompt_hash
 
     prompt_hash = chunk_prompt_hash(glossary, pronouns)
+    budget_err: BudgetExhausted | None = None
 
     if unit_mode == "sentence":
         units = units_for(entries, config.units or {})
@@ -1099,7 +1102,8 @@ def run(
                 todo_units, unit_chunk_fn, apply=apply_units,
                 concurrency=concurrency, cancel=cancel, adaptive=adaptive,
             )
-        except BudgetExhausted as exc:  # 5.2: finish with what exists
+        except BudgetExhausted as exc:  # save progress, resume fills the rest
+            budget_err = exc
             log.warning("s3: %s — the rerun fills the remaining units", exc)
         translated_count = translated_units
     else:
@@ -1110,15 +1114,18 @@ def run(
                 chunk_store=checkpoint_store, prompt_hash=prompt_hash,
                 stats=stats, holder=holder,
             )
-        except BudgetExhausted as exc:  # 5.2: finish with what exists
+        except BudgetExhausted as exc:  # save progress, resume fills the rest
+            budget_err = exc
             log.warning("s3: %s — the rerun fills the remaining segments", exc)
 
     # Update 12 task 3: the dub units file — the primary data of stages
     # 4-7 in sentence mode. One record per sentence unit with the COMPLETE
     # Vietnamese sentence (never fragments).
+    missing_units = 0
     if unit_mode == "sentence" and units:
         from dubtool.dub_units import build_dub_units, write_dub_units
 
+        seg_by_id = {e["id"]: e for e in entries}
         translations: dict[int, dict] = {}
         for u in units:
             uid = int(u["unit_id"])
@@ -1128,12 +1135,30 @@ def run(
                 # from its derived segments with the boundary-dedupe join.
                 from dubtool.stages.s8_export_readable import _join_deduped
 
-                seg_vi = {e["id"]: (e.get("vi") or "") for e in entries}
-                segs = [seg_vi.get(sid, "") for sid in u["seg_ids"]]
+                segs = [(seg_by_id.get(sid) or {}).get("vi") or "" for sid in u["seg_ids"]]
                 vi = _join_deduped([t for t in segs if t.strip()])
             translations[uid] = {"vi": vi, "model": u.get("model")}
+            is_reviewed = u.get("reviewed") or any(
+                (seg_by_id.get(sid) or {}).get("reviewed") for sid in u["seg_ids"]
+            )
+            if not is_reviewed and not str(vi or "").strip():
+                missing_units += 1
         write_dub_units(job, build_dub_units(units, translations))
         log.info("s3: dub_units.json written (%d sentence units)", len(units))
+    else:
+        missing_units = sum(
+            1 for e in entries if not e.get("reviewed") and not (e.get("vi") or "").strip()
+        )
+
+    if budget_err is not None and missing_units > 0:
+        write_json(job.translated_path, entries)
+        log.warning(
+            "s3: %d untranslated %s remain after %s — stopping stage 3 so resume can finish them",
+            missing_units,
+            "units" if (unit_mode == "sentence" and units) else "segments",
+            budget_err,
+        )
+        raise budget_err
 
     # Update 12 task 2.4: a non-blocking fallback notice — in the details
     # panel and the run summary naming how many units the Fast model took.

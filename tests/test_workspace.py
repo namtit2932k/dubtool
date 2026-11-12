@@ -260,3 +260,114 @@ def test_gui_smoke_media_inside_sanitized_home():
     assert 'mkdtemp(prefix="dubtool-smoke-media-")' not in text
     assert 'mkdtemp(prefix="dubtool-gui-smoke-appdata-")' not in text
     assert 'smoke_dir = Path(os.environ["LOCALAPPDATA"]) / "media"' in text
+
+
+def test_safe_rmtree_refuses_protected_and_non_sanitized_paths(build_env, tmp_path, monkeypatch):
+    """Critical regression guard: safe_rmtree_sanitized and job pruning must
+    never delete real APPDATA/LOCALAPPDATA, USERPROFILE, %TEMP%, drive roots,
+    project_root, build_root, or unisolated media paths."""
+    from dubtool import job as job_mod
+
+    proj, br = build_env
+    fake_profile = tmp_path / "Users" / "Tester"
+    fake_local = fake_profile / "AppData" / "Local"
+    fake_roaming = fake_profile / "AppData" / "Roaming"
+    fake_chrome_sentinel = fake_local / "Google" / "Chrome" / "User Data" / "Default" / "Preferences"
+    fake_chrome_sentinel.parent.mkdir(parents=True)
+    fake_chrome_sentinel.write_text("keep", encoding="utf-8")
+    fake_roaming.mkdir(parents=True)
+    fake_temp = fake_local / "Temp"
+    fake_temp.mkdir(parents=True)
+    (fake_local / "media").mkdir(parents=True)
+
+    monkeypatch.setenv("USERPROFILE", str(fake_profile))
+    monkeypatch.setenv("LOCALAPPDATA", str(fake_local))
+    monkeypatch.setenv("APPDATA", str(fake_roaming))
+    monkeypatch.setenv("TEMP", str(fake_temp))
+
+    for dangerous in (
+        Path(fake_profile.anchor),
+        fake_profile.parent,
+        fake_profile,
+        fake_profile / "AppData",
+        fake_local,
+        fake_roaming,
+        fake_temp,
+        fake_local / "media",
+        proj,
+        br,
+        br / "tmp",
+        br / "tmp" / "sanitized",
+        Path.home() / "AppData" / "Local",
+    ):
+        with pytest.raises(RuntimeError):
+            workspace.safe_rmtree_sanitized(dangerous, allow_media_child=True, ignore_errors=True)
+
+    # Prune helpers must also refuse protected roots
+    for dangerous_job in (fake_local, fake_roaming, fake_temp, fake_profile):
+        with pytest.raises(RuntimeError):
+            job_mod.prune_none(dangerous_job)
+        with pytest.raises(RuntimeError):
+            job_mod.prune_light(dangerous_job)
+
+    assert fake_chrome_sentinel.read_text(encoding="utf-8") == "keep"
+
+    # Legitimate sanitized home and its media subdir are allowed
+    san = workspace.sanitized_tmp_dir("safe-case-01")
+    media = san / "media"
+    media.mkdir(parents=True)
+    (media / "clip.mp4").write_bytes(b"ok")
+    workspace.safe_rmtree_sanitized(media, allow_media_child=True)
+    assert not media.exists() and san.is_dir()
+    workspace.safe_rmtree_sanitized(san)
+    assert not san.exists()
+
+
+def test_direct_run_gui_smoke_auto_isolates_before_touching_appdata(build_env, tmp_path, monkeypatch):
+    """Calling run_gui_smoke() directly without --gui-smoke must automatically
+    isolate APPDATA/LOCALAPPDATA into build_root/tmp/sanitized before executing
+    the smoke body, leaving real AppData untouched and restoring env on exit."""
+    from dubtool.app import main as app_main
+
+    _proj, br = build_env
+    fake_local = tmp_path / "RealUsers" / "Admin" / "AppData" / "Local"
+    fake_roaming = tmp_path / "RealUsers" / "Admin" / "AppData" / "Roaming"
+    fake_local.mkdir(parents=True)
+    fake_roaming.mkdir(parents=True)
+    sentinel = fake_local / "important_app.exe"
+    sentinel.write_bytes(b"exe")
+
+    monkeypatch.setenv("LOCALAPPDATA", str(fake_local))
+    monkeypatch.setenv("APPDATA", str(fake_roaming))
+
+    observed: dict[str, str] = {}
+
+    def fake_body(ws):
+        observed["local"] = os.environ["LOCALAPPDATA"]
+        observed["appdata"] = os.environ["APPDATA"]
+        assert ws.is_sanitized_subpath(Path(os.environ["LOCALAPPDATA"]))
+        return 0
+
+    monkeypatch.setattr(app_main, "_run_gui_smoke_body", fake_body)
+    rc = app_main.run_gui_smoke()
+    assert rc == 0
+    assert sentinel.read_bytes() == b"exe"
+    assert os.environ["LOCALAPPDATA"] == str(fake_local)
+    assert os.environ["APPDATA"] == str(fake_roaming)
+    assert Path(observed["local"]).parent == br / "tmp" / "sanitized"
+    assert not Path(observed["local"]).exists()
+
+
+def test_no_raw_env_rmtree_in_src():
+    """Static check: source modules must never call shutil.rmtree directly on an
+    os.environ[...] path."""
+    import re
+
+    src_dir = ROOT / "src"
+    bad_pat = re.compile(r"shutil\.rmtree\(\s*Path\(\s*os\.environ")
+    hits = []
+    for p in src_dir.rglob("*.py"):
+        text = p.read_text(encoding="utf-8")
+        if bad_pat.search(text):
+            hits.append(str(p.relative_to(ROOT)))
+    assert not hits, f"Raw env rmtree found in: {hits}"

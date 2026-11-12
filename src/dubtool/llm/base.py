@@ -343,6 +343,8 @@ def _extract_retry_after(text: str) -> float | None:
     m = re.search(r'"?retryDelay"?\s*[:=]\s*"?(\d+(?:\.\d+)?)\s*s', text, re.I)
     if not m:
         m = re.search(r'retry[- ]?after\s*[:=]\s*"?(\d+(?:\.\d+)?)', text, re.I)
+    if not m:
+        m = re.search(r'retry\s+in\s+(\d+(?:\.\d+)?)\s*s', text, re.I)
     if m:
         try:
             return float(m.group(1))

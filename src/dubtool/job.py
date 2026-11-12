@@ -425,6 +425,7 @@ def prune_light(job_dir: Path) -> int:
     """Keep the small translation files and logs, delete the bulky ones
     (AGENT_UPDATE_10.md 5.2, level 'light'). Returns deleted bytes. Failed
     or cancelled runs never reach this — it is only called on success."""
+    _assert_safe_job_dir(job_dir)
     deleted = 0
     for child in list(job_dir.iterdir()):
         if child.is_symlink():
@@ -446,6 +447,10 @@ def prune_light(job_dir: Path) -> int:
                 continue  # AGU10 5.2: 'light' keeps the logs too
             size = tree_size_local(child)
             try:
+                _assert_safe_job_dir(job_dir)
+                resolved_child = child.resolve()
+                if resolved_child.parent != job_dir.resolve():
+                    raise RuntimeError(f"Refusing to rmtree escaped path: {child}")
                 shutil.rmtree(child)
             except OSError:
                 continue
@@ -453,14 +458,24 @@ def prune_light(job_dir: Path) -> int:
     return deleted
 
 
+def _assert_safe_job_dir(job_dir: Path) -> None:
+    from dubtool import workspace
+
+    workspace.assert_not_protected_dir(job_dir, action="prune job directory")
+
+
 def prune_none(job_dir: Path) -> None:
     """AGU10 5.2 level 'Xóa hết' / AGU4 7.4: keep only the log (and a legacy
     logs/ subfolder), delete everything else including state.json so the
     folder counts as finished for housekeeping. Only called on success."""
+    _assert_safe_job_dir(job_dir)
+    resolved_job = job_dir.resolve()
     for child in list(job_dir.iterdir()):
         if child.is_symlink():
             continue
         if child.is_dir() and child.name != "logs":
+            if child.resolve().parent != resolved_job:
+                raise RuntimeError(f"Refusing to rmtree escaped path: {child}")
             shutil.rmtree(child, ignore_errors=True)
         elif child.name != "pipeline.log":
             try:

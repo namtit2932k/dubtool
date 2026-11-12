@@ -29,11 +29,13 @@ AGENT_UPDATE_11 (tasks 3.1-3.4):
 
 from __future__ import annotations
 
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import hashlib
 import json
 import logging
 import re
 import shutil
+import threading
 import uuid
 from pathlib import Path
 
@@ -74,7 +76,7 @@ def build_tts(config, cache_dir: Path, media_cache=None) -> "SegmentTTS":
     return SegmentTTS(
         EdgeTTSProvider(
             rate=opts.get("rate", "+0%"),
-            rate_limit_s=float(tts_cfg.get("pacing_delay_s", 0.3)),
+            rate_limit_s=float(tts_cfg.get("pacing_delay_s", 0.0)),
             max_cooldown_s=min(float(tts_cfg.get("max_cooldown_s", 120.0)), 30.0),
             request_timeout_s=float(tts_cfg.get("request_timeout_s", 45.0)),
         ),
@@ -101,6 +103,16 @@ class SegmentTTS:
         self.durations: dict[str, float] = {}
         self.media_cache = media_cache
         self.cancel = None
+        self._dur_lock = threading.Lock()
+        self._key_locks: dict[str, threading.Lock] = {}
+
+    def _lock_for(self, key: str) -> threading.Lock:
+        with self._dur_lock:
+            lock = self._key_locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                self._key_locks[key] = lock
+            return lock
 
     def _duration(self, path: Path) -> float:
         """Probe through the shared MediaCache unless overridden."""
@@ -150,45 +162,55 @@ class SegmentTTS:
             raise RuntimeError("refusing to synthesize empty text")
         key = self._key(voice, text)
         cache_file = self.cache_dir / f"{key}.mp3"
-        if not self._cache_valid(cache_file):
-            raw = self.cache_dir / f"~raw-{uuid.uuid4().hex}.mp3"
-            limiter = getattr(self, "limiter", None)
-            try:
-                # Update 12 task 5: every request paces through the global
-                # limiter; a refusal is ANY failure (handshake 503 counts).
-                if limiter is not None:
-                    limiter.gate()
-                try:
-                    self.provider.synthesize(text, voice, raw)
-                except Exception:
-                    if limiter is not None:
-                        limiter.record(False)
-                    raise
-                if limiter is not None:
-                    limiter.record(True)
-                trim = self.options.get("trim")
-                if trim:
-                    tmp = self.cache_dir / f"~trim-{uuid.uuid4().hex}.mp3"
+
+        def _usable(path: Path) -> bool:
+            return path.exists() and path.stat().st_size >= 1000 and self._clip_readable(path)
+
+        if not _usable(cache_file):
+            with self._lock_for(key):
+                if not _usable(cache_file):
+                    raw = self.cache_dir / f"~raw-{uuid.uuid4().hex}.mp3"
+                    limiter = getattr(self, "limiter", None)
                     try:
-                        audio_utils.trim_silence(
-                            raw, tmp, threshold_db=trim["threshold_db"], margin_s=trim["margin_s"],
-                            cancel=self.cancel,
-                        )
-                        if self._duration(tmp) > 0.05:
-                            os_replace_strong(tmp, cache_file)
+                        # Update 12 task 5: every request paces through the global
+                        # limiter; a refusal is ANY failure (handshake 503 counts).
+                        if limiter is not None:
+                            limiter.gate()
+                        try:
+                            self.provider.synthesize(text, voice, raw)
+                        except Exception:
+                            if limiter is not None:
+                                limiter.record(False)
+                            raise
+                        if limiter is not None:
+                            limiter.record(True)
+                        trim = self.options.get("trim")
+                        if trim:
+                            tmp = self.cache_dir / f"~trim-{uuid.uuid4().hex}.mp3"
+                            try:
+                                audio_utils.trim_silence(
+                                    raw, tmp, threshold_db=trim["threshold_db"],
+                                    margin_s=trim["margin_s"], cancel=self.cancel,
+                                )
+                                if self._duration(tmp) > 0.05:
+                                    os_replace_strong(tmp, cache_file)
+                                else:
+                                    # Trim emptied the clip (paranoia): keep raw audio.
+                                    os_replace_strong(raw, cache_file)
+                            finally:
+                                tmp.unlink(missing_ok=True)
                         else:
-                            # Trim emptied the clip (paranoia): keep raw audio.
                             os_replace_strong(raw, cache_file)
                     finally:
-                        tmp.unlink(missing_ok=True)
-                else:
-                    os_replace_strong(raw, cache_file)
-            finally:
-                raw.unlink(missing_ok=True)
+                        raw.unlink(missing_ok=True)
         cache_file = self.cache_dir / f"{key}.mp3"
-        if key not in self.durations:
-            self.durations[key] = self._duration(cache_file)
-        return self.durations[key], cache_file
+        with self._dur_lock:
+            dur = self.durations.get(key)
+        if dur is None:
+            dur = self._duration(cache_file)
+            with self._dur_lock:
+                self.durations[key] = dur
+        return dur, cache_file
 
     def synthesize(self, seg: dict, cancel=None) -> tuple[float, Path]:
         """Return (duration s after trim, cache path) for this segment's text."""
@@ -355,13 +377,21 @@ class _Ladder:
                 "(one voice per video) — remove it from config.yaml"
             )
         self.delays = [float(v) for v in (tts_cfg.get("attempt_delays_s") or [2.0, 5.0])]
+        self.direct_retries = max(0, int(tts_cfg.get("direct_retries", 0)))
         # Update 12 task 3.3: sentence units default to a 200-char split cap.
         self.max_chars = max(25, int(tts_cfg.get("max_chars_per_request", 200)))
         self.silence_s = float(tts_cfg.get("join_silence_s", 0.08))
         self.unit_budget_s = float(tts_cfg.get("unit_budget_s", 60.0))
         self.refuse_ids: set[int] = set()   # fault injection (AGU11)
+        self._state_lock = threading.Lock()
         self.tried: dict[int, set[str]] = {}  # step names already attempted per segment
         self.attempt_no: dict[int, int] = {}
+        self._slept_by_id: dict[int, float] = {}
+        self.last_slept_s: float = 0.0
+
+    def slept_for(self, seg_id: int) -> float:
+        with self._state_lock:
+            return float(self._slept_by_id.get(int(seg_id), 0.0))
 
     def steps(self, base_voice: str, text_len: int) -> list[tuple[str, str]]:
         """Update 12 task 4 (one voice per video): the repair ladder is
@@ -375,10 +405,12 @@ class _Ladder:
 
     def _record(self, seg_id: int, text: str, exc: Exception, elapsed: float,
                 step: str, voice: str) -> None:
-        self.attempt_no[seg_id] = self.attempt_no.get(seg_id, 0) + 1
+        with self._state_lock:
+            attempt = self.attempt_no.get(seg_id, 0) + 1
+            self.attempt_no[seg_id] = attempt
         self.failures.record(
             seg_id,
-            self.attempt_no[seg_id],
+            attempt,
             text,
             exc,
             elapsed,
@@ -415,7 +447,10 @@ class _Ladder:
         seg_id = int(entry["id"])
         base_voice = entry.get("tts_voice") or self.primary_voice
         text = (entry.get("vi") or "").strip()
-        attempted = self.tried.setdefault(seg_id, set())
+        with self._state_lock:
+            attempted = set(self.tried.setdefault(seg_id, set()))
+            self._slept_by_id[seg_id] = 0.0
+            self.last_slept_s = 0.0
         budget = self.unit_budget_s if budget_s is None else float(budget_s)
         deadline = _time.monotonic() + budget
         step_list = self.steps(base_voice, len(text))
@@ -424,40 +459,54 @@ class _Ladder:
         for index, (step, step_voice) in enumerate(step_list):
             if step in attempted:
                 continue
-            if attempted or index > 0:
-                # bound the in-step wait by both the config and the budget
+            tries_allowed = (
+                1 + self.direct_retries
+                if (step == STEP_DIRECT and len(text) <= self.max_chars)
+                else 1
+            )
+            for try_idx in range(tries_allowed):
+                if attempted or index > 0 or try_idx > 0:
+                    # bound the in-step wait by both the config and the budget
+                    remaining = deadline - _time.monotonic() + slept_here
+                    if remaining <= 0:
+                        return "deferred", None, None
+                    delay_idx = index if try_idx == 0 else 0
+                    delay = self.delays[min(delay_idx, len(self.delays) - 1)]
+                    slept_here += self._sleep_between_steps(min(delay, remaining), seg_id, step)
+                    with self._state_lock:
+                        self._slept_by_id[seg_id] = slept_here
+                        self.last_slept_s = slept_here
                 remaining = deadline - _time.monotonic() + slept_here
                 if remaining <= 0:
                     return "deferred", None, None
-                delay = self.delays[min(index, len(self.delays) - 1)]
-                slept_here += self._sleep_between_steps(min(delay, remaining), seg_id, step)
-            remaining = deadline - _time.monotonic() + slept_here
-            if remaining <= 0:
-                return "deferred", None, None
-            if self.cancel is not None and self.cancel.is_set():
-                return "deferred", None, None  # the pass loop re-raises with context
-            if seg_id in self.refuse_ids:
-                # Fault `tts:refuse-ids=…` — the service refuses this text
-                # with the one configured voice; the segment stays pending
-                # (deferred rounds, then the budget decision). Same voice
-                # always — no alternate-voice repair path exists.
+                if self.cancel is not None and self.cancel.is_set():
+                    return "deferred", None, None  # the pass loop re-raises with context
+                if seg_id in self.refuse_ids:
+                    # Fault `tts:refuse-ids=…` — the service refuses this text
+                    # with the one configured voice; the segment stays pending
+                    # (deferred rounds, then the budget decision). Same voice
+                    # always — no alternate-voice repair path exists.
+                    timer = Timer()
+                    self._record(
+                        seg_id, text,
+                        TTSFailure("injected fault tts:refuse-ids (service refuses this text + voice)"),
+                        timer.elapsed(), step, step_voice,
+                    )
+                    attempted.add(step)
+                    with self._state_lock:
+                        self.tried.setdefault(seg_id, set()).add(step)
+                    break
                 timer = Timer()
-                self._record(
-                    seg_id, text,
-                    TTSFailure("injected fault tts:refuse-ids (service refuses this text + voice)"),
-                    timer.elapsed(), step, step_voice,
-                )
-                attempted.add(step)
-                continue
-            self.attempt_no[seg_id] = self.attempt_no.get(seg_id, 0) + 1
-            timer = Timer()
-            try:
-                duration, cache_path = self._synthesize_step(entry, text, step_voice, step)
-            except TTSFailure as exc:
-                self._record(seg_id, text, exc, timer.elapsed(), step, step_voice)
-                attempted.add(step)
-                continue
-            return "done", duration, cache_path
+                try:
+                    duration, cache_path = self._synthesize_step(entry, text, step_voice, step)
+                except TTSFailure as exc:
+                    self._record(seg_id, text, exc, timer.elapsed(), step, step_voice)
+                    if try_idx + 1 >= tries_allowed:
+                        attempted.add(step)
+                        with self._state_lock:
+                            self.tried.setdefault(seg_id, set()).add(step)
+                    continue
+                return "done", duration, cache_path
         return state, None, None
 
     def _synthesize_step(self, entry: dict, text: str, voice: str, step: str) -> tuple[float, Path]:
@@ -562,10 +611,11 @@ def _fault_spec(config):
 
 def _budget_decision(config, missing_count: int, waited_total_s: float) -> str:
     """Update 12 task 4: what to do when segments are still missing after
-    the rounds — wait 10 more minutes / switch the WHOLE video to the
-    backup voice / stop. The GUI answers through the dialog; headless runs
-    use `tts.budget_policy`: 'stop' (default) or 'switch_all' (the legacy
-    'fallback' value maps to switch_all)."""
+    the rounds — fill remaining segments with the backup voice / wait 10 more
+    minutes / switch the WHOLE video to the backup voice / stop. The GUI
+    answers through the dialog; headless runs use `tts.budget_policy`:
+    'stop' (default), 'fallback_remaining', or 'switch_all' (legacy
+    'fallback' maps to switch_all)."""
     from dubtool.audio_utils import format_mmss
     from dubtool.tts.fallback import build_backup
 
@@ -577,7 +627,10 @@ def _budget_decision(config, missing_count: int, waited_total_s: float) -> str:
         except Exception:
             backup = None
         fallback_ok = backup is not None
-        backup_name = getattr(backup, "label", None) or getattr(backup, "name", "")
+        backup_name = (
+            getattr(backup, "label", None)
+            or (_backup_label(config, backup) if backup is not None else "")
+        )
         try:
             choice = str(
                 dialog(missing_count, format_mmss(waited_total_s), fallback_ok, backup_name) or ""
@@ -586,29 +639,29 @@ def _budget_decision(config, missing_count: int, waited_total_s: float) -> str:
             log.warning("tts budget dialog failed (%s) — stopping", exc)
             return "stop"
         choice = choice.strip().lower()
-        if choice in ("wait10", "switch_all", "stop"):
+        if choice in ("wait10", "fallback_remaining", "switch_all", "stop"):
             return choice
         if choice == "fallback":  # legacy dialog value
             return "switch_all"
         log.warning("tts budget dialog returned an unknown choice %r — stopping", choice)
         return "stop"
-    # Headless/API run: no dialog. `tts.budget_policy`: stop (default) or
-    # switch_all; the legacy 'fallback' value means switch_all too.
+    # Headless/API run: no dialog. `tts.budget_policy`: stop (default),
+    # fallback_remaining, or switch_all (legacy 'fallback' -> switch_all).
     policy = str(tts_cfg.get("budget_policy", "stop")).lower()
-    if policy in ("switch_all", "fallback"):
+    if policy in ("fallback_remaining", "switch_all", "fallback"):
+        target = "fallback_remaining" if policy == "fallback_remaining" else "switch_all"
         try:
             if build_backup(config) is not None:
                 log.info(
-                    "tts: budget policy — %d segment(s) still missing, switching "
-                    "the whole video to the backup voice (headless run)",
-                    missing_count,
+                    "tts: budget policy %s — %d segment(s) still missing (headless run)",
+                    target, missing_count,
                 )
-                return "switch_all"
+                return target
         except Exception:
             pass
         log.warning(
-            "tts: budget policy switch_all needs a backup voice — none is "
-            "configured; %d segment(s) stay missing", missing_count,
+            "tts: budget policy %s needs a backup voice — none is "
+            "configured; %d segment(s) stay missing", target, missing_count,
         )
         return "stop"
     log.info(
@@ -636,29 +689,44 @@ class VoiceRequestLimiter:
 
     MIN_INTERVAL_S = 5.0
 
-    def __init__(self, max_rps: float = 1.0, cancel=None, name="edge-tts"):
+    def __init__(
+        self,
+        max_rps: float = 1.0,
+        cancel=None,
+        name="edge-tts",
+        floor_interval_s: float = MIN_INTERVAL_S,
+    ):
         self.cancel = cancel
         self.name = name
         self.min_interval_s = 1.0 / max_rps if max_rps and max_rps > 0 else 0.0
+        self.floor_interval_s = (
+            max(self.min_interval_s, float(floor_interval_s))
+            if self.min_interval_s > 0
+            else float(floor_interval_s)
+        )
         self.current_interval_s = self.min_interval_s
+        self._lock = threading.Lock()
         self._last_allowed: float | None = None
+        self._next_allowed: float | None = None
         self.recent: list[bool] = []      # outcomes of the last <= 10 requests
         self.success_streak = 0
         self.refusals = 0
         self.requests = 0
 
     def gate(self) -> None:
-        """Wait until the next request is allowed; visible, bounded waits."""
-        if self.current_interval_s <= 0:
-            return
+        """Reserve the next paced slot atomically and wait outside the lock so
+        concurrent workers overlap network I/O cleanly."""
         import time as _time
 
-        now = _time.monotonic()
-        wait_until = (
-            now if self._last_allowed is None
-            else max(self._last_allowed + self.current_interval_s, now)
-        )
-        remaining = max(0.0, wait_until - now)
+        with self._lock:
+            interval = self.current_interval_s
+            if interval <= 0:
+                return
+            now = _time.monotonic()
+            slot = now if self._next_allowed is None else max(self._next_allowed, now)
+            self._next_allowed = slot + interval
+            self._last_allowed = slot
+        remaining = max(0.0, slot - _time.monotonic())
         if remaining > 0:
             def text(r: float) -> str:
                 return _panel_text(
@@ -668,39 +736,41 @@ class VoiceRequestLimiter:
                 )
 
             heartbeat.sleeping(remaining, text, cancel=self.cancel)
-        self._last_allowed = _time.monotonic()
 
     def record(self, ok: bool) -> None:
         """Feed one request outcome; adjusts the interval when needed."""
-        self.requests += 1
-        self.recent.append(bool(ok))
-        if len(self.recent) > 10:
-            self.recent.pop(0)
-        if ok:
-            self.refusals = self.refusals if False else self.refusals
-            self.success_streak += 1
-            if self.success_streak >= 10 and self.current_interval_s > self.min_interval_s:
-                excess = self.current_interval_s - self.min_interval_s
-                self.current_interval_s = max(
-                    self.min_interval_s, self.current_interval_s - excess / 2.0
-                )
+        announce = False
+        with self._lock:
+            self.requests += 1
+            self.recent.append(bool(ok))
+            if len(self.recent) > 10:
+                self.recent.pop(0)
+            if ok:
+                self.success_streak += 1
+                if self.success_streak >= 10 and self.current_interval_s > self.min_interval_s:
+                    excess = self.current_interval_s - self.min_interval_s
+                    self.current_interval_s = max(
+                        self.min_interval_s, self.current_interval_s - excess / 2.0
+                    )
+                    self.success_streak = 0
+                    announce = True
+            else:
+                self.refusals += 1
                 self.success_streak = 0
-                self._announce()
-            return
-        self.refusals += 1
-        self.success_streak = 0
-        recent = self.recent[-10:]
-        refused_share = (1.0 - (sum(recent) / len(recent))) if recent else 1.0
-        if refused_share > 0.3:
-            new_interval = min(self.MIN_INTERVAL_S, self.current_interval_s * 2.0)
-            if new_interval != self.current_interval_s:
-                self.current_interval_s = new_interval
-                log.warning(
-                    "tts limiter: %.0f%% of the last 10 requests were refused — "
-                    "rate lowered to one request per %.1f s",
-                    refused_share * 100.0, self.current_interval_s,
-                )
-                self._announce()
+                recent = self.recent[-10:]
+                refused_share = (1.0 - (sum(recent) / len(recent))) if recent else 1.0
+                if refused_share > 0.3:
+                    new_interval = min(self.floor_interval_s, self.current_interval_s * 2.0)
+                    if new_interval != self.current_interval_s:
+                        self.current_interval_s = new_interval
+                        log.warning(
+                            "tts limiter: %.0f%% of the last 10 requests were refused — "
+                            "rate lowered to one request per %.1f s",
+                            refused_share * 100.0, self.current_interval_s,
+                        )
+                        announce = True
+        if announce:
+            self._announce()
 
     def _announce(self) -> None:
         try:
@@ -758,10 +828,15 @@ def _set_state_voice(job, voice: str, *, switched: bool = False,
 
 
 def _backup_label(config, provider) -> str:
-    """The human-readable name of the backup voice (recorded in state and
-    the summary when a whole-video switch happens)."""
+    """The human-readable name of the backup voice (recorded in state,
+    the budget dialog, and entry metadata)."""
+    explicit = getattr(provider, "label", None)
+    if explicit:
+        return str(explicit)
     tts_cfg = getattr(config, "tts", {}) or {}
     mode = str(tts_cfg.get("fallback", "none")).lower()
+    if mode == "windows_winrt":
+        return f"Windows ({tts_cfg.get('winrt_voice') or 'mặc định'})"
     if mode == "windows_sapi":
         return f"Windows SAPI ({tts_cfg.get('sapi_voice') or 'mặc định'})"
     if mode == "piper":
@@ -836,8 +911,13 @@ def run(job, config, force: bool = False, cancel=None) -> None:
     from dubtool.dub_units import file_base
 
     tts_cfg = getattr(config, "tts", {}) or {}
+    configured_rps = tts_cfg.get("max_rps")
+    max_rps = float(configured_rps) if configured_rps is not None else 1.5
+    floor_interval_s = float(
+        tts_cfg.get("limiter_floor_interval_s", VoiceRequestLimiter.MIN_INTERVAL_S)
+    )
     limiter = VoiceRequestLimiter(
-        max_rps=float(tts_cfg.get("max_rps", 1.0) or 0.0), cancel=cancel,
+        max_rps=max(0.0, max_rps), cancel=cancel, floor_interval_s=floor_interval_s,
     )
     # Update 12 task 4 item 2: one video-wide voice, recorded in state.json.
     video_voice = _state_voice(job) or str(getattr(config, "tts_voice", ""))
@@ -849,6 +929,22 @@ def run(job, config, force: bool = False, cancel=None) -> None:
     tts.cancel = cancel
     tts.limiter = limiter  # every provider request goes through the gate
     provider = getattr(tts, "provider", None)  # fakes may not have one
+    if provider is not None and hasattr(provider, "cancel"):
+        provider.cancel = cancel
+    if limiter.min_interval_s > 0 and provider is not None:
+        # VoiceRequestLimiter + stage retry/breaker own pacing; avoid stacking
+        # uncancellable per-request cooldown sleeps inside EdgeTTSProvider.
+        if hasattr(provider, "max_cooldown_s"):
+            provider.max_cooldown_s = 0.0
+        if hasattr(provider, "rate_limit_s"):
+            provider.rate_limit_s = 0.0
+    configured_conc = tts_cfg.get("concurrency")
+    if configured_conc is not None:
+        primary_workers = max(1, int(configured_conc))
+    elif getattr(provider, "supports_concurrent", False):
+        primary_workers = 2
+    else:
+        primary_workers = 1
     fault_factory, refuse_ids = _fault_spec(config)
     if fault_factory is not None and provider is not None:
         tts.provider = fault_factory(provider)
@@ -877,15 +973,38 @@ def run(job, config, force: bool = False, cancel=None) -> None:
     finished_count = len(entries) - len(idle)
     breaker_at = max(1, int(tts_cfg.get("breaker_consecutive", 3)))
     breaker_pause_s = float(tts_cfg.get("breaker_pause_s", _BREAKER_PAUSE_S))
+    schedule_raw = tts_cfg.get("breaker_pause_schedule_s")
+    breaker_schedule = (
+        [max(0.0, float(v)) for v in schedule_raw]
+        if schedule_raw
+        else [breaker_pause_s]
+    )
+    breaker_trips = 0
+
+    def _next_breaker_pause() -> float:
+        nonlocal breaker_trips
+        pause = breaker_schedule[min(breaker_trips, len(breaker_schedule) - 1)]
+        breaker_trips += 1
+        return pause
     rounds = max(0, int(tts_cfg.get("retry_rounds", 3)))
-    cooldowns = [float(c) for c in (tts_cfg.get("round_cooldown_s") or [30.0, 60.0, 120.0])]
+    cooldowns = [float(c) for c in (tts_cfg.get("round_cooldown_s") or [15.0, 30.0, 60.0])]
     stage_budget_s = float(tts_cfg.get("stage_budget_s", 600.0))
     budget_policy = str(tts_cfg.get("budget_policy", "ask")).lower()
     state_box: dict = {}
     fallback_uses = 0
     voice_switch: dict | None = None  # Update 12: set when the video-wide voice changed
+    partial_switch: dict | None = None  # set when missing segments used the backup voice
     used_rounds = 0
     started = _time.monotonic()
+    # Count only time lost on failed/deferred attempts, breaker pauses, and retry
+    # cooldowns toward stage_budget_s so healthy segments do not starve retries.
+    failing_wait_s = 0.0
+
+    def sleep_failing(seconds: float, text_fn) -> None:
+        nonlocal failing_wait_s
+        t0 = _time.monotonic()
+        slept = heartbeat.sleeping(seconds, text_fn, cancel=cancel)
+        failing_wait_s += max(float(slept or 0.0), _time.monotonic() - t0)
 
     def heartbeat_row(round_no: int, rounds_total: int) -> None:
         missing = still_missing()
@@ -896,9 +1015,10 @@ def run(job, config, force: bool = False, cancel=None) -> None:
             pending=len(missing), round=round_no, rounds=rounds_total,
         ))
 
-    def seg_pass(entries_list, round_no: int, rounds_total: int) -> None:
+    def seg_pass(entries_list, round_no: int, rounds_total: int, *,
+                 workers: int = 1) -> None:
         """One pass over the given segments with the shared breaker logic."""
-        nonlocal finished_count, fallback_uses
+        nonlocal finished_count, fallback_uses, failing_wait_s
 
         def _apply(entry, duration, cache_path) -> None:
             shutil.copyfile(str(cache_path), str(clip_path(entry)))
@@ -907,39 +1027,141 @@ def run(job, config, force: bool = False, cancel=None) -> None:
             # Update 12 task 3 item 2: the voice that spoke this clip.
             entry["voice"] = str(entry.get("tts_voice") or video_voice)
 
-        consecutive = 0  # a fresh pass starts with the breaker trust reset
-        for entry in entries_list:
-            if cancel is not None and cancel.is_set():
-                raise StageCancelled(f"s4: cancelled by user at segment {entry['id']}")
-            if clip_ok(entry):
-                continue
-            heartbeat_row(round_no, rounds_total)
+        if workers <= 1:
+            consecutive = 0  # a fresh pass starts with the breaker trust reset
+            for entry in entries_list:
+                if cancel is not None and cancel.is_set():
+                    raise StageCancelled(f"s4: cancelled by user at segment {entry['id']}")
+                if clip_ok(entry):
+                    continue
+                heartbeat_row(round_no, rounds_total)
+                t_attempt = _time.monotonic()
+                state, duration, cache_path = ladder.attempt(entry)
+                if state == "done":
+                    _apply(entry, duration, cache_path)
+                    finished_count += 1
+                    consecutive = 0
+                else:
+                    failing_wait_s += max(
+                        ladder.slept_for(int(entry["id"])),
+                        _time.monotonic() - t_attempt,
+                    )
+                    consecutive += 1
+                    if consecutive >= breaker_at:
+                        pause_s = _next_breaker_pause()
+                        log.warning(
+                            "s4: circuit breaker paused the pass after %d segment(s) "
+                            "exhausted the ladder — %.0f s bounded pause, then it continues",
+                            consecutive, pause_s,
+                        )
+                        sleep_failing(
+                            pause_s,
+                            lambda remaining: _panel_text(
+                                "tts.breaker",
+                                "The voice service is not responding — pause {n} s, then continue",
+                                n=int(remaining + 0.999),
+                            ),
+                        )
+                        consecutive = 0
+                log.info("s4: progress %d/%d", position(entry), len(entries))
+                heartbeat_row(round_no, rounds_total)
+                persist()
+            return
+
+        def _attempt_entry(entry):
+            t0 = _time.monotonic()
             state, duration, cache_path = ladder.attempt(entry)
+            return (
+                state,
+                duration,
+                cache_path,
+                _time.monotonic() - t0,
+                ladder.slept_for(int(entry["id"])),
+            )
+
+        def _handle_completed(fut, *, update_streak: bool) -> None:
+            nonlocal finished_count, failing_wait_s, consecutive, after_breaker
+            entry = active.pop(fut)
+            state, duration, cache_path, elapsed_wall, slept = fut.result()
             if state == "done":
                 _apply(entry, duration, cache_path)
                 finished_count += 1
-                consecutive = 0
+                if update_streak:
+                    consecutive = 0
+                    after_breaker = False
             else:
-                consecutive += 1
+                failing_wait_s += max(slept, elapsed_wall)
+                if update_streak:
+                    consecutive += 1
+            log.info("s4: progress %d/%d", position(entry), len(entries))
+            heartbeat_row(round_no, rounds_total)
+            persist()
+
+        pending_q = [e for e in entries_list if not clip_ok(e)]
+        idx_q = 0
+        active: dict = {}
+        consecutive = 0
+        active_workers = workers
+        after_breaker = False
+        heartbeat_row(round_no, rounds_total)
+        pool = ThreadPoolExecutor(max_workers=workers)
+        try:
+            while idx_q < len(pending_q) or active:
+                if cancel is not None and cancel.is_set():
+                    raise StageCancelled(f"s4: cancelled by user during round {round_no}")
+                if (
+                    limiter.min_interval_s > 0
+                    and limiter.current_interval_s > limiter.min_interval_s * 1.05
+                ):
+                    active_workers = 1
+                elif (
+                    not after_breaker
+                    and consecutive == 0
+                    and (limiter.min_interval_s <= 0 or limiter.current_interval_s <= limiter.min_interval_s)
+                ):
+                    active_workers = workers
+
+                if consecutive < breaker_at:
+                    while len(active) < active_workers and idx_q < len(pending_q):
+                        entry = pending_q[idx_q]
+                        idx_q += 1
+                        if clip_ok(entry):
+                            continue
+                        fut = pool.submit(_attempt_entry, entry)
+                        active[fut] = entry
+                if not active:
+                    continue
+                done, _ = wait(active, timeout=0.2, return_when=FIRST_COMPLETED)
+                if not done:
+                    continue
+                for fut in done:
+                    _handle_completed(fut, update_streak=True)
                 if consecutive >= breaker_at:
+                    while active:
+                        if cancel is not None and cancel.is_set():
+                            raise StageCancelled(f"s4: cancelled by user during round {round_no}")
+                        done2, _ = wait(active, timeout=0.2, return_when=FIRST_COMPLETED)
+                        for fut in done2:
+                            _handle_completed(fut, update_streak=False)
+                    pause_s = _next_breaker_pause()
                     log.warning(
                         "s4: circuit breaker paused the pass after %d segment(s) "
                         "exhausted the ladder — %.0f s bounded pause, then it continues",
-                        consecutive, breaker_pause_s,
+                        consecutive, pause_s,
                     )
-                    heartbeat.sleeping(
-                        breaker_pause_s,
+                    sleep_failing(
+                        pause_s,
                         lambda remaining: _panel_text(
                             "tts.breaker",
                             "The voice service is not responding — pause {n} s, then continue",
                             n=int(remaining + 0.999),
                         ),
-                        cancel=cancel,
                     )
                     consecutive = 0
-            log.info("s4: progress %d/%d", position(entry), len(entries))
-            heartbeat_row(round_no, rounds_total)
-            persist()
+                    active_workers = 1
+                    after_breaker = True
+        finally:
+            pool.shutdown(wait=True, cancel_futures=True)
 
     def position(entry) -> int:
         for i, e in enumerate(entries, start=1):
@@ -948,125 +1170,163 @@ def run(job, config, force: bool = False, cancel=None) -> None:
         return len(entries)
 
     log.info(
-        "s4: tts budget policy %s — stage wait budget %.0f s, unit budget %.0f s/segment",
+        "s4: tts budget policy %s — stage wait budget %.0f s, unit budget %.0f s/segment, workers=%d",
         str(tts_cfg.get("budget_policy", "stop")), stage_budget_s,
-        float(tts_cfg.get("unit_budget_s", 60.0)),
+        float(tts_cfg.get("unit_budget_s", 60.0)), primary_workers,
     )
 
-    # ------------------------------------------------------ first pass
-    seg_pass(idle, 1, rounds + 1)
+    try:
+        # ------------------------------------------------------ first pass
+        seg_pass(idle, 1, rounds + 1, workers=primary_workers)
 
-    # --------------------------------------------- deferred retry rounds
-    for round_number in range(rounds):
-        missing = still_missing()
-        if not missing:
-            break
-        if _time.monotonic() - started >= stage_budget_s:
-            # AGU11 3.4: once the stage wait budget is consumed the deferred
-            # rounds do not stretch it silently — the budget decision takes
-            # over (wait 10 min / backup voice / stop).
-            log.info(
-                "s4: stage wait budget (%.0f s) reached — the rounds stop and "
-                "the budget decision takes over", stage_budget_s,
-            )
-            heartbeat.emit(_panel_text(
-                "tts.stage_budget",
-                "The voice stage used its waiting budget ({n} s) — deciding the next step",
-                n=int(stage_budget_s),
-            ))
-            break
-        used_rounds = round_number + 1
-        cooldown = cooldowns[round_number] if round_number < len(cooldowns) else cooldowns[-1]
-        log.info("s4: retry round %d/%d in %.0f s", round_number + 1, rounds, cooldown)
-        heartbeat.sleeping(
-            cooldown,
-            lambda remaining: _panel_text(
-                "tts.round_wait",
-                "The voice service is busy — retrying the missing segments in {n} s",
-                n=int(remaining + 0.999),
-            ),
-            cancel=cancel,
-        )
-        for entry in still_missing():
-            # AGU11: after the service cooldown every repair step is open
-            # again — a round is a fresh ladder, not a rerun of the same
-            # already-tried steps. Cached split parts still get reused.
-            ladder.tried.pop(int(entry["id"]), None)
-        seg_pass(missing, round_number + 1, rounds + 1)
-
-    # ----------------------------------------------------- budget decision
-    missing_final = still_missing()
-    if missing_final:
-        waited_total = _time.monotonic() - started
-        decision = _budget_decision(config, len(missing_final), waited_total)
-        if decision == "wait10":
-            log.info("tts: waiting %.0f s (gated by the budget dialog), then one quick retry pass", _WAIT10_S)
-            heartbeat.sleeping(
-                _WAIT10_S,
-                lambda remaining: _panel_text(
-                    "tts.budget_wait",
-                    "The voice service is unstable — waiting {n} s, then one more repair pass",
-                    n=int(remaining + 0.999),
-                ),
-                cancel=cancel,
-            )
-            for entry in still_missing():
-                ladder.tried.pop(int(entry["id"]), None)  # all steps are open again
-            seg_pass(still_missing(), rounds + 1, rounds + 1)
-            missing_final = still_missing()
-            if missing_final:
-                # AGU11 3.6: the budget decision may be asked again after
-                # the extra (bounded) wait produced nothing.
-                waited_total = _time.monotonic() - started
-                decision = _budget_decision(config, len(missing_final), waited_total)
-                if decision == "wait10":
-                    decision = "stop"  # one gated wait per run
-        if missing_final and decision == "switch_all":
-            # Update 12 task 3 item 3: switching is an explicit, whole-video
-            # action — the backup provider (never the failing primary) and
-            # EVERY unit regenerate, so the finished video keeps exactly one
-            # voice. Clips are cached per (text, voice), so switching back
-            # reuses the earlier clips.
-            backup = build_backup(config)
-            if backup is None:
-                log.warning(
-                    "tts: the backup voice is not available — %d unit(s) stay missing",
-                    len(missing_final),
-                )
-            else:
-                backup_name = _backup_label(config, backup)
-                log.warning(
-                    "tts: %d unit(s) still missing — switching the whole video to "
-                    "the backup voice and regenerating every unit "
-                    "(the old-voice clips stay cached)",
-                    len(missing_final),
+        # --------------------------------------------- deferred retry rounds
+        for round_number in range(rounds):
+            missing = still_missing()
+            if not missing:
+                break
+            if failing_wait_s >= stage_budget_s:
+                # AGU11 3.4: once the stage wait budget is consumed the deferred
+                # rounds do not stretch it silently — the budget decision takes
+                # over (wait 10 min / backup voice / stop).
+                log.info(
+                    "s4: stage wait budget (%.0f s) reached — the rounds stop and "
+                    "the budget decision takes over", stage_budget_s,
                 )
                 heartbeat.emit(_panel_text(
-                    "tts.switching",
-                    "Voice service unstable — switching the whole video to: {voice}",
-                    voice=backup_name,
+                    "tts.stage_budget",
+                    "The voice stage used its waiting budget ({n} s) — deciding the next step",
+                    n=int(stage_budget_s),
                 ))
-                tts.provider = backup  # pure backup: no silent primary retries
-                _measure_clock_offset_once(state_box)
-                for entry in entries:
-                    # A new video-wide voice: every step of the ladder is
-                    # open again; the old-voice clip is retired (the
-                    # content cache keeps (text, old voice) for switching back).
-                    ladder.tried.pop(int(entry["id"]), None)
-                    entry["tts_voice"] = backup_name
-                for entry in entries:
-                    clip_path(entry).unlink(missing_ok=True)
-                seg_pass(list(entries), rounds + 1, rounds + 1)
-                video_voice = backup_name
-                voice_switch = {
-                    "at": _time.strftime("%Y-%m-%dT%H:%M:%S"),
-                    "to": backup_name,
-                }
-                _set_state_voice(
-                    job, backup_name, switched=True,
-                    reason="voice failures exceeded the stage budget",
+                break
+            used_rounds = round_number + 1
+            cooldown = cooldowns[round_number] if round_number < len(cooldowns) else cooldowns[-1]
+            log.info("s4: retry round %d/%d in %.0f s", round_number + 1, rounds, cooldown)
+            sleep_failing(
+                cooldown,
+                lambda remaining: _panel_text(
+                    "tts.round_wait",
+                    "The voice service is busy — retrying the missing segments in {n} s",
+                    n=int(remaining + 0.999),
+                ),
+            )
+            for entry in still_missing():
+                # AGU11: after the service cooldown every repair step is open
+                # again — a round is a fresh ladder, not a rerun of the same
+                # already-tried steps. Cached split parts still get reused.
+                ladder.tried.pop(int(entry["id"]), None)
+            seg_pass(missing, round_number + 1, rounds + 1, workers=1)
+
+        # ----------------------------------------------------- budget decision
+        missing_final = still_missing()
+        if missing_final:
+            waited_total = _time.monotonic() - started
+            decision = _budget_decision(config, len(missing_final), waited_total)
+            if decision == "wait10":
+                log.info("tts: waiting %.0f s (gated by the budget dialog), then one quick retry pass", _WAIT10_S)
+                heartbeat.sleeping(
+                    _WAIT10_S,
+                    lambda remaining: _panel_text(
+                        "tts.budget_wait",
+                        "The voice service is unstable — waiting {n} s, then one more repair pass",
+                        n=int(remaining + 0.999),
+                    ),
+                    cancel=cancel,
                 )
-                persist()
+                for entry in still_missing():
+                    ladder.tried.pop(int(entry["id"]), None)  # all steps are open again
+                seg_pass(still_missing(), rounds + 1, rounds + 1, workers=1)
+                missing_final = still_missing()
+                if missing_final:
+                    # AGU11 3.6: the budget decision may be asked again after
+                    # the extra (bounded) wait produced nothing.
+                    waited_total = _time.monotonic() - started
+                    decision = _budget_decision(config, len(missing_final), waited_total)
+                    if decision == "wait10":
+                        decision = "stop"  # one gated wait per run
+            if missing_final and decision in ("fallback_remaining", "switch_all"):
+                backup = build_backup(config)
+                if backup is None:
+                    log.warning(
+                        "tts: the backup voice is not available — %d unit(s) stay missing",
+                        len(missing_final),
+                    )
+                else:
+                    backup_name = _backup_label(config, backup)
+                    tts.provider = backup  # pure backup: no silent primary retries
+                    tts.limiter = None     # local backup providers don't hit EdgeTTS limits
+                    _measure_clock_offset_once(state_box)
+                    if decision == "fallback_remaining":
+                        # Fill ONLY the still-missing units with the backup voice so
+                        # already-generated primary clips remain untouched.
+                        log.warning(
+                            "tts: %d unit(s) still missing — generating ONLY those missing "
+                            "unit(s) with backup voice %s (%d finished clip(s) keep %s)",
+                            len(missing_final), backup_name, finished_count, video_voice,
+                        )
+                        heartbeat.emit(_panel_text(
+                            "tts.filling_remaining",
+                            "Generating the {n} remaining segments with \"{voice}\" — finished clips stay intact",
+                            n=len(missing_final), voice=backup_name,
+                        ))
+                        targets = list(missing_final)
+                        orig_voices = {int(e["id"]): e.get("tts_voice") for e in targets}
+                        for entry in targets:
+                            ladder.tried.pop(int(entry["id"]), None)
+                            entry["tts_voice"] = backup_name
+                        before_done = finished_count
+                        seg_pass(targets, rounds + 1, rounds + 1, workers=1)
+                        for entry in targets:
+                            if not clip_ok(entry):
+                                prev = orig_voices.get(int(entry["id"]))
+                                if prev is None:
+                                    entry.pop("tts_voice", None)
+                                else:
+                                    entry["tts_voice"] = prev
+                        recovered = max(0, finished_count - before_done)
+                        fallback_uses += recovered
+                        if recovered > 0:
+                            partial_switch = {
+                                "at": _time.strftime("%Y-%m-%dT%H:%M:%S"),
+                                "to": backup_name,
+                                "count": recovered,
+                            }
+                        persist()
+                    else:
+                        # Update 12 task 3 item 3: whole-video switch regenerates EVERY unit
+                        # so the finished video keeps one voice.
+                        log.warning(
+                            "tts: %d unit(s) still missing — switching the whole video to "
+                            "the backup voice and regenerating every unit "
+                            "(the old-voice clips stay cached)",
+                            len(missing_final),
+                        )
+                        heartbeat.emit(_panel_text(
+                            "tts.switching",
+                            "Voice service unstable — switching the whole video to: {voice}",
+                            voice=backup_name,
+                        ))
+                        for entry in entries:
+                            ladder.tried.pop(int(entry["id"]), None)
+                            entry["tts_voice"] = backup_name
+                        for entry in entries:
+                            clip_path(entry).unlink(missing_ok=True)
+                        seg_pass(list(entries), rounds + 1, rounds + 1, workers=1)
+                        video_voice = backup_name
+                        voice_switch = {
+                            "at": _time.strftime("%Y-%m-%dT%H:%M:%S"),
+                            "to": backup_name,
+                        }
+                        _set_state_voice(
+                            job, backup_name, switched=True,
+                            reason="voice failures exceeded the stage budget",
+                        )
+                        persist()
+    finally:
+        if provider is not None and hasattr(provider, "close"):
+            try:
+                provider.close()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------ finish
     persist()
@@ -1077,9 +1337,13 @@ def run(job, config, force: bool = False, cancel=None) -> None:
             sorted({e["id"] for e in final_missing}), finished_count
         )
     # Update 12 task 3 item 5: the summary states the video-wide voice
-    # (and, when a switch happened, when and why).
+    # (and, when a switch or partial backup happened, when and why).
+    summary_voice = (
+        f"{video_voice} (+{partial_switch['count']} {partial_switch['to']})"
+        if partial_switch else video_voice
+    )
     heartbeat.emit(_panel_text(
-        "tts.voice_summary", "Voice: {voice}", voice=video_voice,
+        "tts.voice_summary", "Voice: {voice}", voice=summary_voice,
     ))
     if voice_switch:
         log.info(
@@ -1087,8 +1351,15 @@ def run(job, config, force: bool = False, cancel=None) -> None:
             "exceeded the stage budget; every unit was regenerated with it",
             voice_switch["to"], voice_switch["at"],
         )
+    elif partial_switch:
+        log.info(
+            "s4: %d missing unit(s) were filled with %s at %s; the remaining "
+            "units kept %s",
+            partial_switch["count"], partial_switch["to"],
+            partial_switch["at"], video_voice,
+        )
     distinct_voices = {e.get("voice") for e in entries if e.get("voice")}
-    if len(distinct_voices) > 1 and not voice_switch:
+    if len(distinct_voices) > 1 and not voice_switch and not partial_switch:
         log.warning(
             "s4: unexpected mixed voices in the finished job: %s",
             sorted(v for v in distinct_voices if v),
@@ -1131,28 +1402,35 @@ def regenerate_tts(job, config, ids: list[int], force: bool = True) -> None:
     tts = build_tts(config, cache_dir)
     id_set = set(int(i) for i in ids)
     regenerated = 0
-    for entry in entries:
-        if entry["id"] not in id_set:
-            continue
-        if not entry.get("vi"):
-            raise RuntimeError(f"retts: entry id={entry['id']} has no Vietnamese text")
-        timer = Timer()
-        try:
-            duration, cache_path = tts.synthesize(entry)
-        except TTSFailure as exc:
-            failures.record(entry["id"], 1, entry["vi"], exc, timer.elapsed())
-            raise
-        shutil.copyfile(str(cache_path), str(job.tts_dir / f"{file_base(entry, mode)}.mp3"))
-        entry["tts_duration"] = round(duration, 3)
-        entry["fit_status"] = "pending"
-        entry["voice"] = str(entry.get("tts_voice") or getattr(config, "tts_voice", ""))
-        regenerated += 1
-        if records is None:
-            write_json(job.translated_path, entries)
-        else:
-            from dubtool.dub_units import write_dub_units
+    try:
+        for entry in entries:
+            if entry["id"] not in id_set:
+                continue
+            if not entry.get("vi"):
+                raise RuntimeError(f"retts: entry id={entry['id']} has no Vietnamese text")
+            timer = Timer()
+            try:
+                duration, cache_path = tts.synthesize(entry)
+            except TTSFailure as exc:
+                failures.record(entry["id"], 1, entry["vi"], exc, timer.elapsed())
+                raise
+            shutil.copyfile(str(cache_path), str(job.tts_dir / f"{file_base(entry, mode)}.mp3"))
+            entry["tts_duration"] = round(duration, 3)
+            entry["fit_status"] = "pending"
+            entry["voice"] = str(entry.get("tts_voice") or getattr(config, "tts_voice", ""))
+            regenerated += 1
+            if records is None:
+                write_json(job.translated_path, entries)
+            else:
+                from dubtool.dub_units import write_dub_units
 
-            write_dub_units(job, records)
+                write_dub_units(job, records)
+    finally:
+        if hasattr(tts.provider, "close"):
+            try:
+                tts.provider.close()
+            except Exception:
+                pass
     # Drop stale fitted clips so s5 refits these ids.
     for entry_id in id_set:
         base = "u" if records is not None else ""

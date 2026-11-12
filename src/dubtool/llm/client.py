@@ -471,10 +471,11 @@ class LLMClient:
         BudgetExhausted BEFORE any network call when the run is out."""
         budget = self._budget
         if budget is not None and not budget.try_consume():
-            log.warning(
-                "llm: request budget used up (%d requests) — stopping LLM calls "
-                "for this run", budget.limit
-            )
+            if getattr(budget, "claim_exhausted_log", lambda: True)():
+                log.warning(
+                    "llm: request budget used up (%d requests) — stopping LLM calls "
+                    "for this run", budget.limit
+                )
             raise budget_mod.BudgetExhausted(
                 f"LLM request budget used up ({budget.limit} requests this run)"
             )
@@ -621,9 +622,9 @@ class LLMClient:
                     self.provider.name, exc, min(retry_after, 600.0),
                 )
                 _panel("llm.rate_pause", n=int(min(retry_after, 600.0)))
-            except InternalLLMError:
-                # AGENT_UPDATE_7.md 4.3: deterministic — fails immediately,
-                # never retried, never reported as a connection problem.
+            except (InternalLLMError, budget_mod.BudgetExhausted):
+                # AGENT_UPDATE_7.md 4.3: deterministic / run-budget errors fail
+                # immediately, never retried, never wrapped as connection errors.
                 raise
             except (LLMError, ConnectionError, OSError) as exc:
                 last_error = exc
@@ -745,10 +746,21 @@ class LLMClient:
                     "llm %s rate limit (%s): %s",
                     self.provider.name, kind, exc,
                 )
+                if outcome == "switched":
+                    # Another healthy key is available: switch immediately even
+                    # on per-minute 429 instead of stalling all keys on a global
+                    # model pause.
+                    continue
+                if outcome == "fallback":
+                    # No key remains for the selected model — straight to the
+                    # fallback (2.4), no attempt loop and no hour-long wait.
+                    self._handle_overload(quota_gone=True)  # raises per policy
+                    self.provider.raise_exhausted()
                 if kind == "minute":
-                    # A per-minute 429 pauses EVERY request to this model
-                    # until the delay passes (a global pause) — with no key
-                    # rotation for a minute limit.
+                    # Every key is now cooling down on per-minute 429: mark the
+                    # shared pause deadline for sibling workers, then fall
+                    # through to wait_for_key() so pool.acquire() is ready when
+                    # we retry (avoids KeyExhaustedError when retry_after < pool cooldown).
                     if pauses_left <= 0:
                         raise LLMError(
                             f"giving up after repeated per-minute rate limits "
@@ -757,16 +769,6 @@ class LLMClient:
                     pauses_left -= 1
                     self.rate_pause_until = _time.monotonic() + min(retry_after, 600.0)
                     _panel("llm.rate_pause", n=int(min(retry_after, 600.0)))
-                    continue
-                if outcome == "switched":
-                    # A per-day quota on one key with another key available:
-                    # retry immediately on the fresh key.
-                    continue
-                if outcome == "fallback":
-                    # No key remains for the selected model — straight to the
-                    # fallback (2.4), no attempt loop and no hour-long wait.
-                    self._handle_overload(quota_gone=True)  # raises per policy
-                    self.provider.raise_exhausted()
                 # All keys limited: wait until the earliest cooldown; the
                 # reduced-concurrency callback fires ONLY in this case.
                 if self.on_rate_limit is not None:
@@ -777,9 +779,9 @@ class LLMClient:
                 if self.provider.wait_for_key():
                     continue
                 self.provider.raise_exhausted()
-            except InternalLLMError:
-                # AGENT_UPDATE_7.md 4.3: deterministic — fails immediately,
-                # never retried, never reported as a connection problem.
+            except (InternalLLMError, budget_mod.BudgetExhausted):
+                # AGENT_UPDATE_7.md 4.3: deterministic / run-budget errors fail
+                # immediately, never retried, never reported as connection errors.
                 raise
             except InvalidKeyError as exc:
                 attempt_no += 1
@@ -871,10 +873,8 @@ class LLMClient:
                     _log_raw_reply_diagnosis(text)
                     error_note = error_note_builder(exc)
                     log.warning("llm validation retry: %s", exc)
-            except OverloadFallbackFast:
-                raise
-            except (SplitRequiredError,):
-                raise  # AGU11 2.2: split happens at translate_resilient
+            except (OverloadFallbackFast, SplitRequiredError, budget_mod.BudgetExhausted):
+                raise  # AGU11 2.2: propagate fallback/split/budget errors immediately
             except LLMError as exc:
                 # A transport/side-error while text is still None: the inner
                 # loop already gave up or the outcome is final — propagate.

@@ -6,4 +6,4 @@ diagnostics) reads it. The version is `1.0.<update number>` where N is the
 update being delivered (AGENT_UPDATE_11: 1.0.11).
 """
 
-__version__ = "1.0.13"
+__version__ = "1.0.14"

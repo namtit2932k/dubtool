@@ -22,6 +22,7 @@ Generated data lives **outside** the project by default
 | `scripts/` | developer | build, maintenance, agent | VCS | checkout | no (source) |
 | `packaging/` | developer | build (spec, build_exe.ps1), run presets | VCS | checkout | no (source) |
 | `docs/` | AGU10 7.4 (this file) | nothing (reference) | rewrite by hand | minutes | content-only |
+| `AGENTS.md` | safety rules | coding agents (always-on rule) | VCS | checkout | no (safety rules) |
 | `agent/` | agent, per update | nothing (docs/labels) | not needed | n/a | content-only (kept untracked on purpose, AGU6 8.1) |
 | `.git/` | `git init` | everything (history) | re-clone | minutes | no |
 | `.venv/` | `py -m venv` | Piper run-from-source only | `py -m venv .venv` + `pip install piper-tts` | ~1 min | yes (recreated) |

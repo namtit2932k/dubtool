@@ -17,6 +17,7 @@ Backup options (AGU11 3.5 — the Settings UI lists what actually exists):
 
 from __future__ import annotations
 
+import base64
 import logging
 import wave
 from pathlib import Path
@@ -81,6 +82,7 @@ class PiperTTSProvider:
                 "not found (set tts.piper_voice in config)"
             )
         self.voice_path = path
+        self.label = f"Piper ({path.stem})"
         self._voice = PiperVoice.load(str(path))
         self.rate_limit_s = 0.05
 
@@ -128,6 +130,124 @@ def _powershell(script: str) -> str:
     return out.stdout or ""
 
 
+def detect_winrt_voices() -> list[tuple[str, str]]:
+    """Voices installed for Windows WinRT SpeechSynthesis (OneCore), returned
+    as `(display_name, language)` pairs with Vietnamese voices listed first."""
+    try:
+        lines = _powershell(
+            "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+            "$null=[Windows.Media.SpeechSynthesis.SpeechSynthesizer,"
+            "Windows.Media.SpeechSynthesis,ContentType=WindowsRuntime]; "
+            "[Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices | "
+            'ForEach-Object { "$($_.DisplayName)|$($_.Language)" }'
+        ).splitlines()
+    except Exception:
+        return []
+    voices: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        name, _, lang = line.partition("|")
+        name, lang = name.strip(), lang.strip()
+        if name and name not in seen:
+            seen.add(name)
+            voices.append((name, lang))
+    voices.sort(
+        key=lambda item: (
+            0 if item[1].lower().startswith("vi") else 1,
+            item[1].lower(),
+            item[0].lower(),
+        )
+    )
+    return voices
+
+
+class WindowsWinRtProvider:
+    """Local Windows OneCore / WinRT voice via PowerShell SpeechSynthesizer.
+
+    Unlike legacy .NET System.Speech (`WindowsSapiProvider`), WinRT exposes
+    modern Windows language-pack voices such as Microsoft An (vi-VN) without
+    modifying the registry.
+    """
+
+    name = "windows_winrt"
+    rate_limit_s = 0.05
+
+    def __init__(self, voice_name: str = ""):
+        self.voice_name = str(voice_name or "").strip()
+        installed = detect_winrt_voices()
+        if not installed:
+            raise TTSFailure(
+                "the Windows WinRT speech voices are not available "
+                "(Settings → Time & Language → Speech)"
+            )
+        by_name = {name: lang for name, lang in installed}
+        if self.voice_name and self.voice_name not in by_name:
+            raise TTSFailure(
+                f"Windows WinRT voice {self.voice_name!r} is not installed; "
+                f"installed: {', '.join(list(by_name)[:6])}"
+            )
+        if not self.voice_name:
+            self.voice_name = installed[0][0]
+        lang = by_name.get(self.voice_name, "")
+        self.label = f"{self.voice_name} ({lang})" if lang else self.voice_name
+
+    def synthesize(self, text: str, voice: str, out_path: Path) -> None:
+        out_path = Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        if out_path.suffix.lower() == ".wav":
+            target, convert = out_path, False
+        else:
+            target, convert = out_path.with_suffix(".wav"), True
+        # Base64 UTF-8 prevents shell quoting bugs and Windows codepage mangling
+        # of Vietnamese diacritics across python -> powershell arguments.
+        voice_b64 = base64.b64encode(self.voice_name.encode("utf-8")).decode("ascii")
+        text_b64 = base64.b64encode(str(text).encode("utf-8")).decode("ascii")
+        out_b64 = base64.b64encode(str(target.resolve()).encode("utf-8")).decode("ascii")
+        script = (
+            "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+            "Add-Type -AssemblyName System.Runtime.WindowsRuntime; "
+            "$null=[Windows.Media.SpeechSynthesis.SpeechSynthesizer,"
+            "Windows.Media.SpeechSynthesis,ContentType=WindowsRuntime]; "
+            "$null=[Windows.Storage.Streams.DataReader,"
+            "Windows.Storage.Streams,ContentType=WindowsRuntime]; "
+            "$asTaskGeneric=([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { "
+            "$_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and "
+            "$_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]; "
+            "function Await($WinRtTask,$ResultType){ "
+            "$netTask=$asTaskGeneric.MakeGenericMethod($ResultType).Invoke($null,@($WinRtTask)); "
+            "$netTask.Wait(-1) | Out-Null; $netTask.Result }; "
+            "$synth=New-Object Windows.Media.SpeechSynthesis.SpeechSynthesizer; "
+            f"$vname=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{voice_b64}')); "
+            "$match=[Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices | "
+            "Where-Object { $_.DisplayName -eq $vname } | Select-Object -First 1; "
+            'if (-not $match) { throw "Voice not found: $vname" }; '
+            "$synth.Voice=$match; "
+            f"$txt=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{text_b64}')); "
+            "$stream=Await ($synth.SynthesizeTextToStreamAsync($txt)) "
+            "([Windows.Media.SpeechSynthesis.SpeechSynthesisStream]); "
+            "$size=[uint32]$stream.Size; "
+            "$reader=New-Object Windows.Storage.Streams.DataReader($stream.GetInputStreamAt(0)); "
+            "$null=Await ($reader.LoadAsync($size)) ([uint32]); "
+            "$bytes=New-Object byte[] $size; "
+            "$reader.ReadBytes($bytes); "
+            f"$outPath=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{out_b64}')); "
+            "[IO.File]::WriteAllBytes($outPath,$bytes); "
+            "$reader.Dispose(); $stream.Dispose(); $synth.Dispose()"
+        )
+        try:
+            _powershell(script)
+            if not target.exists() or target.stat().st_size < 400:
+                raise TTSFailure("the Windows WinRT backup produced no audio")
+            if convert:
+                _wav_to_mp3(target, out_path)
+        finally:
+            if convert:
+                target.unlink(missing_ok=True)
+
+
 def detect_sapi_voices() -> list[str]:
     """Names of the voices installed for Windows SAPI (.NET System.Speech)."""
     try:
@@ -163,6 +283,7 @@ class WindowsSapiProvider:
                 f"Windows SAPI voice {self.voice_name!r} is not installed; "
                 f"installed: {', '.join(installed[:6])}"
             )
+        self.label = f"{self.voice_name} (Windows SAPI)" if self.voice_name else "Windows SAPI"
 
     def synthesize(self, text, voice, out_path) -> None:
         out_path = Path(out_path)
@@ -199,20 +320,49 @@ def _wav_to_mp3(src: Path, dst: Path) -> None:
     src.unlink(missing_ok=True)
 
 
+def tts_overrides_for_backup(setting_value: str) -> dict[str, str]:
+    """Map a Settings `tts_backup_voice` string to `config.tts` fields."""
+    raw = str(setting_value or "").strip()
+    if raw.startswith("windows_winrt:"):
+        return {"fallback": "windows_winrt", "winrt_voice": raw.split(":", 1)[1]}
+    if raw.startswith("windows_sapi:"):
+        return {"fallback": "windows_sapi", "sapi_voice": raw.split(":", 1)[1]}
+    if raw.startswith("piper:"):
+        return {"fallback": "piper", "piper_voice": raw.split(":", 1)[1]}
+    return {}
+
+
+def _build_backup_from_cfg(tts_cfg: dict) -> TTSProvider | None:
+    mode = str((tts_cfg or {}).get("fallback", "none")).lower()
+    if mode in ("", "none"):
+        return None
+    if mode == "windows_winrt":
+        return WindowsWinRtProvider(str(tts_cfg.get("winrt_voice", "") or ""))
+    if mode == "windows_sapi":
+        return WindowsSapiProvider(str(tts_cfg.get("sapi_voice", "") or ""))
+    if mode == "piper":
+        return PiperTTSProvider(str(tts_cfg.get("piper_voice", "") or ""))
+    raise TTSFailure(f"unknown tts.fallback value: {mode!r}")
+
+
+def build_backup_for_setting(setting_value: str) -> TTSProvider:
+    """Build a backup provider directly from a Settings `tts_backup_voice`
+    key, raising TTSFailure if unconfigured or unavailable (used by Settings Listen)."""
+    tts_cfg = tts_overrides_for_backup(setting_value)
+    provider = _build_backup_from_cfg(tts_cfg)
+    if provider is None:
+        raise TTSFailure("no backup voice is selected")
+    return provider
+
+
 def build_backup(config) -> TTSProvider | None:
     """The configured backup provider (config tts.fallback), or None when it
     is 'none' or cannot be built (logged — never fatal)."""
-    mode = str((getattr(config, "tts", {}) or {}).get("fallback", "none")).lower()
-    if mode in ("", "none"):
+    tts_cfg = getattr(config, "tts", {}) or {}
+    if str(tts_cfg.get("fallback", "none")).lower() in ("", "none"):
         return None
     try:
-        if mode == "windows_sapi":
-            tts_cfg = getattr(config, "tts", {}) or {}
-            return WindowsSapiProvider(str(tts_cfg.get("sapi_voice", "") or ""))
-        if mode == "piper":
-            voice_path = str((getattr(config, "tts", {}) or {}).get("piper_voice", "") or "")
-            return PiperTTSProvider(voice_path)
-        raise TTSFailure(f"unknown tts.fallback value: {mode!r}")
+        return _build_backup_from_cfg(tts_cfg)
     except Exception as exc:
         log.warning("tts: backup voice unavailable, continuing with the primary only: %s", exc)
         return None

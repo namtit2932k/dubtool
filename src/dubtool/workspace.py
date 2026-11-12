@@ -18,6 +18,7 @@ the build script and the developer/agent tooling.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -143,6 +144,119 @@ def sanitized_tmp_dir(run_id: str) -> Path:
     d = tmp_dir() / "sanitized" / run_id
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+_PROTECTED_ENV_VARS = (
+    "USERPROFILE",
+    "HOME",
+    "SystemRoot",
+    "WINDIR",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+    "ProgramData",
+    "PUBLIC",
+    "ALLUSERSPROFILE",
+    "TEMP",
+    "TMP",
+)
+
+
+def _norm_resolved(p: Path) -> Path:
+    return Path(os.path.normcase(os.path.realpath(os.path.abspath(str(p)))))
+
+
+def protected_system_and_user_paths() -> list[Path]:
+    """Canonical protected user and OS directories (never derived from mutable APPDATA/LOCALAPPDATA)."""
+    home = Path.home()
+    candidates: list[Path] = [
+        home,
+        home.parent,
+        home / "AppData",
+        home / "AppData" / "Local",
+        home / "AppData" / "Roaming",
+        home / "AppData" / "LocalLow",
+        home / "AppData" / "Local" / "Temp",
+        home / "AppData" / "Local" / "DubTool",
+        home / "AppData" / "Local" / "DubTool" / "tmp",
+        home / "AppData" / "Local" / "DubTool" / "tmp" / "sanitized",
+        home / "AppData" / "Roaming" / "DubTool",
+        home / "Desktop",
+        home / "Documents",
+        home / "Downloads",
+    ]
+    for var in _PROTECTED_ENV_VARS:
+        val = os.environ.get(var, "").strip()
+        if val:
+            candidates.append(Path(val))
+    if not getattr(sys, "frozen", False):
+        try:
+            proj = project_root()
+            candidates.append(proj)
+            br = build_root(create=False)
+            candidates.extend([br, br / "tmp", br / "tmp" / "sanitized"])
+        except Exception:
+            pass
+    out: list[Path] = []
+    seen: set[str] = set()
+    for c in candidates:
+        try:
+            norm = _norm_resolved(c)
+        except OSError:
+            continue
+        key = str(norm)
+        if key not in seen:
+            seen.add(key)
+            out.append(norm)
+    return out
+
+
+def assert_not_protected_dir(target: Path, *, action: str = "modify") -> Path:
+    """Refuse operations whose target is a filesystem root, protected user/OS dir, or an ancestor of one."""
+    norm = _norm_resolved(target)
+    if norm == norm.parent or len(norm.parts) <= 2:
+        raise RuntimeError(f"Refusing to {action} filesystem root or top-level path: {target}")
+    for protected in protected_system_and_user_paths():
+        if norm == protected or norm in protected.parents:
+            raise RuntimeError(
+                f"Refusing to {action} protected directory ({protected}): got {target}"
+            )
+    return norm
+
+
+def is_sanitized_subpath(target: Path, *, allow_media_child: bool = False) -> bool:
+    """True only when target is a dedicated child dir inside `<base>/tmp/sanitized/<run_id>`."""
+    try:
+        assert_not_protected_dir(target, action="clean")
+        norm = _norm_resolved(target)
+    except (RuntimeError, OSError):
+        return False
+    is_home = norm.parent.name.lower() == "sanitized" and norm.parent.parent.name.lower() == "tmp" and bool(norm.name)
+    is_media = (
+        allow_media_child
+        and norm.name.lower() == "media"
+        and norm.parent.parent.name.lower() == "sanitized"
+        and norm.parent.parent.parent.name.lower() == "tmp"
+    )
+    return is_home or is_media
+
+
+def safe_rmtree_sanitized(
+    target: Path,
+    *,
+    allow_media_child: bool = False,
+    ignore_errors: bool = False,
+) -> None:
+    """Delete only a verified sanitized temp directory; raises RuntimeError on any protected/unexpected path."""
+    raw = Path(target)
+    if raw.is_symlink():
+        raise RuntimeError(f"Refusing to rmtree a symlink/junction: {target}")
+    if not is_sanitized_subpath(raw, allow_media_child=allow_media_child):
+        raise RuntimeError(
+            f"Refusing to rmtree non-sanitized directory: {target} "
+            "(must live strictly under .../tmp/sanitized/<run_id>)"
+        )
+    if raw.exists():
+        shutil.rmtree(raw, ignore_errors=ignore_errors)
 
 
 def pip_cache_dir() -> Path:

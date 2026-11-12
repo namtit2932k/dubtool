@@ -70,6 +70,7 @@ def run_experiment(
     With the real provider each synthesized file is deleted immediately —
     acceptance only, no storage.
     """
+    owns_provider = provider is None
     if provider is None:
         from dubtool.tts.edge import EdgeTTSProvider
 
@@ -104,22 +105,29 @@ def run_experiment(
         f"voice request experiment: {len(texts)} texts x {len(CONDITIONS)} "
         f"rate conditions (1/s, 1/3s, 1/10s), seed {seed}, voice {voice}"
     )
-    for index, text in enumerate(texts, start=1):
-        if index % 5 == 0 or index == 1:
-            emit(f"progress: text {index}/{len(texts)}")
-        for key in rng.sample(list(CONDITIONS), k=len(CONDITIONS)):
-            interval = CONDITIONS[key]
-            prev = last[key]
-            if prev is not None:
-                now = time.monotonic()
-                if now < prev + interval:
-                    _sleep(prev + interval - now)
-            last[key] = time.monotonic()
-            fire(text, counts[key])
-        if cancel is not None and cancel.is_set():
-            break
-        if index % 10 == 0:
-            fire(CONTROL_TEXT, controls)  # every 10th request: the control
+    try:
+        for index, text in enumerate(texts, start=1):
+            if index % 5 == 0 or index == 1:
+                emit(f"progress: text {index}/{len(texts)}")
+            for key in rng.sample(list(CONDITIONS), k=len(CONDITIONS)):
+                interval = CONDITIONS[key]
+                prev = last[key]
+                if prev is not None:
+                    now = time.monotonic()
+                    if now < prev + interval:
+                        _sleep(prev + interval - now)
+                last[key] = time.monotonic()
+                fire(text, counts[key])
+            if cancel is not None and cancel.is_set():
+                break
+            if index % 10 == 0:
+                fire(CONTROL_TEXT, controls)  # every 10th request: the control
+    finally:
+        if owns_provider and hasattr(provider, "close"):
+            try:
+                provider.close()
+            except Exception:
+                pass
 
     emit("")
     emit("results (interleaved, same time window):")

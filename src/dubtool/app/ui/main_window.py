@@ -1031,6 +1031,14 @@ class MainWindow(QMainWindow):
 
         bridge = DialogBridge(self)  # lives on the GUI thread
 
+        def _run_modal(factory, extract=lambda dlg: dlg.choice):
+            def _open():
+                dlg = factory()
+                dlg.exec()
+                return extract(dlg)
+
+            return bridge.call(_open)
+
         def _fillers_dialog(suggestions):
             from dubtool import fillers as fillers_mod
 
@@ -1038,22 +1046,34 @@ class MainWindow(QMainWindow):
                 **{k.lower(): str(v) for k, v in (fillers_mod.load_settings().get("vocative") or {}).items()},
                 **{k.lower(): str(v) for k, v in (fillers_mod.load_settings().get("discourse") or {}).items()},
             }
-            return bridge.call(lambda: FillersDialog(suggestions, parent=self, defaults=defaults_map).result_choices())
+            return _run_modal(
+                lambda: FillersDialog(suggestions, parent=self, defaults=defaults_map),
+                lambda dlg: dlg.result_choices(),
+            )
 
         def _overload_dialog(info: dict | None = None):
             # AGU11 2.3: the dialog names the currently failing model and
             # how long it has been trying.
             model = str((info or {}).get("model") or options.model)
             waited = int(float((info or {}).get("waited_s") or 0))
-            return bridge.call(
-                lambda: OverloadDialog(model=model, parent=self, waited_s=waited).choice
-            )
+            return _run_modal(lambda: OverloadDialog(model=model, parent=self, waited_s=waited))
 
-        def _tts_budget_dialog(missing: int, waited_mmss: str, fallback_ok: bool):
+        def _tts_budget_dialog(
+            missing: int,
+            waited_mmss: str,
+            fallback_ok: bool,
+            backup_voice: str | None = None,
+        ):
             # AGU11 3.4: voice generation over its wait budget — wait 10 min,
             # backup voice or stop (the worker thread blocks until answered).
-            return bridge.call(
-                lambda: TtsBudgetDialog(int(missing), str(waited_mmss), bool(fallback_ok), parent=self).choice
+            return _run_modal(
+                lambda: TtsBudgetDialog(
+                    int(missing),
+                    str(waited_mmss),
+                    bool(fallback_ok),
+                    backup_voice=backup_voice,
+                    parent=self,
+                )
             )
 
         started = self.service.start(

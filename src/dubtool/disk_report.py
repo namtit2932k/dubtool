@@ -42,7 +42,7 @@ LARGEST_LIMIT = 30
 # 7.4) documents every folder and file; anything NOT in this list is
 # flagged by the report as undocumented. Prefixes end with '*'.
 DOCUMENTED_ENTRIES: tuple[str, ...] = (
-    "src", "tests", "scripts", "packaging", "docs", "agent", ".git",
+    "src", "tests", "scripts", "packaging", "docs", "agent", "AGENTS.md", ".git",
     ".venv", ".venv-build", ".pytest_cache", ".freebuff", ".vscode",
     "sample", "models", "review", "jobs", "screenshots", "vendor",
     "build", "dist", "inventory*", "tmp", "hf-cache", "eval",

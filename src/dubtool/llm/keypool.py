@@ -34,11 +34,11 @@ class KeyPool:
         cooldown_s: float = DEFAULT_COOLDOWN_S,
         max_wait_s: float = DEFAULT_MAX_WAIT_S,
         max_total_wait_s: float = DEFAULT_MAX_TOTAL_WAIT_S,
-        clock: typing.Callable[[], float] = time.monotonic,
-        sleep: typing.Callable[[float], None] = time.sleep,
+        clock: typing.Callable[[], float] | None = None,
+        sleep: typing.Callable[[float], None] | None = None,
         cancel: threading.Event | None = None,
         model: str = "",
-        until_epoch: typing.Callable[[], float] = time.time,
+        until_epoch: typing.Callable[[], float] | None = None,
     ):
         if not keys:
             raise KeyExhaustedError("no API keys provided")
@@ -50,15 +50,15 @@ class KeyPool:
         self._cooldown_s = cooldown_s
         self._max_wait_s = max_wait_s
         self._max_total_wait_s = max_total_wait_s
-        self._clock = clock
-        self._sleep = sleep
+        self._clock = clock if clock is not None else (lambda: time.monotonic())
+        self._sleep = sleep if sleep is not None else (lambda s: time.sleep(s))
         self._cancel = cancel
         self.switches = 0
         # AGENT_UPDATE_6.md 5.3: daily quotas are per key AND per model, so
         # a pool always knows its model and consults the persisted state at
         # construction (fingerprint of the key value, never the value).
         self.model = model
-        self._until_epoch = until_epoch
+        self._until_epoch = until_epoch if until_epoch is not None else (lambda: time.time())
         self._apply_persisted_daily()
 
     def _apply_persisted_daily(self) -> None:

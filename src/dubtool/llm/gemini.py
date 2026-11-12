@@ -103,15 +103,15 @@ class GeminiProvider:
         # SDK call through the HTTP options so a stalled request cannot hang
         # the pipeline for minutes.
         self._timeout_s = timeout_s
+        # Optional UI-facing event callback for user-facing key notices
+        # ("key #2 invalid — skipped"); positions only, never values.
+        self.key_event = None
 
     @property
     def timeout_s(self) -> float | None:
         """AGU8 3.5: the request cap the request logs report (read alias of
         the private _timeout_s)."""
         return self._timeout_s
-        # Optional UI-facing event callback for user-facing key notices
-        # ("key #2 invalid — skipped"); positions only, never values.
-        self.key_event = None
 
     @staticmethod
     def _keys_from_env() -> list[str]:
@@ -159,7 +159,11 @@ class GeminiProvider:
     def handle_rate_limit(self, exc: RateLimitError, used_key: str) -> str:
         """Mark the 429 against the key that failed; return the outcome for
         the client: 'switched' | 'wait' (all keys limited)."""
-        kind, retry_after = classify_rate_limit(exc)
+        parsed_kind, parsed_retry = classify_rate_limit(exc)
+        kind = "daily" if (getattr(exc, "kind", None) == "day" or parsed_kind == "daily") else "per_minute"
+        retry_after = getattr(exc, "retry_after", None)
+        if retry_after is None:
+            retry_after = parsed_retry
         if kind == "daily":
             self.pool.mark_daily_limit(used_key, until_epoch=self._daily_until(exc))
         else:
@@ -173,7 +177,9 @@ class GeminiProvider:
         otherwise the next midnight Pacific (AGU6 5.3)."""
         import time
 
-        _, retry_after = classify_rate_limit(exc)
+        retry_after = getattr(exc, "retry_after", None)
+        if retry_after is None:
+            _, retry_after = classify_rate_limit(exc)
         now = time.time()
         if retry_after is not None:
             # A daily payload's retryDelay can be expressed in seconds (e.g.
@@ -295,6 +301,14 @@ class GeminiProvider:
             thinking_tokens=thinking_tokens if isinstance(thinking_tokens, int) else None,
         )
 
+    def _rate_limit_error(self, exc: Exception, used_key: str) -> RateLimitError:
+        """Preserve the real quota kind ('minute'|'day') and retryDelay on 429."""
+        k, retry_after = classify_rate_limit(exc)
+        kind = "day" if k == "daily" else "minute"
+        return RateLimitError(
+            self.name, str(exc), retry_after=retry_after, key_used=used_key, kind=kind,
+        )
+
     def _map_error(self, exc: Exception, used_key: str) -> Exception:
         """Tag the failure with the key used so the client can mark the pool.
 
@@ -315,7 +329,7 @@ class GeminiProvider:
             return NetworkLLMError(f"the connection to {self.name} failed")
         code = getattr(exc, "code", None)
         if code == 429:
-            return RateLimitError(self.name, str(exc), key_used=used_key)
+            return self._rate_limit_error(exc, used_key)
         if code in (401, 403):
             return InvalidKeyError(
                 f"gemini rejected the API key (401/403): check this key at "
@@ -342,7 +356,7 @@ class GeminiProvider:
                 f"{self.name} server error 504 DEADLINE_EXCEEDED", status=504
             )
         if "RESOURCE_EXHAUSTED" in text or "quota" in text.lower():
-            return RateLimitError(self.name, text, key_used=used_key)
+            return self._rate_limit_error(exc, used_key)
         if "API key" in text or "API_KEY" in text:
             return InvalidKeyError(
                 f"gemini rejected the API key: {text} (the key value is never "

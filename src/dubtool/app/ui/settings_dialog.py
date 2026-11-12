@@ -663,8 +663,15 @@ class SettingsDialog(QDialog):
         # exist on this machine (Windows SAPI, piper models), or None.
         self.backup_combo = QComboBox()
         self.backup_combo.addItem(i18n.tr("settings.fallback_none"), "none")
+        self._backup_winrt: list[tuple[str, str]] = []
         self._backup_sapi = self._backup_piper = []
         self._backup_choices: dict[str, str] = {"none": "none"}
+        try:
+            from dubtool.tts.fallback import detect_winrt_voices
+
+            self._backup_winrt = detect_winrt_voices()
+        except Exception:
+            self._backup_winrt = []
         try:
             from dubtool.tts.fallback import detect_sapi_voices
 
@@ -677,9 +684,14 @@ class SettingsDialog(QDialog):
             self._backup_piper = PiperTTSProvider.detect_piper_voices()
         except Exception:
             self._backup_piper = []
+        for name, lang in self._backup_winrt:
+            key = f"windows_winrt:{name}"
+            tag = f"{lang}, trên máy" if lang else "trên máy"
+            self.backup_combo.addItem(f"Windows — {name} ({tag})", key)
+            self._backup_choices[key] = "none"
         for name in self._backup_sapi:
             key = f"windows_sapi:{name}"
-            self.backup_combo.addItem(f"Windows — {name} (trên máy)", key)
+            self.backup_combo.addItem(f"Windows SAPI — {name} (trên máy)", key)
             self._backup_choices[key] = "none"
         for path in self._backup_piper:
             key = f"piper:{path}"
@@ -882,14 +894,9 @@ class SettingsDialog(QDialog):
             sample_dir = Path(tempfile.gettempdir()) / "dubtool-samples"
             sample_dir.mkdir(parents=True, exist_ok=True)
             out_path = sample_dir / "backup-sample.mp3"
-            if choice.startswith("windows_sapi:"):
-                from dubtool.tts.fallback import WindowsSapiProvider
+            from dubtool.tts.fallback import build_backup_for_setting
 
-                provider = WindowsSapiProvider(choice.split(":", 1)[1])
-            else:
-                from dubtool.tts.fallback import PiperTTSProvider
-
-                provider = PiperTTSProvider(choice.split(":", 1)[1])
+            provider = build_backup_for_setting(choice)
             provider.synthesize(
                 "Xin chào, đây là bản nghe thử của giọng đọc dự phòng.", "", out_path,
             )

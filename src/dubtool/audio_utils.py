@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import threading
 from pathlib import Path
 
 from dubtool import proc
@@ -233,6 +234,7 @@ class MediaCache:
 
     def __init__(self, job_dir: Path | None = None):
         self.path = (job_dir / "durations.json") if job_dir else None
+        self._lock = threading.Lock()
         self._mem: dict[str, float] = {}
         if self.path and self.path.exists():
             try:
@@ -257,20 +259,28 @@ class MediaCache:
         """Duration of `path`, cached. Raises on failure (as probe_duration)."""
         path = Path(path)
         key = self._key(path, root)
-        if key in self._mem:
-            return self._mem[key]
+        with self._lock:
+            if key in self._mem:
+                return self._mem[key]
         duration = probe_duration(path)
-        self._mem[key] = duration
-        self.save()
+        with self._lock:
+            self._mem[key] = duration
+            self._save_locked()
         return duration
 
     def save(self) -> None:
+        with self._lock:
+            self._save_locked()
+
+    def _save_locked(self) -> None:
         if self.path is None:
             return
         try:
-            self.path.write_text(
+            tmp = self.path.with_name(f"~{self.path.name}.{threading.get_ident()}.tmp")
+            tmp.write_text(
                 json.dumps(self._mem, ensure_ascii=False, indent=2), encoding="utf-8"
             )
+            tmp.replace(self.path)
         except OSError:
             pass
 

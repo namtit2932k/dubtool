@@ -150,7 +150,7 @@ def run_units_parallel(
         while True:
             _check_cancel()
             with lock:
-                while len(active) < workers:
+                while first_error is None and len(active) < workers:
                     chunk = cut_chunk()
                     if chunk is None:
                         break
@@ -173,6 +173,8 @@ def run_units_parallel(
                 except RateLimitError as exc:
                     with lock:
                         pending_units = list(chunk) + pending_units
+                    if first_error is not None:
+                        continue
                     # Update 12 2.2: after any 429 the concurrency drops to
                     # 1; five consecutive successes raise it by one again.
                     workers = 1
@@ -217,9 +219,9 @@ def run_units_parallel(
                     )
     finally:
         pool.shutdown(wait=True)  # in-flight chunks finish (resume-safe)
+    if first_error is not None:
+        raise first_error
     if pending_units:
         raise RuntimeError(
             f"s3: {len(pending_units)} unit(s) did not complete after repeated rate limits"
         )
-    if first_error is not None:
-        raise first_error
