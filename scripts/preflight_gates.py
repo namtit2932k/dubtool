@@ -38,12 +38,16 @@ FORBIDDEN_PREFIXES = ("jobs/", "sample/", "dist/", "build/", "vendor/",
 
 
 def tracked_files() -> list[str]:
-    out = _git("ls-files", "--cached")
+    out = _git("-c", "core.quotePath=false", "ls-files", "--cached")
     return [line for line in out.splitlines() if line]
 
 
 def blob_content(path: str) -> bytes:
-    return _git("show", f":{path}").encode("utf-8", errors="surrogateescape")
+    done = proc.run(["git", "-c", "core.quotePath=false", "show", f":{path}"],
+                    cwd=str(ROOT), text=False)
+    if done.returncode != 0:
+        raise RuntimeError(f"git show failed for {path}")
+    return done.stdout
 
 
 def stored_key_values() -> list[bytes]:

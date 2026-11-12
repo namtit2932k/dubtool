@@ -1,7 +1,7 @@
-DubTool screenshots - 1.0.11
-git: (info not available — not built here)
-built (UTC):  2026-11-04 18:23:31 (from BUILD_INFO.txt is absent)
-build id: (source run, no BUILD_INFO.txt)
+DubTool screenshots - 1.0.14
+git: 63c85a1
+built (UTC): 2026-11-12 13:12:40
+build id: Update 14 (63c85a1)
 images:       from the packaged exe (DubTool.exe --screenshots), platform: windows — the REAL interface
 scale:        1.0 (QT_SCALE_FACTOR unset when 1.0)
 window sizes: 760x600, 900x700, 1100x800

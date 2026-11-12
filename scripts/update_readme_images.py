@@ -64,6 +64,10 @@ def main() -> int:
             raise SystemExit(f"{src} is {size} bytes (> {MAX_BYTES}); compress it first")
         shutil.copyfile(src, dest)
         print(f"  {src_name} -> docs/images/{dest_name} ({size} bytes)")
+    index_src = src_dir / "INDEX.txt"
+    if index_src.is_file():
+        shutil.copyfile(index_src, IMAGES / "INDEX.txt")
+        print(f"  INDEX.txt -> docs/images/INDEX.txt ({index_src.stat().st_size} bytes)")
     if missing:
         print("MISSING (not copied):", ", ".join(missing))
         return 1
