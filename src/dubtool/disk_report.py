@@ -409,7 +409,7 @@ def build_report(project: Path, budget_mb: int, build_root: Path | None = None,
     # .freebuff folder actually is (sanitized-run homes of old verification
     # runs, not agent session data; no verification writes there anymore).
     lines.append("")
-    lines.append("== legacy folders and .freebuff (AGENT_UPDATE_11 items 1/8) ==")
+    lines.append("== legacy folders and .freebuff ==")
     try:
         from dubtool.app.paths import legacy_jobs_dir, legacy_models_dir
 
@@ -427,10 +427,10 @@ def build_report(project: Path, budget_mb: int, build_root: Path | None = None,
             size = sum(f.stat().st_size for f in freebuff_dir.rglob("*") if f.is_file())
         except Exception:
             size = 0
-        lines.append(f"  .freebuff/: {_mb(size)} — sanitized-run HOME folders of past verification runs (duplicate model downloads likely). It is not agent session data; since AGENT_UPDATE_11 item 3 no verification run writes here — sanitized homes go to <build root>/tmp/ and are removed when the run ends.")
+        lines.append(f"  .freebuff/: {_mb(size)} — sanitized-run HOME folders of past verification runs (duplicate model downloads likely). It is not agent session data; no verification run writes here — sanitized homes go to <build root>/tmp/ and are removed when the run ends.")
 
     lines.append("")
-    lines.append("== git facts (task 6.4; cleanup commands are quoted in the report only) ==")
+    lines.append("== git facts (cleanup commands are quoted in the report only) ==")
     for label, value in git_facts(project):
         lines.append(f"  {label}: {value}")
 

@@ -199,17 +199,15 @@ def test_split_respects_90_chars_for_every_fixture_text():
 def test_budget_dialog_texts_exist_in_both_languages():
     from dubtool.app import i18n
 
-    for lang in (i18n.VI, i18n.EN) if hasattr(i18n, "VI") else ("vi", "en"):
-        pass
-    texts = i18n._dicts if hasattr(i18n, "_dicts") else {}
+    texts = getattr(i18n, "STRINGS", None) or getattr(i18n, "_dicts", None) or {}
     keys = ["tts.budget_exceeded", "tts.budget.wait10", "tts.budget.fallback",
             "tts.budget.fallback_disabled", "tts.budget.stop", "tts.cooldown",
             "tts.round_wait", "tts.breaker", "tts.budget_wait"]
-    table = texts.get("vi") if isinstance(texts, dict) and "vi" in texts else None
-    if table is None:
-        pytest.skip("i18n internals are not dict-shaped; covered by app tests")
-    for key in keys:
-        assert key in table, key
+    for lang in ("vi", "en"):
+        table = texts.get(lang) if isinstance(texts, dict) else None
+        assert isinstance(table, dict), f"missing i18n language table: {lang}"
+        for key in keys:
+            assert key in table and table[key], f"missing {lang}:{key}"
 
 
 # ------------------------------------------------------------------ 3.6 extras

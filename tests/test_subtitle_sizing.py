@@ -159,9 +159,20 @@ TEXT_80 = (
 
 def _measure_block(png: Path) -> dict:
     import numpy as np
-    from PIL import Image  # pillow may not exist; fall back below
 
-    arr = np.asarray(Image.open(png).convert("L")).astype(int)
+    try:
+        from PIL import Image  # pillow may not exist; fall back below
+
+        arr = np.asarray(Image.open(png).convert("L")).astype(int)
+    except ImportError:
+        from PySide6.QtGui import QImage
+
+        qimg = QImage(str(png)).convertToFormat(QImage.Format.Format_Grayscale8)
+        assert not qimg.isNull(), f"failed to load {png}"
+        w, h = qimg.width(), qimg.height()
+        bpl = qimg.bytesPerLine()
+        buf = np.frombuffer(qimg.constBits(), dtype=np.uint8).reshape((h, bpl))
+        arr = buf[:, :w].astype(int)
     rows = np.where(arr.max(axis=1) > 40)[0]
     cols = np.where(arr.max(axis=0) > 40)[0]
     if len(rows) == 0:
@@ -207,12 +218,20 @@ def _render_one_frame(tmp_path: Path, size: str, text: str, font_dirs, max_line_
 
 @pytest.mark.parametrize("size", ["1920x1080", "1280x720", "1080x1920"])
 def test_render_text_block_geometry(size):
-    if shutil.which("ffmpeg") is None:
+    if shutil.which("ffmpeg") is None and not Path(audio_utils.ffmpeg_bin()).is_file():
         pytest.skip("ffmpeg not available")
+    has_img = False
     try:
         import PIL  # noqa: F401
+        has_img = True
     except ImportError:
-        pytest.skip("pillow not available")
+        try:
+            from PySide6.QtGui import QImage  # noqa: F401
+            has_img = True
+        except ImportError:
+            pass
+    if not has_img:
+        pytest.skip("neither pillow nor PySide6 QImage available")
     font_dirs = subs.font_search_dirs()
     if not any(d.is_dir() for d in font_dirs):
         pytest.skip("no system font directory on this machine")

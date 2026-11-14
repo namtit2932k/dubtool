@@ -14,7 +14,7 @@
 #  - the PyInstaller work dir is deleted after success unless -KeepBuild.
 #  - dist/ keeps only the newest DubTool folder and the newest zip.
 
-param([switch]$KeepBuild, [switch]$SkipTests, [switch]$ZipOnly)
+param([switch]$KeepBuild, [switch]$SkipTests, [switch]$ZipOnly, [switch]$SkipScreenshots)
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -44,6 +44,26 @@ $updateLine = (Get-Content (Join-Path $root "packaging\update_number.txt") -Raw)
 if (-not ($updateLine -match '^\d+$')) { throw "packaging/update_number.txt must contain just the update number, got '$updateLine'" }
 $update = $updateLine
 $version = "1.0.$update"
+
+# AGENT_UPDATE_15 Task 1: refuse a dirty tree and record full 40-char HEAD commit
+$git = ""
+if (Test-Path (Join-Path $root ".git")) {
+    $dirty = & git -C $root status --porcelain
+    if ($LASTEXITCODE -ne 0) { throw "git status failed in $root" }
+    if (-not [string]::IsNullOrWhiteSpace(($dirty -join "`n"))) {
+        throw "Refusing to build from a dirty working tree:`n$($dirty -join "`n")"
+    }
+    $gitOut = & git -C $root rev-parse HEAD
+    if ($LASTEXITCODE -ne 0 -or -not $gitOut) { throw "git rev-parse HEAD failed in $root" }
+    $git = ([string]$gitOut).Trim()
+} elseif (-not [string]::IsNullOrWhiteSpace($env:DUBTOOL_GIT_HEAD)) {
+    $git = $env:DUBTOOL_GIT_HEAD.Trim()
+} else {
+    throw "Cannot determine clean 40-char Git commit hash (no .git and no DUBTOOL_GIT_HEAD)"
+}
+if (-not ($git -match '^[0-9a-f]{40}$')) {
+    throw "Expected 40-char Git commit hash, got '$git'"
+}
 $buildId = "Update $update ($git)"
 # AGU10 task 2.2: one version source + one build root. The venv, the pip
 # cache, the PyInstaller work dir and dist/ all live in the build root;
@@ -155,19 +175,18 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed" }
     $tmpAppDir = Join-Path $tmpDist "DubTool"
 
-    # 4. Docs into the temp output
-    Write-Host "== [4/6] documentation"
+    # 4. Docs and licenses into the temp output
+    Write-Host "== [4/6] documentation & licenses"
     Copy-Item "packaging/THIRD_PARTY.md" -Destination $tmpAppDir -Force
     Copy-Item "README_BUILD.md" -Destination $tmpAppDir -Force
     Copy-Item "packaging/README_APP.md" -Destination $tmpAppDir -Force -ErrorAction SilentlyContinue
-    # AGU7 task 5: the build identity next to the exe; --version and the
-    # About dialog print the same build id line.
+    $licDest = Join-Path $tmpAppDir "licenses"
+    New-Item -ItemType Directory -Force -Path $licDest | Out-Null
+    Copy-Item "packaging/licenses/*" -Destination $licDest -Recurse -Force
+    # AGU7 task 5 + AGU15 task 1: the build identity next to the exe with full 40-char HEAD
     $exePath = Join-Path $tmpAppDir "DubTool.exe"
     $sha = (Get-FileHash $exePath -Algorithm SHA256).Hash.ToLower()
     $stamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss")
-    $git = "no-repo"
-    $gitOut = & git -C $root rev-parse --short HEAD 2>$null
-    if ($LASTEXITCODE -eq 0 -and $gitOut) { $git = ([string]$gitOut).Trim() }
     $buildId = "Update $update ($git)"
     $buildLines = @(
         "update: $update",
@@ -179,10 +198,19 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
     )
     Set-Content -Path (Join-Path $tmpAppDir "BUILD_INFO.txt") -Value $buildLines -Encoding UTF8
 
-    # 5. Verify the bundled ffmpeg/config.yaml landed. ffprobe.exe is deliberately
+    # 5. Verify the bundled ffmpeg/config.yaml/licenses landed. ffprobe.exe is deliberately
     #    NOT shipped since AGU9 task 8 (probing runs in-process via PyAV).
     Write-Host "== [5/6] structure check"
-    foreach ($p in @("_internal\vendor\ffmpeg.exe", "_internal\config.yaml", "DubTool.exe")) {
+    foreach ($p in @(
+        "_internal\vendor\ffmpeg.exe",
+        "_internal\config.yaml",
+        "DubTool.exe",
+        "THIRD_PARTY.md",
+        "licenses\GPL-3.0.txt",
+        "licenses\LGPL-3.0.txt",
+        "licenses\OFL-NotoSans.txt",
+        "licenses\THIRD_PARTY_NOTICES.txt"
+    )) {
         if (-not (Test-Path (Join-Path $tmpAppDir $p))) { throw "missing $p in the build" }
     }
     if (Test-Path (Join-Path $tmpAppDir "_internal\vendor\ffprobe.exe")) {
@@ -199,11 +227,14 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
     }
     Remove-Item -Recurse -Force $tmpDist
 
-    # 6. Release zip + keep only the newest artifacts
+    # 6. Release zip + SHA256SUMS.txt + keep only the newest artifacts
     Write-Host "== [6/6] zip + dist housekeeping"
     $zip = Join-Path $distDir "DubTool-$version-win64.zip"
     if (Test-Path $zip) { Remove-Item $zip -Force }
     Compress-Archive -Path $appDir/* -DestinationPath $zip
+    $zipHash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+    $sumsPath = Join-Path $distDir "SHA256SUMS.txt"
+    Set-Content -Path $sumsPath -Value "$zipHash  $(Split-Path -Leaf $zip)" -Encoding UTF8
     # AGU10 task 5.6: -ZipOnly deletes the unpacked folder after zipping.
     if ($ZipOnly) {
         Remove-Item -Recurse -Force $appDir
@@ -212,7 +243,7 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
     # Keep only the newest dist folder artifacts: remove other zips except
     # the one just written and any stray content that is not the app dir.
     Get-ChildItem $distDir |
-      Where-Object { $_.Name -ne "DubTool" -and $_.Name -ne (Split-Path -Leaf $zip) } |
+      Where-Object { $_.Name -ne "DubTool" -and $_.Name -ne (Split-Path -Leaf $zip) -and $_.Name -ne "SHA256SUMS.txt" } |
       Remove-Item -Recurse -Force
 
     if (-not $KeepBuild) {
@@ -228,32 +259,36 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
     # asserts the set against this exe's BUILD_INFO.txt. Done after the
     # tests gate on purpose: the PNGs must prove the exe that was just
     # promoted, not a previous one.
-    Write-Host "== [7/6] screenshots from the fresh exe"
-    $buildIdFull = "Update $update ($git)"
-    $slug = ($buildIdFull.ToLower() -replace " ", "_") -replace "[()]", ""
-    $shotsRoot = Join-Path $buildRoot "screenshots"
-    New-Item -ItemType Directory -Force -Path $shotsRoot | Out-Null
-    $shotDir = Join-Path $shotsRoot $slug
-    if (Test-Path $shotDir) { Remove-Item -Recurse -Force $shotDir }
-    # A GUI-subsystem exe does not block PS `&` — wait explicitly.
-    $ssProc = Start-Process -FilePath (Join-Path $appDir "DubTool.exe") `
-      -ArgumentList "--screenshots", $shotDir -Wait -NoNewWindow -PassThru
-    if ($ssProc.ExitCode -ne 0) { throw "screenshot generation failed ($($ssProc.ExitCode))" }
-    Get-ChildItem $shotsRoot -Directory |
-      Where-Object { $_.FullName -ne $shotDir } |
-      Remove-Item -Recurse -Force
-    Write-Host "shots:  $shotDir"
-    & $py -m pytest tests/test_screenshots.py -q
-    if ($LASTEXITCODE -ne 0) { throw "screenshot set check failed" }
+    if (-not $SkipScreenshots) {
+        Write-Host "== [7/6] screenshots from the fresh exe"
+        $buildIdFull = "Update $update ($git)"
+        $slug = ($buildIdFull.ToLower() -replace " ", "_") -replace "[()]", ""
+        $shotsRoot = Join-Path $buildRoot "screenshots"
+        New-Item -ItemType Directory -Force -Path $shotsRoot | Out-Null
+        $shotDir = Join-Path $shotsRoot $slug
+        if (Test-Path $shotDir) { Remove-Item -Recurse -Force $shotDir }
+        # A GUI-subsystem exe does not block PS `&` — wait explicitly.
+        $ssProc = Start-Process -FilePath (Join-Path $appDir "DubTool.exe") `
+          -ArgumentList "--screenshots", $shotDir -Wait -NoNewWindow -PassThru
+        if ($ssProc.ExitCode -ne 0) { throw "screenshot generation failed ($($ssProc.ExitCode))" }
+        Get-ChildItem $shotsRoot -Directory |
+          Where-Object { $_.FullName -ne $shotDir } |
+          Remove-Item -Recurse -Force
+        Write-Host "shots:  $shotDir"
+        & $py -m pytest tests/test_screenshots.py -q
+        if ($LASTEXITCODE -ne 0) { throw "screenshot set check failed" }
 
-    # 8. README images (B update 9 task 7): copy the chosen states from the
-    # fresh screenshot folder into the tracked docs/images with stable
-    # names, then verify every README link resolves to a tracked file.
-    Write-Host "== [7/6] README images from the fresh set"
-    & $py (Join-Path $root "scripts\update_readme_images.py") $shotDir
-    if ($LASTEXITCODE -ne 0) { throw "README image copy failed" }
-    & $py (Join-Path $root "scripts\check_readme_links.py")
-    if ($LASTEXITCODE -ne 0) { throw "README link check failed" }
+        # 8. README images (B update 9 task 7): copy the chosen states from the
+        # fresh screenshot folder into the tracked docs/images with stable
+        # names, then verify every README link resolves to a tracked file.
+        Write-Host "== [7/6] README images from the fresh set"
+        & $py (Join-Path $root "scripts\update_readme_images.py") $shotDir
+        if ($LASTEXITCODE -ne 0) { throw "README image copy failed" }
+        & $py (Join-Path $root "scripts\check_readme_links.py")
+        if ($LASTEXITCODE -ne 0) { throw "README link check failed" }
+    } else {
+        Write-Host "== [7/6] screenshots skipped (-SkipScreenshots)"
+    }
 }
 finally {
     Pop-Location

@@ -128,6 +128,7 @@ class StageList(QListWidget):
 
     def __init__(self):
         super().__init__()
+        self._states: dict[str, str] = {}
         for stage in STAGES:
             item = QListWidgetItem(self._label(stage))
             item.setData(Qt.ItemDataRole.UserRole, stage)
@@ -142,11 +143,13 @@ class StageList(QListWidget):
         return f"○ {base}"
 
     def setAllPending(self) -> None:
+        self._states = {stage: "pending" for stage in STAGES}
         for row in range(self.count()):
             item = self.item(row)
             item.setText(f"○ {i18n.tr(item.data(Qt.ItemDataRole.UserRole))}")
 
     def update_state(self, stage: str, state: str, done: int | None = None, total: int | None = None) -> None:
+        self._states[stage] = state
         label = i18n.tr(stage) if stage in STAGES else stage
         icon = self.STATE_ICON.get(state, "○")
         text = f"{icon} {label}"

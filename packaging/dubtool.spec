@@ -43,7 +43,7 @@ _vinfo = _vi.VSVersionInfo(
                     _vi.StringStruct("FileVersion", _VERSION),
                     _vi.StringStruct("InternalName", "DubTool"),
                     _vi.StringStruct(
-                        "LegalCopyright", "MIT License - see packaging/THIRD_PARTY.md"
+                        "LegalCopyright", "All rights reserved - see packaging/THIRD_PARTY.md"
                     ),
                     _vi.StringStruct("OriginalFilename", "DubTool.exe"),
                     _vi.StringStruct("ProductName", "DubTool"),
@@ -62,6 +62,7 @@ _txt_version.write_text(str(_vinfo), encoding="utf-8")
 datas = [
     (str(ROOT / "config.yaml"), "."),
     (str(ROOT / "packaging" / "models.yaml"), "packaging"),
+    (str(ROOT / "packaging" / "licenses"), "licenses"),
 ]
 
 # AGU9 task 8: vendor/ is listed file-by-file, NOT as a directory entry —
@@ -69,7 +70,7 @@ datas = [
 # ffprobe.exe filter below never matched and the 121 MB ffprobe build
 # stayed in the shipped folder of the 262f9eb build.
 for _src in _ws.vendor_dir().iterdir():
-    if _src.name.lower() == "ffprobe.exe":
+    if _src.name.lower() in ("ffprobe.exe", "gh"):
         continue
     if _src.is_file():
         datas.append((str(_src), "vendor"))

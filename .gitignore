@@ -90,3 +90,12 @@ cleanup_dryrun.txt
 *.bin
 !tests/fixtures/*.onnx
 !tests/fixtures/*.bin
+
+# Untracked local workspace rules and post-commit generated evidence files
+AGENTS.md
+DOD_REPORT.md
+RELEASE_EVIDENCE.txt
+REPORT_UPDATE_15.md
+REVIEW_NOTES.md
+docs/images/INDEX.txt
+

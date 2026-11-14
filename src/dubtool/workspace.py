@@ -55,11 +55,11 @@ def build_root(create: bool = True) -> Path:
             p = default_build_root()
         p = Path(os.path.abspath(str(p)))
         project = project_root()
-        if p == project or p in project.parents or project in p.parents:
+        if p == project or project in p.parents:
             raise RuntimeError(
                 f"DUBTOOL_BUILD_ROOT must be OUTSIDE the project folder "
                 f"({project}); got {p}. Generated data may never live in "
-                f"the project (AGENT_UPDATE_10.md task 1)."
+                f"the project."
             )
     if create:
         _ensure(p)

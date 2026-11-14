@@ -413,7 +413,7 @@ def load_job(job_id: str, jobs_root: Path | None = None) -> Job:
 # plus any file not listed here as filed under "bulky" — is deleted.
 _LIGHT_KEEP_FILES = {
     "state.json", "transcript.json", "translated.json", "units.json",
-    "schedule.json", "words.json", "quality_report.json",
+    "dub_units.json", "schedule.json", "words.json", "quality_report.json",
     "tts_failures.json", "durations.json", "brief.txt", "profile.csv",
     "pipeline.log", "pipeline.err.log",
 }

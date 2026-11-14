@@ -22,14 +22,69 @@ STATES = ("idle", "video", "running", "finished", "error")
 OVERLAP_EPS = 2  # px tolerated for rounding
 
 
-def _probe_file() -> Path:
-    """An existing file to name as the fake video. Path(__file__) points
-    inside the frozen PYZ archive (not a real file), so prefer the exe."""
-    import sys
+FAKE_VIDEO_PATH = Path(r"C:\Videos\test.mp4")
+FAKE_OUTPUT_DIR = Path(r"C:\Videos\Output")
 
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable)
-    return Path(__file__)
+
+def _probe_file() -> Path:
+    """Fake neutral video path for layout check and screenshots."""
+    return FAKE_VIDEO_PATH
+
+
+def collect_widget_texts(root) -> list[str]:
+    """Return all visible/accessible text strings from widgets under `root`."""
+    from PySide6.QtWidgets import (
+        QAbstractButton,
+        QComboBox,
+        QGroupBox,
+        QLabel,
+        QLineEdit,
+        QPlainTextEdit,
+        QWidget,
+    )
+
+    texts: list[str] = []
+    for w in [root, *root.findChildren(QWidget)]:
+        if isinstance(w, (QLabel, QLineEdit, QAbstractButton)):
+            t = w.text()
+            if t:
+                texts.append(t)
+        elif isinstance(w, QPlainTextEdit):
+            t = w.toPlainText()
+            if t:
+                texts.append(t)
+        elif isinstance(w, QComboBox):
+            t = w.currentText()
+            if t:
+                texts.append(t)
+        elif isinstance(w, QGroupBox):
+            t = w.title()
+            if t:
+                texts.append(t)
+        tip = w.toolTip() if hasattr(w, "toolTip") else ""
+        if tip:
+            texts.append(tip)
+    return texts
+
+
+def assert_masked_paths(win, state: str) -> None:
+    """Assert fake video path, neutral output folder, and no workspace path leaks."""
+    assert str(win.output_dir) == str(FAKE_OUTPUT_DIR), (
+        f"Expected output_dir={FAKE_OUTPUT_DIR!s} in state {state!r}, got {win.output_dir!r}"
+    )
+    assert win.output_edit.text() == str(FAKE_OUTPUT_DIR), (
+        f"Expected output_edit={FAKE_OUTPUT_DIR!s} in state {state!r}, got {win.output_edit.text()!r}"
+    )
+    if state != "idle":
+        assert win.video_path is not None and win.video_path.name == "test.mp4", (
+            f"Expected win.video_path.name == 'test.mp4' in state {state!r}, got {win.video_path!r}"
+        )
+    for txt in collect_widget_texts(win):
+        norm = txt.replace("/", "\\").lower()
+        if "d:\\projects\\vibe" in norm:
+            raise AssertionError(
+                f"Workspace path leaked in state {state!r} widget text: {txt!r}"
+            )
 
 
 def apply_state(win, state: str) -> None:
@@ -42,6 +97,8 @@ def apply_state(win, state: str) -> None:
     win.service.running = state == "running"
     win.video_path = None
     win.video_info.clear()
+    win.output_dir = FAKE_OUTPUT_DIR
+    win.output_edit.setText(str(FAKE_OUTPUT_DIR))
     win.output_warn.clear()
     win.progress_group.reset_for_check()
     # Update 9 task 2/1: the card replaces the drop zone when a video is
@@ -50,17 +107,19 @@ def apply_state(win, state: str) -> None:
     win.drop_zone.show()
     win._busy = False
     win.brief_edit.setReadOnly(False)
-    if state == "video":
+    if state == "idle":
+        win._refresh_buttons()
+    elif state == "video":
         win.video_path = _probe_file()
         win.video_info.setText("test.mp4 · 1.0 min")
         win.drop_zone.hide()
         win.file_card.show_file(win.video_path.name, str(win.video_path))
-        win.output_dir = Path.cwd()
-        win._validate_output()
         win._refresh_buttons()
     elif state == "running":
-        win.output_dir = Path.cwd()
-        win.output_edit.setText(str(win.output_dir))
+        win.video_path = _probe_file()
+        win.video_info.setText("test.mp4 · 1.0 min")
+        win.drop_zone.hide()
+        win.file_card.show_file(win.video_path.name, str(win.video_path))
         win._refresh_buttons()
         win._busy = True
         for w in win._busy_widgets():
@@ -72,29 +131,36 @@ def apply_state(win, state: str) -> None:
             ("s1", "start", -1, -1, ""),
             ("s1", "done", -1, -1, ""),
             ("s2", "start", -1, -1, ""),
-            ("s2", "progress", 40, 92, ""),
+            ("s2", "done", 92, 92, ""),
             ("s3", "start", -1, -1, ""),
             ("s3", "progress", 2, 5, ""),
         ]
         for stage, st, done, total, msg in events:
             win.progress_group.on_progress(stage, st, done, total, msg, 12.0)
     elif state in ("finished", "error"):
+        win.video_path = _probe_file()
+        win.video_info.setText("test.mp4 · 1.0 min")
+        win.drop_zone.hide()
+        win.file_card.show_file(win.video_path.name, str(win.video_path))
         # The busy widgets are re-enabled: the run ended.
         for w in win._busy_widgets():
             w.setEnabled(True)
-        win.output_dir = Path.cwd()
-        win.output_edit.setText(str(win.output_dir))
         win._refresh_buttons()
         win.progress_group.show_running()
         if state == "finished":
             # out_readable present: the success row includes the
             # "M\u1edf b\u1ea3n d\u1ecbch" button (AGENT_UPDATE_7.md task 5).
             win.progress_group.on_finished(
-                DubResult(ok=True, code="ok", out_video=Path("out/ok.mp4"),
-                          out_readable=Path("out/ok_vi_translation.docx"))
+                DubResult(
+                    ok=True,
+                    code="ok",
+                    out_video=FAKE_OUTPUT_DIR / "test_vi.mp4",
+                    out_readable=FAKE_OUTPUT_DIR / "test_vi_translation.docx",
+                )
             )
         else:
             win.progress_group.on_finished(DubResult(ok=False, code="quota"))
+    assert_masked_paths(win, state)
 
 
 def _new_window():

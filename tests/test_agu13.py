@@ -277,3 +277,45 @@ def test_version_1_0_13_consistency():
     update_num = (Path(__file__).resolve().parents[1] / "packaging" / "update_number.txt").read_text().strip()
     assert int(update_num) >= 13
     assert dubtool.__version__ == f"1.0.{update_num}"
+
+
+def test_catalog_labels_have_no_unaccented_phi_and_no_duplicate_suffix(app_window):
+    items = catalog.load()
+    for entry in items.values():
+        assert "phi" not in entry.label.lower(), (
+            f"Catalog label {entry.label!r} for {entry.id} contains unaccented 'phi'"
+        )
+        assert "(trả phí)" not in entry.label.lower()
+
+    combo = app_window.model_combo
+    model = combo.model()
+    paid_sfx = i18n.tr("run.model_paid")
+    no_key_sfx = i18n.tr("run.model_no_key")
+    for row in range(model.rowCount()):
+        item = model.item(row)
+        text = item.text()
+        assert "tra phi" not in text.lower(), f"Unaccented 'tra phi' in dropdown item: {text!r}"
+        assert text.count(paid_sfx) <= 1, f"Duplicate paid suffix in dropdown item: {text!r}"
+        assert text.count(no_key_sfx) <= 1, f"Duplicate no-key suffix in dropdown item: {text!r}"
+
+
+def test_screenshot_states_mask_paths_and_single_active_stage(app_window):
+    from dubtool.app import layout_check
+
+    try:
+        for state in layout_check.STATES:
+            layout_check.apply_state(app_window, state)
+            layout_check.assert_masked_paths(app_window, state)
+            if state == "running":
+                stages_widget = app_window.progress_group.stages
+                active = [
+                    stage
+                    for stage, st in getattr(stages_widget, "_states", {}).items()
+                    if st in ("start", "progress")
+                ]
+                assert active == ["s3"], f"Expected only s3 active in running state, got {active}"
+                assert "2/5" in app_window.progress_group.counter.text()
+    finally:
+        app_window.service.running = False
+        app_window._busy = False
+

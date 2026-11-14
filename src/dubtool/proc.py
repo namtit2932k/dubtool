@@ -114,7 +114,7 @@ def popen(cmd: list[str], *, cwd=None, capture: bool = True,
         raise TypeError("proc.popen/run take a list of args, never a shell string")
     flags, sui = _windows_flags(low_priority, gui)
     kwargs: dict[str, Any] = {
-        "stdin": subprocess.DEVNULL,
+        "stdin": kw.pop("stdin", subprocess.DEVNULL),
         "stdout": kw.pop("stdout", subprocess.PIPE if capture else None),
         "stderr": kw.pop("stderr", subprocess.PIPE if capture else None),
     }
@@ -177,6 +177,8 @@ def run(cmd: list[str], *, cwd=None, capture: bool = True, timeout: float | None
     its tree) when the event is set; the pipeline's StageCancelled is raised
     so the job stays resumable.
     """
+    if input is not None and "stdin" not in kw:
+        kw["stdin"] = subprocess.PIPE
     if cancel is None and timeout is None:
         proc = popen(cmd, cwd=cwd, capture=capture, low_priority=low_priority, gui=gui, **kw)
         out, err = proc.communicate(input=input)
@@ -216,7 +218,7 @@ def run(cmd: list[str], *, cwd=None, capture: bool = True, timeout: float | None
         # same error type subprocess.run raises.
         proc = popen(cmd, cwd=cwd, capture=capture, low_priority=low_priority, gui=gui, **kw)
         try:
-            out, err = proc.communicate(timeout=timeout)
+            out, err = proc.communicate(input=input, timeout=timeout)
         except subprocess.TimeoutExpired:
             _kill_tree(proc.pid)
             try:

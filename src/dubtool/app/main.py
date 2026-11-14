@@ -144,7 +144,7 @@ def _verify_no_tofu(app, family: str) -> list[str]:
 
     metrics = QFontMetrics(QFont(family))
     strings: list[str] = []
-    dicts = getattr(i18n, "_dicts", None)
+    dicts = getattr(i18n, "STRINGS", None) or getattr(i18n, "_dicts", None)
     if isinstance(dicts, dict):
         for table in dicts.values():
             if isinstance(table, dict):
@@ -176,7 +176,12 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     from PySide6.QtWidgets import QApplication
 
     from dubtool.app import i18n, secrets, settings
-    from dubtool.app.layout_check import apply_state
+    from dubtool.app.layout_check import (
+        FAKE_OUTPUT_DIR,
+        apply_state,
+        assert_masked_paths,
+        collect_widget_texts,
+    )
     from dubtool.app.paths import ensure_user_dirs
     from dubtool.app.service import PipelineService
     from dubtool.app.ui.first_run import PrivacyDialog
@@ -216,6 +221,7 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
         for state in ("idle", "video", "running", "finished", "error"):
             apply_state(window, state)
             app.processEvents()
+            assert_masked_paths(window, state)
             window.grab().save(str(out_dir / f"{size[0]}x{size[1]}_{state}.png"))
     window.hide()
 
@@ -228,9 +234,13 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     dialog.setIcon(QW.QMessageBox.Icon.Critical)
     dialog.setWindowTitle("DubTool")
     dialog.setText(_errors.message_for_code("quota"))
+    dialog.setMinimumWidth(600)
     dialog.show()
     app.processEvents()
     dialog.adjustSize()
+    if dialog.width() < 600:
+        dialog.resize(600, max(dialog.height(), 160))
+        app.processEvents()
     dialog.grab().save(str(out_dir / "dialog_error.png"))
     dialog.hide()
 
@@ -239,12 +249,14 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     from dubtool.app.ui.fillers_dialog import OverloadDialog, TtsBudgetDialog
 
     overload = OverloadDialog("gemini-3.8-flash", waited_s=240)  # real model name
+    overload.setMinimumWidth(600)
     overload.show()
     app.processEvents()
     overload.adjustSize()
     overload.grab().save(str(out_dir / "dialog_overload.png"))
     overload.accept()
     tts_budget = TtsBudgetDialog(13, "09:37", True, "Windows SAPI (Hỏa My)")
+    tts_budget.setMinimumWidth(600)
     tts_budget.show()
     app.processEvents()
     tts_budget.adjustSize()
@@ -269,11 +281,16 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     secrets_for_shots._stored_list = lambda *a, **kw: list(fake)
     secrets_for_shots._save_list = lambda *a, **kw: fake.__setitem__(slice(None), list(a[1] if len(a) > 1 else a[0] if a else []))
     settings_dialog = SettingsDialog()
+    settings_dialog.jobs_edit.setText("")
+    settings_dialog.output_edit.setText(str(FAKE_OUTPUT_DIR))
     settings_dialog._badges = {("gemini", 1): "quota", 1: "quota"}  # row 2 shows the quota badge
     settings_dialog._refresh_rows(select=0)  # one key selected
     settings_dialog.show()
     app.processEvents()
     settings_dialog.adjustSize()
+    for txt in collect_widget_texts(settings_dialog):
+        if "d:\\projects\\vibe" in txt.replace("/", "\\").lower():
+            raise RuntimeError(f"Workspace path leaked in SettingsDialog text: {txt!r}")
     settings_dialog.grab().save(str(out_dir / "dialog_settings.png"))
     keys_tab_shot: str | None = None
     for index in range(settings_dialog.tabs.count()):
@@ -298,6 +315,7 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
 
     # Privacy notice
     privacy = PrivacyDialog()
+    privacy.setMinimumWidth(600)
     privacy.show()
     privacy.adjustSize()
     app.processEvents()
@@ -308,6 +326,7 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     from dubtool.app.ui.paid_notice import PaidProviderConfirmDialog
 
     paid_dlg = PaidProviderConfirmDialog(provider_label="OpenAI")
+    paid_dlg.setMinimumWidth(600)
     paid_dlg.show()
     app.processEvents()
     paid_dlg.adjustSize()
@@ -363,6 +382,7 @@ def _write_screenshots_index(out_dir: Path, scale: float) -> None:
     _app = QCoreApplication.instance()
     platform = str(_app.platformName()) if _app is not None else "unknown"
     lines.insert(0, f"DubTool screenshots - {app_version()}")
+    png_names = sorted(p.name for p in out_dir.glob("*.png"))
     lines += [
         "images:       from the packaged exe (DubTool.exe --screenshots), "
         f"platform: {platform} — the REAL interface",
@@ -370,7 +390,9 @@ def _write_screenshots_index(out_dir: Path, scale: float) -> None:
         "window sizes: 760x600, 900x700, 1100x800",
         "states:       idle, video, running, finished (with 'Mo ban dich'), error",
         "dialogs:      error, first-run privacy, Settings (whole dialog + each tab)",
+        "masked paths: yes",
         "notes:        key rows are masked (fake keys); no real key material in any image",
+        "files:        " + ", ".join(png_names),
     ]
     (out_dir / "INDEX.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -875,6 +897,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tts-probe", nargs="?", const="tts_probe_results.json",
                         default=None, metavar="JSON",
                         help="run the interleaved voice-request experiment (same code from source and from the exe) and print the table")
+    parser.add_argument("--tts-probe-ab", nargs=3, default=None, metavar=("OUT_JSON", "START_IDX", "COUNT"),
+                        help="run an interleaved A/B validation slice for Task 4")
     parser.add_argument("--fault", action="append", default=[], metavar="STAGE:SPEC=N",
                         help="debug-only fault injection, e.g. --fault tts:fail-first=6 (debug-only; ignored by the GUI)")
     args = parser.parse_args(argv)
@@ -889,6 +913,12 @@ def main(argv: list[str] | None = None) -> int:
         from dubtool.tts_probe import run_experiment
 
         run_experiment(Config(), out_path=args.tts_probe)
+        return 0
+    if args.tts_probe_ab:
+        from dubtool.tts_probe import run_ab_slice
+
+        out_p, s_idx, cnt = args.tts_probe_ab
+        run_ab_slice(out_p, start_idx=int(s_idx), count=int(cnt))
         return 0
     if args.fault:
         from dubtool import faults as faults_mod

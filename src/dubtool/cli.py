@@ -603,7 +603,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor_p = sub.add_parser("doctor", help="check prerequisites")
     doctor_p.add_argument("--disk", action="store_true",
-                          help="print the read-only disk report (update 10 task 7)")
+                          help="print the read-only disk report")
     doctor_p.set_defaults(func=cmd_doctor)
 
     clean_p = sub.add_parser(

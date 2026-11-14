@@ -1,0 +1,47 @@
+DubTool Third-Party Notices & License Information
+=================================================
+
+Application License Status
+--------------------------
+DubTool: Chưa chọn giấy phép — bảo lưu mọi quyền (No license selected yet — all rights reserved).
+Note: This document records bundled third-party components and their licenses for compliance and transparency; it is not legal advice.
+
+1. FFmpeg (bundled in _internal/vendor/ffmpeg.exe)
+--------------------------------------------------
+- Exact `ffmpeg -version` string:
+  ffmpeg version N-118281-gb76053d8bf-20250111 Copyright (c) 2000-2025 the FFmpeg developers
+  built with gcc 14.2.0 (crosstool-NG 1.26.0.120_4d36f27)
+- Exact `--enable-gpl` configuration line:
+  configuration: --prefix=/ffbuild/prefix --pkg-config-flags=--static --pkg-config=pkg-config --cross-prefix=x86_64-w64-mingw32- --arch=x86_64 --target-os=mingw32 --enable-gpl --enable-version3 --disable-debug --disable-w32threads --enable-pthreads --enable-iconv --enable-zlib --enable-libfreetype --enable-libfribidi --enable-gmp --enable-libxml2 --enable-lzma --enable-fontconfig --enable-libharfbuzz --enable-libvorbis --enable-opencl --disable-libpulse --enable-libvmaf --disable-libxcb --disable-xlib --enable-amf --enable-libaom --enable-libaribb24 --enable-avisynth --enable-chromaprint --enable-libdav1d --enable-libdavs2 --enable-libdvdread --enable-libdvdnav --disable-libfdk-aac --enable-ffnvcodec --enable-cuda-llvm --enable-frei0r --enable-libgme --enable-libkvazaar --enable-libaribcaption --enable-libass --enable-libbluray --enable-libjxl --enable-libmp3lame --enable-libopus --enable-librist --enable-libssh --enable-libtheora --enable-libvpx --enable-libwebp --enable-libzmq --enable-lv2 --enable-libvpl --enable-openal --enable-libopencore-amrnb --enable-libopencore-amrwb --enable-libopenh264 --enable-libopenjpeg --enable-libopenmpt --enable-librav1e --enable-librubberband --enable-schannel --enable-sdl2 --enable-libsoxr --enable-libsrt --enable-libsvtav1 --enable-libtwolame --enable-libuavs3d --disable-libdrm --enable-vaapi --enable-libvidstab --enable-vulkan --enable-libshaderc --enable-libplacebo --disable-libvvenc --enable-libx264 --enable-libx265 --enable-libxavs2 --enable-libxvid --enable-libzimg --enable-libzvbi --extra-cflags=-DLIBTWOLAME_STATIC --extra-cxxflags= --extra-libs=-lgomp --extra-ldflags=-pthread --extra-ldexeflags= --cc=x86_64-w64-mingw32-gcc --cxx=x86_64-w64-mingw32-g++ --ar=x86_64-w64-mingw32-gcc-ar --ranlib=x86_64-w64-mingw32-gcc-ranlib --nm=x86_64-w64-mingw32-gcc-nm --extra-version=20250111
+- Downloaded build URL:
+  https://github.com/BtbN/FFmpeg-Builds/releases (artifact: ffmpeg-N-118281-gb76053d8bf-win64-gpl.zip)
+- Upstream source URL:
+  https://github.com/FFmpeg/FFmpeg/tree/b76053d8bf (https://ffmpeg.org/download.html#repositories)
+- License: GNU General Public License v3.0 or later (see `licenses/GPL-3.0.txt`).
+
+2. Noto Sans Font (bundled in _internal/vendor/fonts/NotoSans.ttf)
+------------------------------------------------------------------
+- Source URL: https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans[wdth,wght].ttf
+- SHA-256: bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d
+- License: SIL Open Font License 1.1 (see `licenses/OFL-NotoSans.txt` and `_internal/vendor/fonts/OFL.txt`).
+
+3. Bundled Python Runtime and Libraries
+---------------------------------------
+- Python Runtime (CPython 3.13): PSF License Version 2
+- PySide6-Essentials (Qt for Python): LGPL-3.0 (see `licenses/LGPL-3.0.txt`)
+- edge-tts: LGPL-3.0 / MIT (see `licenses/LGPL-3.0.txt`). Note: `edge-tts` is an unofficial client interface to Microsoft Edge's online read-aloud service and may be rate-limited or changed by Microsoft at any time.
+- faster-whisper / ctranslate2 / onnxruntime: MIT License (see `licenses/MIT-faster-whisper.txt`)
+- PyAV (`av`): BSD-3-Clause (bindings; see `licenses/BSD-3-PyAV.txt`) + FFmpeg libraries
+- google-genai / tokenizers / huggingface_hub: Apache License 2.0 (see `licenses/Apache-2.0.txt`)
+- openai / anthropic / keyring / python-docx / pydub / pydantic / pyyaml / python-dotenv / psutil / tqdm: MIT / Apache-2.0 / BSD-3-Clause
+- certifi: MPL-2.0
+
+4. License Texts Included in `licenses/` (inside the package & zip)
+-------------------------------------------------------------------
+- `licenses/GPL-3.0.txt` — GNU General Public License v3.0 (FFmpeg GPL build)
+- `licenses/LGPL-3.0.txt` — GNU Lesser General Public License v3.0 (PySide6, edge-tts)
+- `licenses/OFL-NotoSans.txt` — SIL Open Font License 1.1 (Noto Sans font)
+- `licenses/Apache-2.0.txt` — Apache License 2.0 (google-genai, huggingface_hub, tokenizers, openai)
+- `licenses/MIT-faster-whisper.txt` — MIT License (faster-whisper, ctranslate2, onnxruntime, anthropic, etc.)
+- `licenses/BSD-3-PyAV.txt` — BSD 3-Clause License (PyAV)
+- `licenses/THIRD_PARTY_NOTICES.txt` — This summary file

@@ -42,7 +42,7 @@ gemini-3.6-flash:
   verified: ai.google.dev/gemini-api/docs/models (2026-10-26)
 gpt-5.4-nano:
   provider: openai
-  label: GPT-5.4 nano (tra phi)
+  label: GPT-5.4 nano
   paid: true
   structured: json_schema
   reasoning: true
@@ -54,7 +54,7 @@ gpt-5.4-nano:
   verified: platform.openai.com/docs/models (2026-11-05)
 gpt-5.4-mini:
   provider: openai
-  label: GPT-5.4 mini (tra phi)
+  label: GPT-5.4 mini
   paid: true
   structured: json_schema
   reasoning: true
@@ -66,7 +66,7 @@ gpt-5.4-mini:
   verified: platform.openai.com/docs/models (2026-11-05)
 gpt-5.4:
   provider: openai
-  label: GPT-5.4 (tra phi)
+  label: GPT-5.4
   paid: true
   structured: json_schema
   reasoning: true
@@ -78,7 +78,7 @@ gpt-5.4:
   verified: platform.openai.com/docs/models (2026-11-05)
 gpt-5.5:
   provider: openai
-  label: GPT-5.5 (tra phi)
+  label: GPT-5.5
   paid: true
   structured: json_schema
   reasoning: true
@@ -90,7 +90,7 @@ gpt-5.5:
   verified: platform.openai.com/docs/models (2026-11-05)
 claude-haiku-5-5:
   provider: anthropic
-  label: Claude Haiku 5.5 (tra phi)
+  label: Claude Haiku 5.5
   paid: true
   structured: json_schema
   reasoning: false
@@ -101,7 +101,7 @@ claude-haiku-5-5:
   verified: docs.anthropic.com/en/docs/about-claude/models (2026-11-05)
 claude-sonnet-5-5:
   provider: anthropic
-  label: Claude Sonnet 5.5 (tra phi)
+  label: Claude Sonnet 5.5
   paid: true
   structured: json_schema
   reasoning: false
@@ -112,7 +112,7 @@ claude-sonnet-5-5:
   verified: docs.anthropic.com/en/docs/about-claude/models (2026-11-05)
 claude-opus-5-5:
   provider: anthropic
-  label: Claude Opus 5.5 (tra phi)
+  label: Claude Opus 5.5
   paid: true
   structured: json_schema
   reasoning: false

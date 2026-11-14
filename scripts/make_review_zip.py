@@ -40,6 +40,8 @@ ALLOWLIST_TOP_LEVEL_FILES = [
     "AGENT_UPDATE_5.md",
     "README_BUILD.md",
     "REVIEW_NOTES.md",
+    "DOD_REPORT.md",
+    "RELEASE_EVIDENCE.txt",
 ]
 # AGU11 item 4: docs/ travels in the review zip too (WORKSPACE.md,
 # docs/images/ - the README's screenshots - so the images can be checked).

@@ -779,9 +779,9 @@ class MainWindow(QMainWindow):
                 has_key = secrets.has_key()
             for entry in entries:
                 label = entry.display_label
-                if entry.paid:
+                if entry.paid and _PAID_SFX not in label:
                     label += f" {_PAID_SFX}"
-                if not has_key:
+                if not has_key and _NO_KEY_SFX not in label:
                     label += f" {_NO_KEY_SFX}"
                 item = QStandardItem(label)
                 item.setData(entry.id, Qt.ItemDataRole.UserRole)

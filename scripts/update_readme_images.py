@@ -53,6 +53,18 @@ def main() -> int:
     print(f"copying README images from {src_dir}")
     IMAGES.mkdir(parents=True, exist_ok=True)
     missing = []
+    current_set: set[str] = set()
+
+    # Copy all current PNGs from src_dir first
+    for src in sorted(src_dir.glob("*.png")):
+        size = src.stat().st_size
+        if size > MAX_BYTES:
+            raise SystemExit(f"{src} is {size} bytes (> {MAX_BYTES}); compress it first")
+        dest = IMAGES / src.name
+        shutil.copyfile(src, dest)
+        current_set.add(src.name)
+
+    # Ensure CHOSEN canonical README aliases come from their exact mapped sources
     for src_name, dest_name in CHOSEN.items():
         src = src_dir / src_name
         dest = IMAGES / dest_name
@@ -63,11 +75,21 @@ def main() -> int:
         if size > MAX_BYTES:
             raise SystemExit(f"{src} is {size} bytes (> {MAX_BYTES}); compress it first")
         shutil.copyfile(src, dest)
+        current_set.add(dest_name)
         print(f"  {src_name} -> docs/images/{dest_name} ({size} bytes)")
+
     index_src = src_dir / "INDEX.txt"
     if index_src.is_file():
         shutil.copyfile(index_src, IMAGES / "INDEX.txt")
+        current_set.add("INDEX.txt")
         print(f"  INDEX.txt -> docs/images/INDEX.txt ({index_src.stat().st_size} bytes)")
+
+    # Delete any stale file in docs/images/ not part of the current set
+    for existing in sorted(IMAGES.iterdir()):
+        if existing.is_file() and existing.name not in current_set:
+            existing.unlink()
+            print(f"  removed stale docs/images/{existing.name}")
+
     if missing:
         print("MISSING (not copied):", ", ".join(missing))
         return 1
