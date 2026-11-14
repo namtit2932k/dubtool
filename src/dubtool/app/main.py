@@ -234,13 +234,11 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     dialog.setIcon(QW.QMessageBox.Icon.Critical)
     dialog.setWindowTitle("DubTool")
     dialog.setText(_errors.message_for_code("quota"))
+    dialog.setStyleSheet("QLabel { min-width: 520px; }")
     dialog.setMinimumWidth(600)
     dialog.show()
     app.processEvents()
     dialog.adjustSize()
-    if dialog.width() < 600:
-        dialog.resize(600, max(dialog.height(), 160))
-        app.processEvents()
     dialog.grab().save(str(out_dir / "dialog_error.png"))
     dialog.hide()
 
@@ -898,7 +896,7 @@ def main(argv: list[str] | None = None) -> int:
                         default=None, metavar="JSON",
                         help="run the interleaved voice-request experiment (same code from source and from the exe) and print the table")
     parser.add_argument("--tts-probe-ab", nargs=3, default=None, metavar=("OUT_JSON", "START_IDX", "COUNT"),
-                        help="run an interleaved A/B validation slice for Task 4")
+                        help="run an interleaved A/B voice validation slice")
     parser.add_argument("--fault", action="append", default=[], metavar="STAGE:SPEC=N",
                         help="debug-only fault injection, e.g. --fault tts:fail-first=6 (debug-only; ignored by the GUI)")
     args = parser.parse_args(argv)
