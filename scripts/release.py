@@ -262,13 +262,13 @@ def run_pipeline(update_n: int, dry_run: bool = False, skip_build_if_matching: b
 
         logger.log("=== STEP 6: Docs & README Images Sync ===")
         logger.run([sys.executable, "scripts/update_readme_images.py", str(shot_dir)], env=env)
-        # Check if any tracked file in docs/images changed
-        tracked_diff = logger.run(["git", "status", "--porcelain", "--untracked-files=no"], env=env).stdout.strip()
+        # Check if any file in docs/images changed (modified, deleted, or newly synced PNGs)
+        tracked_diff = logger.run(["git", "status", "--porcelain", "--", "docs/images"], env=env).stdout.strip()
         if tracked_diff:
             if loop_idx == 1:
                 raise RuntimeError(f"Tracked files still changed on second loop:\n{tracked_diff}")
-            logger.log(f"Tracked docs/images changed; committing and restarting from Step 1:\n{tracked_diff}")
-            logger.run(["git", "add", "-u", "docs/images"], env=env)
+            logger.log(f"docs/images changed; committing and restarting from Step 1:\n{tracked_diff}")
+            logger.run(["git", "add", "docs/images"], env=env)
             logger.run(["git", "commit", "-m", f"Docs: sync README screenshots for Update {update_n}"], env=env)
             skip_build_if_matching = False
             continue
