@@ -124,7 +124,8 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
     Write-Host "== [1/6] build environment"
     $reqHash = ""
     $enc = [System.Text.Encoding]::UTF8
-    $ms = New-Object System.IO.MemoryStream (, $enc.GetBytes($Pinned))
+    $pinnedNorm = (($Pinned -join "`n") -replace "`r`n", "`n").TrimEnd()
+    $ms = New-Object System.IO.MemoryStream (, $enc.GetBytes($pinnedNorm))
     $reqHash = [BitConverter]::ToString(
         [System.Security.Cryptography.SHA256]::Create().ComputeHash($ms)
     ).Replace("-", "").ToLower()
