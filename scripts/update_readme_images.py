@@ -48,6 +48,39 @@ def newest_folder() -> Path:
     return candidates[0]
 
 
+def _copy_png_if_changed(src: Path, dest: Path) -> bool:
+    """Copy src -> dest unless dest already exists with identical geometry and >=99% identical pixels
+    (suppressing sub-second Windows QProgressBar shimmer phase noise across identical builds)."""
+    if not dest.is_file():
+        shutil.copyfile(src, dest)
+        return True
+    if src.read_bytes() == dest.read_bytes():
+        return False
+    try:
+        from PySide6.QtGui import QImage
+
+        img_a = QImage(str(src))
+        img_b = QImage(str(dest))
+        if not img_a.isNull() and not img_b.isNull():
+            if img_a.width() == img_b.width() and img_a.height() == img_b.height():
+                w, h = img_a.width(), img_a.height()
+                step_x = max(1, w // 100)
+                step_y = max(1, h // 100)
+                total = 0
+                same = 0
+                for y in range(0, h, step_y):
+                    for x in range(0, w, step_x):
+                        total += 1
+                        if img_a.pixel(x, y) == img_b.pixel(x, y):
+                            same += 1
+                if total > 0 and (same / total) >= 0.98:
+                    return False
+    except Exception:
+        pass
+    shutil.copyfile(src, dest)
+    return True
+
+
 def main() -> int:
     src_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else newest_folder()
     print(f"copying README images from {src_dir}")
@@ -55,13 +88,16 @@ def main() -> int:
     missing = []
     current_set: set[str] = set()
 
-    # Copy all current PNGs from src_dir first
+    # Copy all current PNGs from src_dir first (except CHOSEN target names handled below)
+    chosen_targets = set(CHOSEN.values())
     for src in sorted(src_dir.glob("*.png")):
+        if src.name in chosen_targets:
+            continue
         size = src.stat().st_size
         if size > MAX_BYTES:
             raise SystemExit(f"{src} is {size} bytes (> {MAX_BYTES}); compress it first")
         dest = IMAGES / src.name
-        shutil.copyfile(src, dest)
+        _copy_png_if_changed(src, dest)
         current_set.add(src.name)
 
     # Ensure CHOSEN canonical README aliases come from their exact mapped sources
@@ -74,7 +110,7 @@ def main() -> int:
         size = src.stat().st_size
         if size > MAX_BYTES:
             raise SystemExit(f"{src} is {size} bytes (> {MAX_BYTES}); compress it first")
-        shutil.copyfile(src, dest)
+        _copy_png_if_changed(src, dest)
         current_set.add(dest_name)
         print(f"  {src_name} -> docs/images/{dest_name} ({size} bytes)")
 
