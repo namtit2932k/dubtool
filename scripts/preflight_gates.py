@@ -125,7 +125,7 @@ def run_gates(repo: Path = ROOT, quick: bool = False, commits: list[str] | None 
             for f in files
             if f.startswith(FORBIDDEN_PREFIXES)
             or f == ".env"
-            or f.startswith(".env.")
+            or (f.startswith(".env.") and f != ".env.example")
             or "/.env" in f
         ]
         if bad_paths:
