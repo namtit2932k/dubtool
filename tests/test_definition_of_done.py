@@ -22,9 +22,9 @@ if str(ROOT / "scripts") not in sys.path:
 import definition_of_done as dod  # noqa: E402
 
 
-def _make_png(path: Path, width: int = 800, height: int = 600, mostly_white: bool = False) -> None:
+def _make_png(path: Path, width: int = 800, height: int = 600, mostly_white: bool = False, color: tuple[int, int, int] = (40, 60, 90)) -> None:
     img = QImage(width, height, QImage.Format.Format_RGB32)
-    img.fill(QColor(255, 255, 255) if mostly_white else QColor(40, 60, 90))
+    img.fill(QColor(255, 255, 255) if mostly_white else QColor(*color))
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(str(path))
 
@@ -90,8 +90,8 @@ def _setup_valid_tree(tmp_path: Path, update_n: int = 15) -> tuple[Path, Path, s
         "1100x800_finished.png",
         "1100x800_error.png",
     ]
-    for name in req_pngs:
-        _make_png(repo / "docs" / "images" / name, 800, 600, mostly_white=False)
+    for i, name in enumerate(req_pngs):
+        _make_png(repo / "docs" / "images" / name, 800, 600, mostly_white=False, color=(40 + i * 15, 60 + i * 10, 90 + i * 5))
 
     (repo / "README.md").write_text(
         "![r](docs/images/ready.png)\n![ru](docs/images/running.png)\n![f](docs/images/finished.png)\n![s](docs/images/settings_api_keys.png)\n",

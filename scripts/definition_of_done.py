@@ -162,45 +162,72 @@ def check_rule_2_artifacts(repo: Path, build_root: Path, update_n: int) -> tuple
     )
 
 
+def _check_png_dimensions_and_whiteness(png_path: Path) -> tuple[bool, str]:
+    from PySide6.QtGui import QImage
+
+    img = QImage(str(png_path))
+    if img.isNull():
+        return False, f"{png_path.name}: invalid PNG image"
+    w, h = img.width(), img.height()
+    if w < 600:
+        return False, f"{png_path.name}: width {w}px < 600px"
+    # Sample a grid of pixels to ensure image is not mostly white (>=98% white)
+    step_x = max(1, w // 40)
+    step_y = max(1, h // 40)
+    total = 0
+    white = 0
+    for y in range(0, h, step_y):
+        for x in range(0, w, step_x):
+            c = img.pixelColor(x, y)
+            total += 1
+            if c.red() >= 250 and c.green() >= 250 and c.blue() >= 250:
+                white += 1
+    if total > 0 and (white / total) >= 0.98:
+        return False, f"{png_path.name}: mostly white ({white}/{total} sampled pixels)"
+    return True, f"{w}x{h}"
+
+
 def _check_image_contents(images_dir: Path) -> tuple[bool, str]:
     """Check for byte-identical images (except for explicit copies in INDEX.txt)
     and ensure different states have different content."""
-    
+
     # 1. Byte-identical check
     hashes: dict[str, list[str]] = {}
     for p in images_dir.glob("*.png"):
-        if p.name == "INDEX.txt": continue
+        if p.name == "INDEX.txt":
+            continue
         h = _sha256(p)
         hashes.setdefault(h, []).append(p.name)
-    
-    # Allowed copies (hardcoded from requirement)
+
+    # Allowed canonical copies (copies of their sized originals)
     canonical = {"ready.png", "running.png", "finished.png", "settings_api_keys.png"}
-    
+
     for h, names in hashes.items():
         if len(names) > 1:
-            for name in names:
-                if name not in canonical:
-                    return False, f"Byte-identical images found and not canonical: {names}"
-            
+            non_canonical = [n for n in names if n not in canonical]
+            if len(non_canonical) > 1:
+                return False, f"Byte-identical images found and not canonical: {sorted(names)}"
+
     # 2. State vs Content check
-    state_hashes: dict[tuple[str, str], str] = {} # (size, state) -> hash
-    
+    state_hashes: dict[tuple[str, str], str] = {}  # (size, state) -> hash
+
     for p in images_dir.glob("*.png"):
-        if "_" not in p.name or "dialog_" in p.name: continue
-        parts = p.name.split('_')
+        if "_" not in p.name or "dialog_" in p.name:
+            continue
+        parts = p.name.split("_")
         size = parts[0]
         state = parts[1].replace(".png", "")
-        
+
         h = _sha256(p)
-        
+
         # Check all previous hashes for this size
         for (s_size, s_state), s_hash in state_hashes.items():
             if s_size == size and s_state != state:
                 if h == s_hash:
                     return False, f"Different states {s_state} and {state} have identical content ({p.name} and {size}_{s_state}.png)"
-        
+
         state_hashes[(size, state)] = h
-    
+
     return True, "Image content checks passed"
 
 

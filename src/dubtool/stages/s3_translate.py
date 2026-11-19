@@ -493,7 +493,24 @@ def _selected_model(config) -> str | None:
     return getattr(config, "llm_model", None) or None
 
 
-def fast_client(config, pid: str, api_keys, cancel, on_overload=None):
+def _resolved_source_lang_code(job, config) -> str:
+    state = getattr(job, "state", None) if job is not None else None
+    if isinstance(state, dict):
+        sl = state.get("source_language")
+        if isinstance(sl, dict) and sl.get("code"):
+            return str(sl["code"]).lower()
+    asr_cfg = getattr(config, "asr", None) or {}
+    code = str(asr_cfg.get("language") or "en").lower()
+    return "en" if code in ("", "auto") else code
+
+
+def _resolved_source_lang_name(job, config) -> str:
+    from dubtool.stages.s2_transcribe import language_name
+
+    return language_name(_resolved_source_lang_code(job, config))
+
+
+def fast_client(config, pid: str, api_keys, cancel, on_overload=None, job=None):
     """A cheap-model LLMClient for the mechanical steps (punctuation,
     re-translation); its requests count in the shared run budget."""
     llm_cfg = getattr(config, "llm", {}) or {}
@@ -512,7 +529,7 @@ def fast_client(config, pid: str, api_keys, cancel, on_overload=None):
     )
     return LLMClient(
         provider, cancel=cancel, options=options, on_overload=on_overload,
-        source_lang=config.asr.get("language", "English")
+        source_lang=_resolved_source_lang_name(job, config),
     )
 
 
@@ -930,7 +947,7 @@ def run(
         holder["client"] = LLMClient(
             fallback_provider, cancel=cancel, options=client_options,
             on_overload=_overload_callback,
-            source_lang=config.asr.get("language", "English")
+            source_lang=_resolved_source_lang_name(job, config),
         )
         stats["fallback"] = True
         stats["fast_model"] = fallback_provider.model
@@ -951,7 +968,7 @@ def run(
 
     holder: dict = {"client": LLMClient(
         provider, cancel=cancel, options=client_options, on_overload=_overload_callback,
-        source_lang=config.asr.get("language", "English")
+        source_lang=_resolved_source_lang_name(job, config),
     )}
 
     def translate_payloads(payloads, context_payload, label: str,

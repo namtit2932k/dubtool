@@ -221,17 +221,25 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
         for state in ("idle", "video", "running", "finished", "error"):
             apply_state(window, state)
             app.processEvents()
+            if state in ("running", "finished", "error"):
+                window.scroll.verticalScrollBar().setValue(window.scroll.verticalScrollBar().maximum())
+            else:
+                window.scroll.verticalScrollBar().setValue(0)
+            app.processEvents()
             assert_masked_paths(window, state)
-            
+
             # Assertion: finished state
             if state == "finished":
+                assert not window.progress_group.open_btn.isHidden()
+                assert not window.progress_group.play_btn.isHidden()
                 assert not window.progress_group.readable_btn.isHidden()
-            
+
             # Assertion: error state
             if state == "error":
                 assert window.progress_group.cancel_btn.isHidden()
-                # Assuming some error state visual, or just the buttons
-            
+                assert window.progress_group.open_btn.isHidden()
+                assert not window.progress_group.resume_btn.isHidden()
+
             window.grab().save(str(out_dir / f"{size[0]}x{size[1]}_{state}.png"))
     window.hide()
 

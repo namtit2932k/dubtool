@@ -302,18 +302,46 @@ def _postprocess_only(job, config) -> None:
         print(f"s2 postprocess: removed repeat from segment {seg_id}: {removed!r}")
     log.info("s2 postprocess: %d duplicate removals, %d segments remain", len(removals), len(cleaned))
 
+LANGUAGE_NAMES: dict[str, str] = {
+    "en": "English",
+    "vi": "Vietnamese",
+    "ja": "Japanese",
+    "zh": "Chinese",
+    "ko": "Korean",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "ru": "Russian",
+    "pt": "Portuguese",
+    "it": "Italian",
+    "th": "Thai",
+    "hi": "Hindi",
+    "ar": "Arabic",
+    "id": "Indonesian",
+}
+_SPACELESS_LANGS = {"zh", "ja", "th", "lo", "km"}
+
+
+def language_name(code: str | None) -> str:
+    c = (code or "en").lower().strip()
+    if c == "auto" or not c:
+        return "English"
+    return LANGUAGE_NAMES.get(c, c)
+
+
 def _transcribe(model, job, config) -> None:
     """Whisper pass + cleanup + write transcript.json (AGU6 4.2 split)."""
     want_words = bool(config.asr.get("word_timestamps", True))
     lang = config.asr.get("language")
+    effective_lang = lang if lang and lang != "auto" else None
     kwargs: dict[str, Any] = {
-        "language": lang if lang != "auto" else None,
+        "language": effective_lang,
         "vad_filter": True,
         "condition_on_previous_text": bool(
             config.asr.get("condition_on_previous_text", False)
         ),
     }
-    if config.asr.get("initial_prompt"):
+    if config.asr.get("initial_prompt") and (effective_lang in (None, "en")):
         kwargs["initial_prompt"] = config.asr.get("initial_prompt")
     words: list[dict] | None = None
     try:
@@ -337,14 +365,21 @@ def _transcribe(model, job, config) -> None:
     if not segments:
         raise RuntimeError("transcription produced no segments — is the audio silent?")
 
-    cleaned, removals = cleanup_segments(
-        segments, dedupe_min_words=int(config.asr.get("dedupe_min_words", 3))
-    )
-    # Update 12 task 3.6: single boundary-word repeats collapse against the
-    # word timestamps (never for legitimately doubled words).
-    if words:
-        cleaned, boundary_removals = collapse_boundary_word(cleaned, words)
-        removals = removals + boundary_removals
+    resolved_code = (effective_lang or getattr(info, "language", None) or "en").lower()
+    if resolved_code in _SPACELESS_LANGS:
+        cleaned = merge_short(split_long(segments))
+        removals: list[tuple[int, str]] = []
+        for i, seg in enumerate(cleaned):
+            seg["id"] = i
+    else:
+        cleaned, removals = cleanup_segments(
+            segments, dedupe_min_words=int(config.asr.get("dedupe_min_words", 3))
+        )
+        # Update 12 task 3.6: single boundary-word repeats collapse against the
+        # word timestamps (never for legitimately doubled words).
+        if words:
+            cleaned, boundary_removals = collapse_boundary_word(cleaned, words)
+            removals = removals + boundary_removals
     for seg_id, removed in removals:
         log.info("s2: removed repeated words from segment %d: %r", seg_id, removed)
     from dubtool.job import write_json
@@ -354,6 +389,16 @@ def _transcribe(model, job, config) -> None:
         from dubtool.punctuate import write_words
 
         write_words(job, words)
+    if hasattr(job, "state") and isinstance(job.state, dict) and "source_language" not in job.state:
+        job.state["source_language"] = {
+            "code": resolved_code,
+            "name": language_name(resolved_code),
+            "probability": float(getattr(info, "language_probability", 1.0) or 1.0),
+            "method": "manual" if effective_lang else "auto",
+            "windows": [],
+        }
+        if hasattr(job, "save"):
+            job.save()
     log.info(
         "s2: transcribed %d raw -> %d cleaned segments (%.1fs of speech, "
         "lang=%s, words=%s)",
@@ -442,25 +487,44 @@ def run(job, config, force: bool = False) -> None:
             cpu_threads=threads,
         )
 
-        # AGU16 3.2: Language detection (auto)
-        source_lang = config.asr.get("language")
-        if source_lang == "auto":
-            from faster_whisper import WhisperModel
-            # Detection logic: use first 3 segments with VAD to detect
-            # Using the first 3 speech regions for language detection
-            log.info("s2: Language detection: auto-detecting...")
-            segments_info, info = model.detect_language(str(job.audio_path))
-            detected_lang = info.language
-            detected_prob = info.language_probability
-            log.info(f"s2: Language detection: Detected {detected_lang} with prob {detected_prob}")
-            
-            # Update config with detected language
+        # Language detection when set to auto
+        source_lang = (config.asr.get("language") or "auto").strip().lower()
+        min_conf = float(config.asr.get("language_min_confidence", 0.60) or 0.60)
+        if source_lang == "auto" and hasattr(model, "detect_language"):
+            from faster_whisper import decode_audio
+
+            log.info("s2: auto-detecting source language...")
+            audio = decode_audio(str(job.audio_path), sampling_rate=16000)
+            detected_lang, detected_prob, _all_probs = model.detect_language(
+                audio,
+                vad_filter=True,
+                language_detection_segments=3,
+                language_detection_threshold=0.5,
+            )
+            detected_lang = str(detected_lang or "en").lower()
+            detected_prob = float(detected_prob or 0.0)
+            log.info(
+                "s2: detected language=%s (%.1f%%)",
+                detected_lang,
+                detected_prob * 100.0,
+            )
+            if hasattr(job, "state") and isinstance(job.state, dict):
+                job.state["source_language"] = {
+                    "code": detected_lang,
+                    "name": language_name(detected_lang),
+                    "probability": round(detected_prob, 4),
+                    "method": "auto",
+                    "uncertain": detected_prob < min_conf,
+                    "windows": [],
+                }
+                if hasattr(job, "save"):
+                    job.save()
             config.asr["language"] = detected_lang
-            
-            if detected_lang == "vi" and detected_prob >= 0.6:
-                log.info("s2: Video is already Vietnamese. Stopping.")
-                # This needs a mechanism to stop the whole pipeline and offer subtitle-only
-                raise RuntimeError("Video_already_vietnamese")
+            if detected_lang == "vi" and detected_prob >= min_conf:
+                pct = int(round(detected_prob * 100))
+                raise RuntimeError(
+                    f"Video có vẻ đã là tiếng Việt (độ tin cậy {pct}%). Không cần dịch."
+                )
 
         segments = _transcribe(model, job, config)
     finally:

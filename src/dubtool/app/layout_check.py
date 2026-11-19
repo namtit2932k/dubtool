@@ -159,6 +159,7 @@ def apply_state(win, state: str) -> None:
                 )
             )
         else:
+            win.progress_group.on_progress("s3", "error", -1, -1, "quota", 0.0)
             win.progress_group.on_finished(DubResult(ok=False, code="quota"))
     assert_masked_paths(win, state)
 

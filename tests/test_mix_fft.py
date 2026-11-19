@@ -15,11 +15,6 @@ import wave
 
 import numpy as np
 import pytest
-try:
-    import pydub
-    HAS_PYDUB = True
-except ImportError:
-    HAS_PYDUB = False
 
 from dubtool import audio_utils
 
@@ -27,7 +22,6 @@ from dubtool import audio_utils
 @pytest.fixture(scope="module")
 def mixed_wav(tmp_path_factory) -> np.ndarray:
     """Run the real static mix on synthetic WAVs once for the module."""
-    pytest.skip("pydub not installed")
     import pydub  # noqa: F401  # needed by mix_overlays
 
     root = tmp_path_factory.mktemp("mixfft")
@@ -94,7 +88,6 @@ def band_amplitude(x: np.ndarray, rate: int, lo: float, hi: float) -> float:
     return float(4.0 * band.max() / len(x))
 
 
-@pytest.mark.skipif(not HAS_PYDUB, reason="pydub not installed")
 def test_original_tone_present_and_lowered(mixed_wav):
     samples, _ = mixed_wav
     window = samples[: int(2.0 * 44100)]  # 0..2 s: ONLY the 440 Hz original
@@ -109,7 +102,6 @@ def test_original_tone_present_and_lowered(mixed_wav):
     assert abs(peak_hz - 440.0) < 5.0
 
 
-@pytest.mark.skipif(not HAS_PYDUB, reason="pydub not installed")
 def test_dub_tone_present_and_unattenuated(mixed_wav):
     samples, _ = mixed_wav
     window = samples[int(2.2 * 44100): int(3.8 * 44100)]  # 2.2..3.8 s
@@ -124,7 +116,6 @@ def test_dub_tone_present_and_unattenuated(mixed_wav):
     assert amp880 > 3 * amp440
 
 
-@pytest.mark.skipif(not HAS_PYDUB, reason="pydub not installed")
 def test_no_clipping(mixed_wav):
     samples, _ = mixed_wav
     assert float(np.max(np.abs(samples))) <= 0.99
