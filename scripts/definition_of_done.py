@@ -199,8 +199,13 @@ def _check_image_contents(images_dir: Path) -> tuple[bool, str]:
         h = _sha256(p)
         hashes.setdefault(h, []).append(p.name)
 
-    # Allowed canonical copies (copies of their sized originals)
+    # Allowed canonical copies + explicit `copy of <target>` entries in INDEX.txt
     canonical = {"ready.png", "running.png", "finished.png", "settings_api_keys.png"}
+    index_path = images_dir / "INDEX.txt"
+    if index_path.is_file():
+        idx_txt = index_path.read_text(encoding="utf-8", errors="replace")
+        for m in re.finditer(r"^\s*([^\s]+\.png)\s+\([^)]*copy of\s+([^\s)]+\.png)", idx_txt, flags=re.MULTILINE):
+            canonical.add(m.group(1))
 
     for h, names in hashes.items():
         if len(names) > 1:

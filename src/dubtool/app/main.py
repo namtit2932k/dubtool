@@ -431,6 +431,22 @@ def _write_screenshots_index(out_dir: Path, scale: float) -> None:
     platform = str(_app.platformName()) if _app is not None else "unknown"
     lines.insert(0, f"DubTool screenshots - {app_version()}")
     png_names = sorted(p.name for p in out_dir.glob("*.png"))
+    lines += [
+        "images:       from the packaged exe (DubTool.exe --screenshots), "
+        f"platform: {platform} — the REAL interface",
+        f"scale:        {scale} (QT_SCALE_FACTOR unset when 1.0)",
+        "window sizes: 760x600, 900x700, 1100x800",
+        "states:       idle, video, running, finished (with 'Mở bản dịch'), error",
+        "masked paths: yes (input=test.mp4, output=C:\\Users\\User\\Videos\\DubTool)",
+    ]
+    explicit_copies = {
+        "ready.png": "900x700_idle.png",
+        "running.png": "900x700_running.png",
+        "finished.png": "900x700_finished.png",
+        "settings_api_keys.png": "dialog_settings_tab0_Khóa_API.png",
+        "dialog_settings.png": "dialog_settings_tab0_Khóa_API.png",
+        "dialog_settings_keys_gemini.png": "dialog_settings_tab0_Khóa_API.png",
+    }
     lines.append("files:")
     for name in png_names:
         assertion = "none"
@@ -444,8 +460,10 @@ def _write_screenshots_index(out_dir: Path, scale: float) -> None:
             assertion = "result buttons visible"
         elif name == "dialog_error.png":
             assertion = "error dialog visible"
-        lines.append(f"  {name:<40} ({assertion})")
-    
+        copy_of = explicit_copies.get(name)
+        suffix = f"; copy of {copy_of}" if copy_of else ""
+        lines.append(f"  {name:<40} ({assertion}{suffix})")
+
     (out_dir / "INDEX.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
