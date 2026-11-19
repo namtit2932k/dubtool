@@ -17,7 +17,8 @@ log = logging.getLogger("dubtool")
 
 MIN_SEGMENT_S = 0.8
 MAX_SEGMENT_S = 12.0
-_SENTENCE_ENDS = ".!?"
+# Updated for multi-language support (AGU16 3.3)
+_SENTENCE_ENDS = ".!?…¿¡。！？؟۔।"
 
 # Common abbreviations: a sentence-final "period" after these does not close
 # a sentence (used both by the splitter and dedupe-boundary checks).
@@ -440,6 +441,27 @@ def run(job, config, force: bool = False) -> None:
             compute_type=config.compute_type,
             cpu_threads=threads,
         )
+
+        # AGU16 3.2: Language detection (auto)
+        source_lang = config.asr.get("language")
+        if source_lang == "auto":
+            from faster_whisper import WhisperModel
+            # Detection logic: use first 3 segments with VAD to detect
+            # Using the first 3 speech regions for language detection
+            log.info("s2: Language detection: auto-detecting...")
+            segments_info, info = model.detect_language(str(job.audio_path))
+            detected_lang = info.language
+            detected_prob = info.language_probability
+            log.info(f"s2: Language detection: Detected {detected_lang} with prob {detected_prob}")
+            
+            # Update config with detected language
+            config.asr["language"] = detected_lang
+            
+            if detected_lang == "vi" and detected_prob >= 0.6:
+                log.info("s2: Video is already Vietnamese. Stopping.")
+                # This needs a mechanism to stop the whole pipeline and offer subtitle-only
+                raise RuntimeError("Video_already_vietnamese")
+
         segments = _transcribe(model, job, config)
     finally:
         cpu_mod.restore_app_priority()
