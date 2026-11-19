@@ -224,7 +224,7 @@ class FakeCaptureClient:
     last: dict = {}
     built: object = None
 
-    def __new__(cls, provider, cancel=None, options=None, on_overload=None):
+    def __new__(cls, provider, cancel=None, options=None, on_overload=None, source_lang=None):
         cls.last = {"model": provider.model,
                     "policy": options.get("overload_policy")}
         instance = super().__new__(cls)
@@ -237,3 +237,7 @@ class FakeCaptureClient:
 
 class SimpleConfig:
     llm = {"request_timeout_s_fast": 90}
+    asr = {"language": "English"}
+
+    def __init__(self):
+        self.asr = {"language": "English"}

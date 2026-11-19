@@ -183,6 +183,9 @@ def test_edge_provider_reuses_loop_connector_and_honors_cancel(tmp_path, monkeyp
     import concurrent.futures
     import threading
     import time
+    
+    # Try forcing immediate load
+    concurrent.futures.ThreadPoolExecutor
 
     import edge_tts
 

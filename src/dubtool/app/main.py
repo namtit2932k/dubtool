@@ -263,13 +263,20 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     overload.show()
     app.processEvents()
     overload.adjustSize()
+    
+    # Assertion: Overload dialog visible
+    assert overload.isVisible()
     overload.grab().save(str(out_dir / "dialog_overload.png"))
     overload.accept()
+    
     tts_budget = TtsBudgetDialog(13, "09:37", True, "Windows SAPI (Hỏa My)")
     tts_budget.setMinimumWidth(600)
     tts_budget.show()
     app.processEvents()
     tts_budget.adjustSize()
+    
+    # Assertion: TTS budget dialog visible
+    assert tts_budget.isVisible()
     tts_budget.grab().save(str(out_dir / "dialog_tts_budget.png"))
     tts_budget.accept()
 
@@ -346,6 +353,9 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     privacy.show()
     privacy.adjustSize()
     app.processEvents()
+    
+    # Assertion: Privacy dialog visible
+    assert privacy.isVisible()
     privacy.grab().save(str(out_dir / "dialog_first_run.png"))
     privacy.close()
 
@@ -357,6 +367,9 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     paid_dlg.show()
     app.processEvents()
     paid_dlg.adjustSize()
+    
+    # Assertion: Paid notice dialog visible
+    assert paid_dlg.isVisible()
     paid_dlg.grab().save(str(out_dir / "dialog_paid_notice.png"))
     paid_dlg.close()
 

@@ -53,14 +53,12 @@ def fisher_exact_two_sided(a: int, b: int, c: int, d: int) -> float:
 def _merge_bucket(dst: dict, src: dict) -> None:
     dst["requests"] += int(src.get("requests", 0))
     dst["ok"] += int(src.get("ok", 0))
-    dst["handshake_503"] += int(src.get("handshake_503", 0))
-    dst["NoAudioReceived"] += int(src.get("NoAudioReceived", 0))
-    dst["timeout"] += int(src.get("timeout", 0))
-    dst["retried_ok"] += int(src.get("retried_ok", 0))
-    dst["breaker_pauses"] += int(src.get("breaker_pauses", 0))
-    dst["elapsed_s"].extend(src.get("elapsed_s") or [])
+    
+    # Classify failure by root cause as per AGU16 5.1
     for k, v in (src.get("failures_by_kind") or {}).items():
         dst["failures_by_kind"][k] = dst["failures_by_kind"].get(k, 0) + int(v)
+    
+    dst["elapsed_s"].extend(src.get("elapsed_s") or [])
     
     # Merge buckets
     src_buckets = src.get("buckets", {})
@@ -75,13 +73,8 @@ def _new_bucket() -> dict:
     return {
         "requests": 0,
         "ok": 0,
-        "handshake_503": 0,
-        "NoAudioReceived": 0,
-        "timeout": 0,
         "failures_by_kind": {},
         "elapsed_s": [],
-        "retried_ok": 0,
-        "breaker_pauses": 0,
         "buckets": {
             "<=40": {"requests": 0, "ok": 0},
             "41-80": {"requests": 0, "ok": 0},
@@ -95,7 +88,7 @@ def _fmt_other_kinds(b: dict) -> str:
     extra = {
         k: v
         for k, v in sorted((b.get("failures_by_kind") or {}).items())
-        if k not in ("handshake_503", "NoAudioReceived", "timeout") and v > 0
+        if v > 0
     }
     if not extra:
         return "none (0)"
@@ -230,8 +223,8 @@ def run_validation(total_texts: int = 60, slice_size: int = 10, seed: int = 2026
         f"- **Control acceptance:** `{ctrl_total_ok}/{ctrl_total_req}` (`{ctrl_acc:.1f}%`)",
         f"- **Decision rule outcome:** **{decision}**",
         "",
-        "| Environment | Condition | Requests | Accepted (`ok`) | Acceptance (%) | `handshake_503` | `NoAudioReceived` | `timeout` | Other Failure Kinds (by exact name) | Mean / Median Time per Req (s) |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Environment | Condition | Requests | Accepted (`ok`) | Acceptance (%) | Failures (by kind) | Mean / Median Time per Req (s) |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for env_label, env_key in (("1.0.15 Exe", "exe"), ("Source", "source")):
         for cond_label, cond_key in (
@@ -245,7 +238,6 @@ def run_validation(total_texts: int = 60, slice_size: int = 10, seed: int = 2026
             pct = 100.0 * ok / max(1, reqs)
             md_lines.append(
                 f"| {env_label} | {cond_label} | {reqs} | {ok} | {pct:.1f}% | "
-                f"{b['handshake_503']} | {b['NoAudioReceived']} | {b['timeout']} | "
                 f"`{_fmt_other_kinds(b)}` | {_mean_s(b):.3f} s / {_median_s(b):.3f} s |"
             )
 
