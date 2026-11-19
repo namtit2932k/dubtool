@@ -164,9 +164,19 @@ def _sleep(seconds: float) -> None:
 
 
 def classify_exact(exc: Exception) -> str:
-    """Classify a TTS exception by exact kind name (never an 'other' bucket)."""
-    text = f"{type(exc).__name__}: {exc}"
+    """Classify a TTS exception by exact kind name (never an 'other' bucket).
+    Incorporates root cause (__cause__) and context (__context__)."""
+    
+    # Traverse to find the root cause
+    root_exc = exc
+    while root_exc.__cause__:
+        root_exc = root_exc.__cause__
+    if root_exc.__context__:
+        root_exc = root_exc.__context__
+
+    text = f"{type(root_exc).__name__}: {root_exc}"
     low = text.lower()
+    
     if "noaudioreceived" in low:
         return "NoAudioReceived"
     if "503" in text and ("handshake" in low or "invalid response" in low or "wsserverhandshakeerror" in low):
@@ -175,7 +185,7 @@ def classify_exact(exc: Exception) -> str:
         return "timeout"
     if "429" in text:
         return "http_429"
-    return type(exc).__name__
+    return type(root_exc).__name__
 
 
 def run_ab_slice(
@@ -202,6 +212,17 @@ def run_ab_slice(
     provider_b = EdgeTTSProvider(request_timeout_s=45.0, rate_limit_s=0.0)
     provider_ctrl = EdgeTTSProvider(request_timeout_s=45.0, rate_limit_s=0.0)
 
+    def _add_to_bucket(stats, text, ok):
+        length = len(text)
+        if length <= 40: bucket = "<=40"
+        elif length <= 80: bucket = "41-80"
+        elif length <= 120: bucket = "81-120"
+        else: bucket = ">120"
+        
+        stats["buckets"][bucket]["requests"] += 1
+        if ok:
+            stats["buckets"][bucket]["ok"] += 1
+
     def _new_bucket() -> dict:
         return {
             "requests": 0,
@@ -213,6 +234,12 @@ def run_ab_slice(
             "elapsed_s": [],
             "retried_ok": 0,
             "breaker_pauses": 0,
+            "buckets": {
+                "<=40": {"requests": 0, "ok": 0},
+                "41-80": {"requests": 0, "ok": 0},
+                "81-120": {"requests": 0, "ok": 0},
+                ">120": {"requests": 0, "ok": 0},
+            },
         }
 
     stats_a = _new_bucket()

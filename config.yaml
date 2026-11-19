@@ -97,6 +97,8 @@ units:
 
 # ASR post-processing (stage 2)
 asr:
+  language: auto
+  language_min_confidence: 0.60
   dedupe_min_words: 3            # shortest repeated run removed across a boundary
   condition_on_previous_text: false  # passed to faster-whisper for new transcriptions
   word_timestamps: true          # AGU8 4.2: word times -> words.json

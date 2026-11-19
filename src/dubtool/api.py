@@ -38,6 +38,7 @@ class DubOptions:
     save_srt: bool = False
     original_gain_db: float = -14.0
     voice: str = "vi-VN-HoaiMyNeural"
+    video_language: str = "auto"
     keep_level: str = "light"          # none | light | full (AGU10 5.2)
     description: str | None = None     # video brief text (user-supplied)
     translate_concurrency: int | None = None
@@ -364,6 +365,7 @@ def run_dub(
                 "Xin chào viewers, hôm nay chúng ta sẽ cùng tìm hiểu về một chủ đề khá là thú vị. "
                 "Cảm ơn mọi người đã theo dõi hết đoạn này, chúc mọi người một ngày tốt lành!"
             )
+        overrides.setdefault("asr", {})["language"] = options.video_language
         if options.whisper_model:
             overrides["whisper_model"] = options.whisper_model
         if options.whisper_device:

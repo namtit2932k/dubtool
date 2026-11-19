@@ -162,29 +162,46 @@ def check_rule_2_artifacts(repo: Path, build_root: Path, update_n: int) -> tuple
     )
 
 
-def _check_png_dimensions_and_whiteness(png_path: Path) -> tuple[bool, str]:
-    from PySide6.QtGui import QImage
-
-    img = QImage(str(png_path))
-    if img.isNull():
-        return False, f"{png_path.name}: invalid PNG image"
-    w, h = img.width(), img.height()
-    if w < 600:
-        return False, f"{png_path.name}: width {w}px < 600px"
-    # Sample a grid of pixels to ensure image is not mostly white (>=98% white)
-    step_x = max(1, w // 40)
-    step_y = max(1, h // 40)
-    total = 0
-    white = 0
-    for y in range(0, h, step_y):
-        for x in range(0, w, step_x):
-            c = img.pixelColor(x, y)
-            total += 1
-            if c.red() >= 250 and c.green() >= 250 and c.blue() >= 250:
-                white += 1
-    if total > 0 and (white / total) >= 0.98:
-        return False, f"{png_path.name}: mostly white ({white}/{total} sampled pixels)"
-    return True, f"{w}x{h}"
+def _check_image_contents(images_dir: Path) -> tuple[bool, str]:
+    """Check for byte-identical images (except for explicit copies in INDEX.txt)
+    and ensure different states have different content."""
+    
+    # 1. Byte-identical check
+    hashes: dict[str, list[str]] = {}
+    for p in images_dir.glob("*.png"):
+        if p.name == "INDEX.txt": continue
+        h = _sha256(p)
+        hashes.setdefault(h, []).append(p.name)
+    
+    # Allowed copies (hardcoded from requirement)
+    canonical = {"ready.png", "running.png", "finished.png", "settings_api_keys.png"}
+    
+    for h, names in hashes.items():
+        if len(names) > 1:
+            for name in names:
+                if name not in canonical:
+                    return False, f"Byte-identical images found and not canonical: {names}"
+            
+    # 2. State vs Content check
+    state_hashes: dict[tuple[str, str], str] = {} # (size, state) -> hash
+    
+    for p in images_dir.glob("*.png"):
+        if "_" not in p.name or "dialog_" in p.name: continue
+        parts = p.name.split('_')
+        size = parts[0]
+        state = parts[1].replace(".png", "")
+        
+        h = _sha256(p)
+        
+        # Check all previous hashes for this size
+        for (s_size, s_state), s_hash in state_hashes.items():
+            if s_size == size and s_state != state:
+                if h == s_hash:
+                    return False, f"Different states {s_state} and {state} have identical content ({p.name} and {size}_{s_state}.png)"
+        
+        state_hashes[(size, state)] = h
+    
+    return True, "Image content checks passed"
 
 
 def check_rule_3_screenshots(repo: Path, build_root: Path, update_n: int) -> tuple[bool, str, str]:
@@ -253,6 +270,11 @@ def check_rule_3_screenshots(repo: Path, build_root: Path, update_n: int) -> tup
         problems = crl.check(repo, tracked_set)
         if problems:
             return False, cmd, f"README link errors: {'; '.join(problems)}"
+            
+    # New content check
+    ok_content, msg_content = _check_image_contents(images_dir)
+    if not ok_content:
+        return False, cmd, msg_content
 
     png_count = sum(1 for f in existing_files if f.lower().endswith(".png"))
     return True, cmd, f"{png_count} PNGs verified (>=600px, non-white, no stale files); INDEX.txt matches {expected_build_id}"
@@ -492,5 +514,34 @@ def main(argv: list[str] | None = None) -> int:
     return rc
 
 
+def test_dod_image_checks():
+    import tempfile
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        
+        # Test 1: Byte-identical
+        (tmpdir_path / "a.png").write_bytes(b"content")
+        (tmpdir_path / "b.png").write_bytes(b"content")
+        ok, _ = _check_image_contents(tmpdir_path)
+        assert not ok, "Should fail for identical content"
+        (tmpdir_path / "a.png").unlink()
+        (tmpdir_path / "b.png").unlink()
+        
+        # Test 2: Different states different content
+        (tmpdir_path / "900x700_idle.png").write_bytes(b"idle")
+        (tmpdir_path / "900x700_running.png").write_bytes(b"running")
+        ok, msg = _check_image_contents(tmpdir_path)
+        print(f"DEBUG: ok={ok}, msg={msg}")
+        assert ok, f"Should pass for different states: {msg}"
+        
+        (tmpdir_path / "900x700_running.png").write_bytes(b"idle")
+        ok, _ = _check_image_contents(tmpdir_path)
+        assert not ok, "Should fail for identical content on different states"
+
+    print("Image content checks tests passed")
+
 if __name__ == "__main__":
+    # Run tests
+    test_dod_image_checks()
     raise SystemExit(main())

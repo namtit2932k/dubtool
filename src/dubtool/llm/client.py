@@ -115,7 +115,8 @@ def _panel(key: str, **kwargs) -> None:
 class LLMClient:
     def __init__(self, provider: LLMProvider, on_rate_limit: Callable[[float], None] | None = None,
                  cancel=None, options: dict | None = None,
-                 on_overload: Callable[..., str] | None = None):
+                 on_overload: Callable[..., str] | None = None,
+                 source_lang: str = "English"):
         """on_rate_limit(seconds) is called ONLY when every key is limited and
         the wrapper has to wait (AGENT_UPDATE_5.md 2.4): a caller running
         chunks in parallel can back off and reduce concurrency. A successful
@@ -136,6 +137,7 @@ class LLMClient:
         self.cancel = cancel
         self.options = options or {}
         self.on_overload = on_overload
+        self.source_lang = source_lang
         # AGU11 2.3: the callback may take the info dict or nothing (tests,
         # simple policies) — decide once from its signature.
         self._on_overload_takes_info = False
@@ -909,7 +911,7 @@ class LLMClient:
             _system_of("translate"),
             render_translate_user(
                 segments, context, glossary, brief=brief, pronouns=pronouns,
-                policy=policy,
+                policy=policy, source_lang=self.source_lang,
             ),
             validate,
             note,

@@ -190,6 +190,11 @@ class OptionsWidget(QGroupBox):
         self.voice_combo = QComboBox()
         self.voice_combo.addItems(VOICE_KEYS)
         self.voice_combo.setCurrentText(s["voice"])
+        self.lang_combo = QComboBox()
+        self.lang_combo.addItem(i18n.tr("language.auto"), "auto")
+        for lang_code in ["en", "vi", "es", "fr", "de", "zh", "ja", "ko", "ar"]:
+            self.lang_combo.addItem(i18n.tr(f"language.{lang_code}"), lang_code)
+        self.lang_combo.setCurrentIndex(0)
         grid.addWidget(self.burn_check, 0, 0, 1, 3)
         grid.addWidget(self.srt_check, 1, 0, 1, 3)
         grid.addWidget(QLabel(i18n.tr("options.keep_label")), 2, 0)
@@ -199,8 +204,10 @@ class OptionsWidget(QGroupBox):
         grid.addWidget(QLabel(i18n.tr("options.gain")), 4, 0)
         grid.addWidget(self.gain_slider, 4, 1)
         grid.addWidget(self.gain_value, 4, 2)
-        grid.addWidget(QLabel(i18n.tr("options.voice")), 5, 0)
-        grid.addWidget(self.voice_combo, 5, 1, 1, 2)
+        grid.addWidget(QLabel(i18n.tr("language.header")), 5, 0)
+        grid.addWidget(self.lang_combo, 5, 1, 1, 2)
+        grid.addWidget(QLabel(i18n.tr("options.voice")), 6, 0)
+        grid.addWidget(self.voice_combo, 6, 1, 1, 2)
 
     def to_options(self, model: str, brief: str) -> api.DubOptions:
         from dubtool.brief import normalize_brief
@@ -211,6 +218,7 @@ class OptionsWidget(QGroupBox):
             save_srt=self.srt_check.isChecked(),
             original_gain_db=float(self.gain_slider.value()),
             voice=self.voice_combo.currentText(),
+            video_language=str(self.lang_combo.currentData() or "auto"),
             keep_level=str(self.keep_combo.currentData() or "light"),
             export_readable=self.readable_check.isChecked(),
             readable_format=str(self.readable_format_combo.currentData() or "docx"),
@@ -418,6 +426,7 @@ class ProgressWidget(QGroupBox):
     def on_finished(self, result: api.DubResult) -> None:
         self._last_result = result
         import time as _time
+        print(f"DEBUG: on_finished called, result.ok={result.ok}, result.out_readable={bool(result.out_readable)}")
 
         self._last_event_mono = _time.monotonic()
         self.cancel_btn.hide()
@@ -427,7 +436,10 @@ class ProgressWidget(QGroupBox):
             self.open_btn.show()
             self.play_btn.show()
             if result.out_readable:
+                print("DEBUG: showing readable_btn")
                 self.readable_btn.show()
+            else:
+                print("DEBUG: not showing readable_btn")
             if result.readable_warning:
                 # AGENT_UPDATE_7.md 5.5: the video is fine; say so plainly.
                 self.log.append(i18n.tr("progress.readable_warning"))

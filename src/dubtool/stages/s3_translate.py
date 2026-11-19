@@ -510,7 +510,10 @@ def fast_client(config, pid: str, api_keys, cancel, on_overload=None):
         config, mech_pid, api_keys=api_keys, cancel=cancel,
         model_override=mech_model,
     )
-    return LLMClient(provider, cancel=cancel, options=options, on_overload=on_overload)
+    return LLMClient(
+        provider, cancel=cancel, options=options, on_overload=on_overload,
+        source_lang=config.asr.get("language", "English")
+    )
 
 
 def _prepare_sentences(job, config, transcript, pid, api_keys, cancel):
@@ -927,6 +930,7 @@ def run(
         holder["client"] = LLMClient(
             fallback_provider, cancel=cancel, options=client_options,
             on_overload=_overload_callback,
+            source_lang=config.asr.get("language", "English")
         )
         stats["fallback"] = True
         stats["fast_model"] = fallback_provider.model
@@ -947,6 +951,7 @@ def run(
 
     holder: dict = {"client": LLMClient(
         provider, cancel=cancel, options=client_options, on_overload=_overload_callback,
+        source_lang=config.asr.get("language", "English")
     )}
 
     def translate_payloads(payloads, context_payload, label: str,

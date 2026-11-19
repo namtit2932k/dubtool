@@ -544,6 +544,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--brief", default=None, help="video brief text (context for the translator; max 1000 chars)")
     run_p.add_argument("--brief-file", default=None, help="path to a video brief text file")
     run_p.add_argument("--model", default=None, help="override the provider's configured model id")
+    run_p.add_argument("--source-language", default="auto", help="Source language (e.g. auto, en, vi, ja)")
     run_p.add_argument("--translate-concurrency", type=int, default=None, help="parallel translation chunk calls (1-5)")
     run_p.add_argument(
         "--no-readable",
@@ -585,6 +586,7 @@ def build_parser() -> argparse.ArgumentParser:
     stage_p.add_argument("--brief", default=None, help="video brief text (context for the translator; max 1000 chars)")
     stage_p.add_argument("--brief-file", default=None, help="path to a video brief text file")
     stage_p.add_argument("--model", default=None, help="override the provider's configured model id")
+    stage_p.add_argument("--source-language", default="auto", help="Source language (e.g. auto, en, vi, ja)")
     stage_p.add_argument("--translate-concurrency", type=int, default=None, help="parallel translation chunk calls")
     stage_p.set_defaults(func=cmd_stage)
 

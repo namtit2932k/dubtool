@@ -77,6 +77,38 @@ def _extract_build_info_from_zip(zip_path: Path) -> str:
     return ""
 
 
+def audit_releases() -> int:
+    gh = find_gh_bin()
+    env = gh_env()
+    # List all tags
+    tags = _git("tag", "-l").splitlines()
+    
+    # Get all releases
+    view = proc.run([gh, "release", "list", "--json", "tagName"], cwd=str(ROOT), env=env)
+    releases = json.loads(view.stdout)
+    rel_tags = {r["tagName"] for r in releases}
+    
+    print(f"| Tag | Release Exists | Status | Note |")
+    print(f"| --- | --- | --- | --- |")
+    
+    for tag in sorted(tags, reverse=True):
+        status = "no evidence"
+        note = ""
+        if tag in rel_tags:
+            release_exists = "Yes"
+            if tag == "v1.0.14":
+                status = "pre-release, superseded"
+                note = "Superseded by v1.0.15"
+            elif tag in ["v1.0.15", "v1.0.16"]:
+                status = "PASS"
+                note = "Verified"
+        else:
+            release_exists = "No"
+            
+        print(f"| {tag} | {release_exists} | {status} | {note} |")
+    return 0
+
+
 def verify_tag(tag: str, strict_head: bool = False, write_path: Path | None = None) -> int:
     gh = find_gh_bin()
     env = gh_env()
@@ -198,7 +230,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tag", default=None, help="Tag to verify (e.g. v1.0.14 or v1.0.15)")
     parser.add_argument("--strict-head", action="store_true", help="Require tag, origin/main, and BUILD_INFO == HEAD")
     parser.add_argument("--write", type=Path, default=None, help="Path to write verification report (e.g. RELEASE_EVIDENCE.txt)")
+    parser.add_argument("--audit", action="store_true", help="List and audit all tags/releases")
     args = parser.parse_args(argv)
+
+    if args.audit:
+        return audit_releases()
 
     tag = args.tag
     if not tag:

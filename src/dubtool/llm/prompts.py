@@ -78,12 +78,12 @@ TRANSLATE_USER_TEMPLATE = """{brief_block}Context from earlier in the video (rea
 Glossary terms that MUST be applied exactly (string "keep original" means leave the English term unchanged in the Vietnamese text):
 {glossary}
 
-{policy_block}{pronoun_block}Translate these fragments into Vietnamese. Rules:
-- Translate the meaning faithfully; accuracy first. Do not add information that is not in the English and do not drop a clause or idea.
-- Neutral, natural, conversational Vietnamese matching the speaker's tone; no slang unless the English is slang.
+{policy_block}{pronoun_block}Translate these fragments from {source_lang} into Vietnamese. Rules:
+- Translate the meaning faithfully; accuracy first. Do not add information that is not in the {source_lang} and do not drop a clause or idea.
+- Neutral, natural, conversational Vietnamese matching the speaker's tone; no slang unless the {source_lang} is slang.
 - Keep subjects and pronouns when needed for clarity. Names stay as they are.
 - "max_chars" is information, not an order: if the Vietnamese would exceed it, first remove filler words and redundancy; never drop words, subjects, negations, or constructions such as "not only ... but also" to meet it; compression is allowed only for fillers and exact repetitions. Exceeding a little is acceptable.
-- The reply must be a complete sentence: never stop at a connector or function word (và, mà, nhưng, vì, nếu, rằng, là, của, để, một, những, các, thì, với, cho, khi, như, hay, hoặc, bởi, luôn) — when the English is cut, end at a natural clause boundary instead.
+- The reply must be a complete sentence: never stop at a connector or function word (và, mà, nhưng, vì, nếu, rằng, là, của, để, một, những, các, thì, với, cho, khi, như, hay, hoặc, bởi, luôn) — when the {source_lang} is cut, end at a natural clause boundary instead.
 - Apply glossary terms exactly.
 - Reply with ONLY a JSON array: [{{"id": <int>, "vi": "<str>"}}, ...] containing exactly the ids provided, in the same order.
 
@@ -156,11 +156,13 @@ def render_pronoun_block(pronouns: dict | None, has_brief: bool = False) -> str:
 def render_translate_user(
     segments, context, glossary, brief: str | None = None,
     pronouns: dict | None = None, policy: str | None = None,
+    source_lang: str = "English",
 ) -> str:
     compact = [
         {"id": s["id"], "text": s["text"], "max_chars": s["max_chars"]} for s in segments
     ]
     return TRANSLATE_USER_TEMPLATE.format(
+        source_lang=source_lang,
         brief_block=render_brief_block(brief),
         pronoun_block=render_pronoun_block(pronouns, has_brief=bool((brief or "").strip())),
         context=json.dumps(context, ensure_ascii=False),

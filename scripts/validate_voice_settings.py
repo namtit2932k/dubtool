@@ -61,6 +61,14 @@ def _merge_bucket(dst: dict, src: dict) -> None:
     dst["elapsed_s"].extend(src.get("elapsed_s") or [])
     for k, v in (src.get("failures_by_kind") or {}).items():
         dst["failures_by_kind"][k] = dst["failures_by_kind"].get(k, 0) + int(v)
+    
+    # Merge buckets
+    src_buckets = src.get("buckets", {})
+    for b_key, b_data in src_buckets.items():
+        if b_key not in dst["buckets"]:
+            dst["buckets"][b_key] = {"requests": 0, "ok": 0}
+        dst["buckets"][b_key]["requests"] += b_data["requests"]
+        dst["buckets"][b_key]["ok"] += b_data["ok"]
 
 
 def _new_bucket() -> dict:
@@ -74,6 +82,12 @@ def _new_bucket() -> dict:
         "elapsed_s": [],
         "retried_ok": 0,
         "breaker_pauses": 0,
+        "buckets": {
+            "<=40": {"requests": 0, "ok": 0},
+            "41-80": {"requests": 0, "ok": 0},
+            "81-120": {"requests": 0, "ok": 0},
+            ">120": {"requests": 0, "ok": 0},
+        },
     }
 
 

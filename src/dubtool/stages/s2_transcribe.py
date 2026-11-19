@@ -304,8 +304,9 @@ def _postprocess_only(job, config) -> None:
 def _transcribe(model, job, config) -> None:
     """Whisper pass + cleanup + write transcript.json (AGU6 4.2 split)."""
     want_words = bool(config.asr.get("word_timestamps", True))
+    lang = config.asr.get("language")
     kwargs: dict[str, Any] = {
-        "language": "en",
+        "language": lang if lang != "auto" else None,
         "vad_filter": True,
         "condition_on_previous_text": bool(
             config.asr.get("condition_on_previous_text", False)

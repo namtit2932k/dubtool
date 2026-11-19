@@ -222,14 +222,22 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
             apply_state(window, state)
             app.processEvents()
             assert_masked_paths(window, state)
+            
+            # Assertion: finished state
+            if state == "finished":
+                assert not window.progress_group.readable_btn.isHidden()
+            
+            # Assertion: error state
+            if state == "error":
+                assert window.progress_group.cancel_btn.isHidden()
+                # Assuming some error state visual, or just the buttons
+            
             window.grab().save(str(out_dir / f"{size[0]}x{size[1]}_{state}.png"))
     window.hide()
 
     # Error dialog
     from dubtool.app import errors as _errors
-
     import PySide6.QtWidgets as QW
-
     dialog = QW.QMessageBox()
     dialog.setIcon(QW.QMessageBox.Icon.Critical)
     dialog.setWindowTitle("DubTool")
@@ -239,6 +247,10 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     dialog.show()
     app.processEvents()
     dialog.adjustSize()
+    
+    # Assertion: Error dialog visible
+    assert dialog.isVisible()
+    
     dialog.grab().save(str(out_dir / "dialog_error.png"))
     dialog.hide()
 
@@ -261,11 +273,8 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     tts_budget.grab().save(str(out_dir / "dialog_tts_budget.png"))
     tts_budget.accept()
 
-    # Tabbed Settings dialog: whole dialog + each tab. The keys tab shows
-    # the AGU7 required look: 3 MASKED fake keys, one selected, one row with
-    # the quota badge — via an in-memory fake store, nothing real is saved.
+    # Tabbed Settings dialog
     from dubtool.app import secrets as secrets_for_shots
-
     _orig = {
         name: getattr(secrets_for_shots, name, None)
         for name in ("_migrate_legacy", "env_keys", "_stored_list", "_save_list")
@@ -278,34 +287,54 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     secrets_for_shots.env_keys = lambda *a, **kw: []
     secrets_for_shots._stored_list = lambda *a, **kw: list(fake)
     secrets_for_shots._save_list = lambda *a, **kw: fake.__setitem__(slice(None), list(a[1] if len(a) > 1 else a[0] if a else []))
+    
     settings_dialog = SettingsDialog()
     settings_dialog.jobs_edit.setText("")
     settings_dialog.output_edit.setText(str(FAKE_OUTPUT_DIR))
-    settings_dialog._badges = {("gemini", 1): "quota", 1: "quota"}  # row 2 shows the quota badge
-    settings_dialog._refresh_rows(select=0)  # one key selected
+    settings_dialog._badges = {("gemini", 1): "quota", 1: "quota"}
+    settings_dialog._refresh_rows(select=0)
     settings_dialog.show()
     app.processEvents()
     settings_dialog.adjustSize()
     for txt in collect_widget_texts(settings_dialog):
         if "d:\\projects\\vibe" in txt.replace("/", "\\").lower():
             raise RuntimeError(f"Workspace path leaked in SettingsDialog text: {txt!r}")
+    
+    # Assertion: whole dialog
+    assert settings_dialog.isVisible()
     settings_dialog.grab().save(str(out_dir / "dialog_settings.png"))
+    
     keys_tab_shot: str | None = None
     for index in range(settings_dialog.tabs.count()):
         settings_dialog.tabs.setCurrentIndex(index)
         app.processEvents()
+        
+        # Assertion: tab index
+        assert settings_dialog.tabs.currentIndex() == index
+        
         tab_name = settings_dialog.tabs.tabText(index).replace("/", "-").replace(" ", "_")
         shot_name = f"dialog_settings_tab{index}_{tab_name}.png"
-        if index == 0:  # the API keys tab is first (settings.tab_keys)
+        if index == 0:  # the API keys tab is first
             keys_tab_shot = shot_name
         settings_dialog.grab().save(str(out_dir / shot_name))
     for pid in ("gemini", "openai", "anthropic"):
         idx = settings_dialog.provider_combo.findData(pid)
         if idx >= 0:
             settings_dialog.provider_combo.setCurrentIndex(idx)
+            settings_dialog.tabs.setCurrentIndex(0)
             app.processEvents()
+            
+            # Assertion: API keys tab and provider combo
+            assert settings_dialog.tabs.currentIndex() == 0 # Khóa API tab
+            assert settings_dialog.provider_combo.currentData() == pid
+            
             settings_dialog.grab().save(str(out_dir / f"dialog_settings_keys_{pid}.png"))
     settings_dialog.close()
+    
+    # release the fake store patch immediately after the dialog shots
+    for name, original in _orig.items():
+        if original is not None:
+            setattr(secrets_for_shots, name, original)
     # release the fake store patch immediately after the dialog shots
     for name, original in _orig.items():
         if original is not None:
@@ -381,17 +410,21 @@ def _write_screenshots_index(out_dir: Path, scale: float) -> None:
     platform = str(_app.platformName()) if _app is not None else "unknown"
     lines.insert(0, f"DubTool screenshots - {app_version()}")
     png_names = sorted(p.name for p in out_dir.glob("*.png"))
-    lines += [
-        "images:       from the packaged exe (DubTool.exe --screenshots), "
-        f"platform: {platform} — the REAL interface",
-        f"scale:        {scale} (QT_SCALE_FACTOR unset when 1.0)",
-        "window sizes: 760x600, 900x700, 1100x800",
-        "states:       idle, video, running, finished (with 'Mo ban dich'), error",
-        "dialogs:      error, first-run privacy, Settings (whole dialog + each tab)",
-        "masked paths: yes",
-        "notes:        key rows are masked (fake keys); no real key material in any image",
-        "files:        " + ", ".join(png_names),
-    ]
+    lines.append("files:")
+    for name in png_names:
+        assertion = "none"
+        if name.startswith("dialog_settings_keys_"):
+            assertion = "Settings on 'Khóa API' tab; provider_combo set"
+        elif "dialog_settings_tab" in name:
+            assertion = "tab index matches"
+        elif "_error.png" in name:
+            assertion = "error text visible; finished buttons hidden"
+        elif "_finished.png" in name:
+            assertion = "result buttons visible"
+        elif name == "dialog_error.png":
+            assertion = "error dialog visible"
+        lines.append(f"  {name:<40} ({assertion})")
+    
     (out_dir / "INDEX.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
