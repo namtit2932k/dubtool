@@ -313,6 +313,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.env_count": "{n} khóa từ .env",
         "settings.no_key_provider": "Chưa có khóa nào cho {provider}",
         "settings.add_wrong_provider": "Khóa bạn vừa dán ({sample}…) là khóa của {target}, không phải {current}. Bạn có muốn chuyển sang {target} không?",
+        "language.video_label": "Ngôn ngữ video",
     },
     "en": {
         "app.title": "DubTool — Vietnamese dubbing",
@@ -621,6 +622,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "settings.env_count": "{n} key(s) from .env",
         "settings.no_key_provider": "No keys stored for {provider}",
         "settings.add_wrong_provider": "The key you pasted ({sample}…) looks like a {target} key, not {current}. Switch to {target}?",
+        "language.video_label": "Video language",
     },
 }
 

@@ -190,11 +190,11 @@ class OptionsWidget(QGroupBox):
         self.voice_combo = QComboBox()
         self.voice_combo.addItems(VOICE_KEYS)
         self.voice_combo.setCurrentText(s["voice"])
-        self.lang_combo = QComboBox()
-        self.lang_combo.addItem(i18n.tr("language.auto"), "auto")
+        self.ui_lang_combo = QComboBox()
+        self.ui_lang_combo.addItem(i18n.tr("language.auto"), "auto")
         for lang_code in ["en", "vi", "es", "fr", "de", "zh", "ja", "ko", "ar"]:
-            self.lang_combo.addItem(i18n.tr(f"language.{lang_code}"), lang_code)
-        self.lang_combo.setCurrentIndex(0)
+            self.ui_lang_combo.addItem(i18n.tr(f"language.{lang_code}"), lang_code)
+        self.ui_lang_combo.setCurrentIndex(0)
         grid.addWidget(self.burn_check, 0, 0, 1, 3)
         grid.addWidget(self.srt_check, 1, 0, 1, 3)
         grid.addWidget(QLabel(i18n.tr("options.keep_label")), 2, 0)
@@ -205,7 +205,7 @@ class OptionsWidget(QGroupBox):
         grid.addWidget(self.gain_slider, 4, 1)
         grid.addWidget(self.gain_value, 4, 2)
         grid.addWidget(QLabel(i18n.tr("language.header")), 5, 0)
-        grid.addWidget(self.lang_combo, 5, 1, 1, 2)
+        grid.addWidget(self.ui_lang_combo, 5, 1, 1, 2)
         grid.addWidget(QLabel(i18n.tr("options.voice")), 6, 0)
         grid.addWidget(self.voice_combo, 6, 1, 1, 2)
 
@@ -218,7 +218,7 @@ class OptionsWidget(QGroupBox):
             save_srt=self.srt_check.isChecked(),
             original_gain_db=float(self.gain_slider.value()),
             voice=self.voice_combo.currentText(),
-            video_language=str(self.lang_combo.currentData() or "auto"),
+            video_language=str(self.ui_lang_combo.currentData() or "auto"),
             keep_level=str(self.keep_combo.currentData() or "light"),
             export_readable=self.readable_check.isChecked(),
             readable_format=str(self.readable_format_combo.currentData() or "docx"),
@@ -648,7 +648,20 @@ class MainWindow(QMainWindow):
         self.options = OptionsWidget()
         self.left_layout.addWidget(self.options)
 
-        # 5. Generate row (AGU4 7.5): the model dropdown and ONE Tạo button
+        # 5. Language row (AGU16 3.1)
+        self.lang_video_row = QWidget()
+        self.lang_video_row.setObjectName("lang_video_row")
+        lang_video_layout = QHBoxLayout(self.lang_video_row)
+        lang_video_layout.setContentsMargins(0, 0, 0, 0)
+        lang_video_layout.addWidget(QLabel(i18n.tr("language.video_label")))
+        self.lang_video_combo = QComboBox()
+        self.lang_video_combo.addItem(i18n.tr("language.auto"), "auto")
+        for lang_code in ["en", "ja", "zh", "ko", "es", "fr", "de", "ru", "pt", "it", "th", "hi", "ar", "id"]:
+            self.lang_video_combo.addItem(i18n.tr(f"language.{lang_code}"), lang_code)
+        lang_video_layout.addWidget(self.lang_video_combo, 1)
+        self.left_layout.addWidget(self.lang_video_row)
+
+        # 6. Generate row (AGU4 7.5): the model dropdown and ONE Tạo button
         self.buttons_row = QWidget()
         self.buttons_row.setObjectName("buttons_row")
         buttons_row = QHBoxLayout(self.buttons_row)
@@ -1020,6 +1033,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, i18n.tr("output.header"), self.output_warn.text())
             return
         options = self.options.to_options(model_id, brief=self.brief_edit.toPlainText())
+        options.video_language = str(self.lang_video_combo.currentData() or "auto")
         # The selected model id persists for the next run.
         try:
             s = settings.load()
