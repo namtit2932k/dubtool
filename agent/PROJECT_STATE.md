@@ -8,17 +8,18 @@
 ## 1. Trạng thái Git & Phiên bản hiện tại
 
 - **Repository:** `namtit2932k/dubtool` (public), workspace `d:\Projects\Vibe\Project_K`, build root `D:\Projects\Vibe\Project_K_build`.
-- **Phiên bản đã phát hành gần nhất:** **`v1.0.17`** (commit `6bc8192adc00321c6cc6d9d720b5b7ec7c0f381f`, 2026-11-20) — Official, đã verify đầy đủ qua `scripts/release.py 17` (`DOD_REPORT.md` 9/9 PASS, `RELEASE_EVIDENCE.txt` PASS, `verify_release.py --audit` PASS, `DubTool-1.0.17-win64.zip` 220,758,408 B, SHA-256 `ed404ad5074685f4b163d0ced7b5a437a6dd9a12bfcb6ea06d50fba408d32d93`).
-- **Nhánh hiện tại (`main`):** Đã hoàn tất Update 17 (`v1.0.17`) và chuỗi cải tiến/hotfix sau chạy thực tế:
+- **Phiên bản đã phát hành gần nhất:** **`v1.0.18`** (commit `a9c4680aae9b1abd0fc7a4d760dee9c398864a76`, 2026-11-20) — Official, đã verify đầy đủ qua `scripts/release.py 18` (`DOD_REPORT.md` 9/9 PASS, `RELEASE_EVIDENCE.txt` PASS, `verify_release.py --audit` PASS, `DubTool-1.0.18-win64.zip` 220,855,212 B, SHA-256 `387c4b58777c44b67ffd28532d50fc111dcc37f0b8aecdb3a85f3e86f3f31dc9`, `https://github.com/namtit2932k/dubtool/releases/tag/v1.0.18`).
+- **Nhánh hiện tại (`main`):** Đã phát hành chính thức **`v1.0.18` (Update 18)** bao gồm toàn bộ chuỗi sửa lỗi thực tế và cải tiến sau `v1.0.17`:
   1. Nút Hủy dừng ngay khi S3 gặp 503 liên tục + short-circuit `punctuate` + UI `"Đang hủy…"`.
-  2. Fix mất/cắt UI bên phải khi thu nhỏ cửa sổ (`_make_shrinkable_combo`, `minimumSize` động, kiểm tra `scroll-content-overflow-x`).
+  2. Fix mất/cắt UI bên phải khi thu nhỏ cửa sổ chính (`_make_shrinkable_combo`, `minimumSize` động, kiểm tra `scroll-content-overflow-x`).
   3. Tách riêng `fallback_model` khỏi mô hình chính ở S3 (`fast_model_id` ưu tiên `config.llm_model`) và giữ nguyên lựa chọn `model_combo` sau khi đóng Cài đặt.
   4. Fix S4 `'NoneType' object has no attribute 'write'` trên `.exe` windowed (`_ensure_stdio` + `_hf_cache_context`) + fail-fast `TTSEngineInitError`.
   5. Fix lệch mốc thời gian giọng lồng tiếng (`repair_word_timings` chữa chữ mồ côi đầu đoạn & tách khoảng lặng nội bộ `>= 1.5s`, guard `max_gap_s=0.5` cho `merge_short`, `vad_parameters={"min_silence_duration_ms": 500}`).
   6. Fix header `Chi tiết tiến trình` không còn giữ dòng cũ từ S5 khi sang S7/hoàn tất (`Hoàn tất`).
   7. Nâng cấp `README.md` + `docs/README.vi.md` theo phong cách hiện đại với logo trắng không viền (`docs/images/logo.png`), đổi icon `.exe` và icon cửa sổ sang logo trắng nền đen (`packaging/icon.ico`).
   8. Dọn gọn thư mục gốc (`REPORT_UPDATE_*.md` → `docs/reports/`, xóa rác untracked) và giảm tổng dung lượng `Project_K` + `Project_K_build` hơn **5.5 GB**.
-  9. Tinh chỉnh UI/UX & Gemini catalog: căn thẳng thanh tiến trình (`setTextVisible(False)`, `counter` ẩn khi rỗng) & 2 nút `Sao chép chi tiết`/`Mở thư mục log` 50/50, thêm nút **Nghe thử giọng** offline (`voice_preview.py`) ngay dưới chọn giọng đọc ở cả màn hình chính và Cài đặt, cho phép resize & thu gọn `SettingsDialog`, hiển thị rõ đường dẫn mặc định thư mục job + nút `Chọn…`, bổ sung các model Gemini chạy ổn định (`gemini-3.1-flash-lite`, `gemini-3-flash-preview`, `gemini-flash-lite-latest`), giảm concurrency của `3.6-flash`/`3.8-flash` xuống 1 và giữ `gemini-3.5-flash-lite` làm mặc định lần đầu.
+  9. Tinh chỉnh UI/UX & Gemini catalog: căn thẳng thanh tiến trình (`setTextVisible(False)`, `counter` ẩn khi rỗng) & 2 nút `Sao chép chi tiết`/`Mở thư mục log` 50/50, thêm nút **Nghe thử giọng** offline (`voice_preview.py`) ngay dưới chọn giọng đọc ở cả màn hình chính và Cài đặt, cho phép resize & thu gọn `SettingsDialog` (tab Chung tự xuống dòng `WrapLongRows` không bị nuốt UI khi thu hẹp; tab Nâng cao bố cục lưới 2 cột gọn gàng cho giữ job tối đa & giới hạn tổng dung lượng + 2 nút đáy chia 50/50), hiển thị rõ đường dẫn mặc định thư mục job + nút `Chọn…`, bổ sung các model Gemini chạy ổn định (`gemini-3.1-flash-lite`, `gemini-3-flash-preview`, `gemini-flash-lite-latest`), giảm concurrency của `3.6-flash`/`3.8-flash` xuống 1, giữ `gemini-3.5-flash-lite` làm mô hình chính mặc định và đặt `gemini-3.1-flash-lite` làm mô hình dự phòng mặc định lần đầu.
+  10. Bộ test offline **595 passed, 2 skipped (`SKIPS.md`), 0 failed**; báo cáo cập nhật tại `docs/reports/REPORT_UPDATE_18.md`.
 
 ---
 
@@ -62,8 +63,8 @@
 
 ---
 
-## 4. Lộ trình kế tiếp (Tùy chọn cho Update 18+)
+## 4. Lộ trình kế tiếp (Tùy chọn cho Update 19+)
 
 - **Voice Cloning (VieNeu-TTS v3):** Cho phép người dùng nạp clip giọng mẫu 3–10 giây (cần đóng gói thêm `soxr`, `kaldi-native-fbank` và tải encoder/denoiser ONNX theo yêu cầu).
 - **Tăng tốc GPU (CUDA) cho Whisper & VieNeu-TTS v3:** Tuỳ chọn cho máy có GPU NVIDIA.
-- **Mở rộng UX/chất lượng theo phản hồi thực tế sau khi dùng bản `v1.0.17`.**
+- **Mở rộng UX/chất lượng theo phản hồi thực tế sau khi dùng bản `v1.0.18`.**

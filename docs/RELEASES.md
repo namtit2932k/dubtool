@@ -14,6 +14,7 @@
 | `v1.0.15` | `102528cd` | Official | Mechanical release via `scripts/release.py 15`; `BUILD_INFO`, tag, `origin/main`, and asset SHA-256 verified | 2026-11-14 |
 | `v1.0.16` | `76ba8313` | Official | Automatic source-language detection → Vietnamese, MIT license, screenshot/audit fixes; mechanical release via `scripts/release.py 16` | 2026-11-20 |
 | `v1.0.17` | `6bc8192a` | Official | Replace `edge-tts` with offline CPU ONNX VieNeu-TTS v3 (`v3turbo_int8` default + `v3nano` low-RAM); mechanical release via `scripts/release.py 17` | 2026-11-20 |
+| `v1.0.18` | `a9c4680a` | Official | Field hotfixes (S3 cancel/503, S4 windowed stdio fail-fast, Whisper timing sync repair, narrow-window & Settings UI polish), offline voice preview, Gemini catalog refresh (`gemini-3.1-flash-lite` default fallback), new branding/README & workspace cleanup; mechanical release via `scripts/release.py 18` | 2026-11-20 |
 
 ## Release Audit & Hook Limits
 
