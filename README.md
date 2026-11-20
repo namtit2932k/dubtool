@@ -9,17 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/namtit2932k/dubtool/releases/latest">
-    <img src="https://img.shields.io/github/v/release/namtit2932k/dubtool?label=release&color=e05d44" alt="Latest release" />
-  </a>
-  <a href="https://github.com/namtit2932k/dubtool/releases">
-    <img src="https://img.shields.io/github/downloads/namtit2932k/dubtool/total?label=downloads&color=2ea043" alt="Downloads" />
-  </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/badge/license-MIT-0969da" alt="MIT License" />
-  </a>
-  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0969da" alt="Windows 10/11 x64" />
-  <img src="https://img.shields.io/badge/TTS-VieNeu--TTS%20v3%20(Offline)-2ea043" alt="Offline VieNeu-TTS v3" />
+  <a href="https://github.com/namtit2932k/dubtool/releases/latest"><img src="https://img.shields.io/github/v/release/namtit2932k/dubtool?label=Release&color=e05d44" alt="Latest release" /></a>
+  <a href="https://github.com/namtit2932k/dubtool/releases"><img src="https://img.shields.io/github/downloads/namtit2932k/dubtool/total?label=Downloads&color=2ea043" alt="Downloads" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-0969da" alt="MIT License" /></a>
+  <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64-0969da" alt="Windows 10/11 x64" />
 </p>
 
 <p align="center">
@@ -27,9 +20,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/namtit2932k/dubtool/releases/latest">
-    <img src="https://img.shields.io/badge/%E2%86%93%20DOWNLOAD-WINDOWS%2010%2F11%20X64-2ea043?style=for-the-badge&labelColor=555555" alt="Download for Windows 10/11 x64" />
-  </a>
+  <a href="https://github.com/namtit2932k/dubtool/releases/latest"><img src="https://img.shields.io/badge/%E2%86%93%20DOWNLOAD-WINDOWS%2010%2F11%20X64-2ea043?style=for-the-badge&labelColor=555555" alt="Download for Windows 10/11 x64" /></a>
 </p>
 
 ---
