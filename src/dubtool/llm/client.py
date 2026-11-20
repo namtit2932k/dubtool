@@ -49,6 +49,7 @@ from dubtool.llm.base import (
     TimeoutLLMError,
 )
 from dubtool import heartbeat
+from dubtool.job import StageCancelled
 from dubtool.llm import budget as budget_mod
 from dubtool.llm import parsing
 from dubtool.llm import prompts
@@ -224,12 +225,17 @@ class LLMClient:
             rpm = 0.0
         return 60.0 / rpm if rpm > 0 else 0.0
 
+    def _check_cancel(self) -> None:
+        if self.cancel is not None and self.cancel.is_set():
+            raise StageCancelled("llm: cancelled by user")
+
     def _rate_gate(self) -> None:
         """Wait out the model rate pause (per-minute 429) and the token
         bucket (llm.max_rpm) BEFORE a request is sent; both waits are
         visible and count against the stage budget."""
         import time as _time
 
+        self._check_cancel()
         wait_s = max(0.0, self.rate_pause_until - _time.monotonic())
         if wait_s > 0:
             def pause_text(remaining: float) -> str:
@@ -239,10 +245,12 @@ class LLMClient:
             self.stage_wait["waited_s"] = float(
                 self.stage_wait.get("waited_s", 0.0)) + max(0.0, float(slept))
             self.rate_pause_until = _time.monotonic()
+            self._check_cancel()
         elif self.min_interval_s > 0:
             heartbeat.sleeping(
                 self.min_interval_s, lambda _r: "", self.cancel,
             )
+            self._check_cancel()
 
     def _split_eligible(self) -> bool:
         """Update 12 2.1: a chunk may split only when it is larger than
@@ -403,8 +411,10 @@ class LLMClient:
     def _sleep_backoff(self, seconds: float) -> None:
         """Wait out one server-error backoff, feeding the shared stage-wait
         accumulator (AGU11 2.3) and emitting the countdown from sleeping()."""
+        self._check_cancel()
         slept = heartbeat.sleeping(seconds, _backoff_text, self.cancel)
         self.stage_wait["waited_s"] = float(self.stage_wait.get("waited_s", 0.0)) + max(0.0, float(slept))
+        self._check_cancel()
 
     def _request_started_log(self, kind: str, attempt: int = 1) -> None:
         """AGU8 3.5 + AGU11 2.4: name the model, the request kind, its size
@@ -510,6 +520,7 @@ class LLMClient:
         pauses_left = 3           # per-minute pause occurrences per request
         first_attempt = True
         while True:
+            self._check_cancel()
             self._rate_gate()     # per-minute model pause + token bucket
             if first_attempt:
                 first_attempt = False
@@ -559,6 +570,7 @@ class LLMClient:
                     "— no fallback switch happened; the run stays resumable"
                 ) from exc
             except RequestTooLargeError as exc:
+                self._check_cancel()
                 # A request the model cannot answer whole (context length
                 # or the reply cut by the output budget): same schedule as
                 # a latency failure, splitting once when the chunk allows.
@@ -571,6 +583,7 @@ class LLMClient:
                     ) from exc
                 self._sleep_backoff(backoff)
             except ServerErrorLLMError as exc:
+                self._check_cancel()
                 # Update 12 2.1: model-wide capacity errors (503/500/502) —
                 # no key rotation; retry the SAME request with the bounded
                 # backoff schedule (at most len(backoff_s) attempts) and the
@@ -584,6 +597,7 @@ class LLMClient:
                     ) from exc
                 self._sleep_backoff(backoff)
             except TimeoutLLMError as exc:
+                self._check_cancel()
                 # Update 12 2.1: a client timeout is a latency signal — the
                 # same schedule, and it may split once (split-eligible chunk).
                 last_error = exc
@@ -595,6 +609,7 @@ class LLMClient:
                     ) from exc
                 self._sleep_backoff(backoff)
             except RateLimitError as exc:
+                self._check_cancel()
                 last_error = exc
                 kind = getattr(exc, "kind", None) or "minute"
                 retry_after = float(getattr(exc, "retry_after", None) or 60.0)
@@ -624,11 +639,11 @@ class LLMClient:
                     self.provider.name, exc, min(retry_after, 600.0),
                 )
                 _panel("llm.rate_pause", n=int(min(retry_after, 600.0)))
-            except (InternalLLMError, budget_mod.BudgetExhausted):
-                # AGENT_UPDATE_7.md 4.3: deterministic / run-budget errors fail
-                # immediately, never retried, never wrapped as connection errors.
+            except (StageCancelled, InternalLLMError, budget_mod.BudgetExhausted):
+                # Deterministic, cancel, or run-budget errors fail immediately.
                 raise
             except (LLMError, ConnectionError, OSError) as exc:
+                self._check_cancel()
                 last_error = exc
                 self.consecutive_server_errors = 0
                 log.warning(
@@ -642,6 +657,7 @@ class LLMClient:
                     ) from exc
                 slept = heartbeat.sleeping(BACKOFF_BASE_S * gen_attempts, _backoff_text, self.cancel)
                 self.stage_wait["waited_s"] = float(self.stage_wait.get("waited_s", 0.0)) + slept
+                self._check_cancel()
 
     def _call_with_pool(self, system: str, user: str, *, json_mode: bool,
                         max_tokens: int, schema: dict | None = None):
@@ -659,6 +675,7 @@ class LLMClient:
         pauses_left = 3
         last_error: Exception | None = None
         while True:
+            self._check_cancel()
             self._rate_gate()
             try:
                 self._consume_budget()
@@ -704,6 +721,7 @@ class LLMClient:
                     "— no fallback switch happened; the run stays resumable"
                 ) from exc
             except RequestTooLargeError as exc:
+                self._check_cancel()
                 # Unable-to-answer-whole request (context length or a reply
                 # cut by the output budget): the latency/size schedule.
                 last_error = exc
@@ -715,6 +733,7 @@ class LLMClient:
                     ) from exc
                 self._sleep_backoff(backoff)
             except ServerErrorLLMError as exc:
+                self._check_cancel()
                 # Update 12: model-wide capacity errors — NO key rotation;
                 # the bounded backoff with the breaker, the policy triggers,
                 # and the one-time split for eligible latency/size chunks.
@@ -727,6 +746,7 @@ class LLMClient:
                     ) from exc
                 self._sleep_backoff(backoff)
             except TimeoutLLMError as exc:
+                self._check_cancel()
                 # Update 12: same handling as a server deadline (latency).
                 last_error = exc
                 cap_attempts += 1
@@ -737,6 +757,7 @@ class LLMClient:
                     ) from exc
                 self._sleep_backoff(backoff)
             except RateLimitError as exc:
+                self._check_cancel()
                 last_error = exc
                 self.consecutive_server_errors = 0
                 used = getattr(exc, "key_used", None)
@@ -779,11 +800,12 @@ class LLMClient:
                     except Exception:
                         log.exception("on_rate_limit callback failed")
                 if self.provider.wait_for_key():
+                    self._check_cancel()
                     continue
+                self._check_cancel()
                 self.provider.raise_exhausted()
-            except (InternalLLMError, budget_mod.BudgetExhausted):
-                # AGENT_UPDATE_7.md 4.3: deterministic / run-budget errors fail
-                # immediately, never retried, never reported as connection errors.
+            except (StageCancelled, InternalLLMError, budget_mod.BudgetExhausted):
+                # Deterministic, cancel, or run-budget errors fail immediately.
                 raise
             except InvalidKeyError as exc:
                 attempt_no += 1
@@ -803,6 +825,7 @@ class LLMClient:
                     "valid key remains (check Settings → API keys)"
                 ) from exc
             except (LLMError, ConnectionError, OSError) as exc:
+                self._check_cancel()
                 last_error = exc
                 self.consecutive_server_errors = 0
                 log.warning(
@@ -814,16 +837,17 @@ class LLMClient:
                     raise LLMError(
                         f"giving up after {gen_attempts} attempts ({self.provider.name}): {exc}"
                     ) from exc
-                if self.cancel is not None and self.cancel.is_set():
-                    break
                 slept = heartbeat.sleeping(BACKOFF_BASE_S * gen_attempts, _backoff_text, self.cancel)
                 self.stage_wait["waited_s"] = float(self.stage_wait.get("waited_s", 0.0)) + slept
+                self._check_cancel()
             except KeyExhaustedError:
                 # acquire() found every key unavailable right now: this is
                 # not a failure of a request — wait until the earliest
                 # cooldown WITHOUT consuming a retry attempt (AGU5 2.4).
                 if self.provider.wait_for_key():
+                    self._check_cancel()
                     continue
+                self._check_cancel()
                 self.provider.raise_exhausted()  # fail-fast message if all daily
         if isinstance(last_error, InvalidKeyError):
             raise LLMError(
@@ -860,6 +884,7 @@ class LLMClient:
         error_note = ""
         last_error: Exception | None = None
         for attempt in range(1, MAX_VALIDATION_ATTEMPTS + 1):
+            self._check_cancel()
             text = None
             try:
                 text = self._call(
@@ -875,8 +900,8 @@ class LLMClient:
                     _log_raw_reply_diagnosis(text)
                     error_note = error_note_builder(exc)
                     log.warning("llm validation retry: %s", exc)
-            except (OverloadFallbackFast, SplitRequiredError, budget_mod.BudgetExhausted):
-                raise  # AGU11 2.2: propagate fallback/split/budget errors immediately
+            except (StageCancelled, OverloadFallbackFast, SplitRequiredError, budget_mod.BudgetExhausted):
+                raise  # propagate cancel/fallback/split/budget errors immediately
             except LLMError as exc:
                 # A transport/side-error while text is still None: the inner
                 # loop already gave up or the outcome is final — propagate.

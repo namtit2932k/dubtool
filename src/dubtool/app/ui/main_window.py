@@ -265,7 +265,7 @@ class ProgressWidget(QGroupBox):
         # are visible, so the row collapses or extends as needed.
         self.action_row = QHBoxLayout()
         self.cancel_btn = QPushButton(i18n.tr("progress.cancel"))
-        self.cancel_btn.clicked.connect(service.cancel)
+        self.cancel_btn.clicked.connect(self._on_cancel_clicked)
         self.resume_btn = QPushButton(i18n.tr("progress.resume"))
         self.resume_btn.clicked.connect(lambda: self._retry(force=False))
         self.over_btn = QPushButton(i18n.tr("progress.start_over"))
@@ -389,6 +389,8 @@ class ProgressWidget(QGroupBox):
         self.bar.setRange(0, 0)
         self.bar.setValue(0)
         self.counter.setText("")
+        self.cancel_btn.setText(i18n.tr("progress.cancel"))
+        self.cancel_btn.setEnabled(True)
         self.cancel_btn.hide()
         self.resume_btn.hide()
         self.over_btn.hide()
@@ -407,10 +409,18 @@ class ProgressWidget(QGroupBox):
         self.lang_status_lbl.setVisible(False)
         self.log.text.clear()
 
+    def _on_cancel_clicked(self) -> None:
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.setText(i18n.tr("progress.cancelling"))
+        self.log.append(i18n.tr("progress.cancelling_log"))
+        self.service.cancel()
+
     def show_running(self) -> None:
         self.show()
         self.lang_status_lbl.setText("")
         self.lang_status_lbl.setVisible(False)
+        self.cancel_btn.setText(i18n.tr("progress.cancel"))
+        self.cancel_btn.setEnabled(True)
         self.cancel_btn.show()
         for b in (self.resume_btn, self.over_btn, self.open_btn, self.play_btn, self.readable_btn):
             b.hide()
@@ -452,6 +462,8 @@ class ProgressWidget(QGroupBox):
         import time as _time
 
         self._last_event_mono = _time.monotonic()
+        self.cancel_btn.setText(i18n.tr("progress.cancel"))
+        self.cancel_btn.setEnabled(True)
         self.cancel_btn.hide()
         if result.ok:
             self.bar.setRange(0, 1)

@@ -151,9 +151,28 @@ def _extract_json_object(reply: str) -> str:
     return text
 
 
+def _is_service_unavailable(exc: Exception) -> bool:
+    """True when the failure looks like a provider/server outage (503/504/429/timeout/network)
+    rather than a reply-format mismatch on one window."""
+    from dubtool.llm.base import (
+        NetworkLLMError,
+        RateLimitError,
+        RateLimitExhausted,
+        ServerErrorLLMError,
+        TimeoutLLMError,
+        _walk,
+    )
+
+    for e in _walk(exc):
+        if isinstance(e, (ServerErrorLLMError, TimeoutLLMError, NetworkLLMError, RateLimitError, RateLimitExhausted)):
+            return True
+    msg = str(exc).lower()
+    return any(tok in msg for tok in ("503", "504", "unavailable", "rate limit", "timed out", "timeout"))
+
+
 def restore_punctuation(
     segments: list[dict[str, Any]], client, cfg: dict | None = None,
-    lang: str = "en",
+    lang: str = "en", cancel=None,
 ) -> tuple[int, int]:
     """AGU8 4.3: punctuate in windows of about `window_segments` segments.
 
@@ -161,12 +180,19 @@ def restore_punctuation(
     place for accepted windows. The client is a Fast-model LLMClient; every
     window counts one request against llm.max_requests_per_run.
     """
+    from dubtool.job import StageCancelled
+
     cfg = cfg or {}
     window = max(5, int(cfg.get("window_segments", 40)))
+    max_consec_outage = max(1, int(cfg.get("max_consecutive_server_errors", 2)))
+    cancel_ev = cancel if cancel is not None else getattr(client, "cancel", None)
     total = len(segments)
     accepted = rejected = 0
+    consec_outage = 0
     sys_prompt = punctuate_system_prompt(lang)
     for start in range(0, total, window):
+        if cancel_ev is not None and cancel_ev.is_set():
+            raise StageCancelled("punctuate: cancelled by user")
         chunk = segments[start : start + window]
         texts = [(s.get("text") or "").strip() for s in chunk]
         validate = _validate_window(texts, lang=lang)
@@ -174,13 +200,31 @@ def restore_punctuation(
             corrected = client._call_and_validate(
                 sys_prompt, _window_user(texts, lang=lang), validate, _note
             )
+        except StageCancelled:
+            raise
         except Exception as exc:
+            if cancel_ev is not None and cancel_ev.is_set():
+                raise StageCancelled("punctuate: cancelled by user") from exc
             log.warning(
                 "punctuate: window %d-%d rejected (%s) — keeping original text",
                 start, start + len(chunk), exc,
             )
             rejected += 1
+            if _is_service_unavailable(exc):
+                consec_outage += 1
+                if consec_outage >= max_consec_outage:
+                    remaining_windows = max(0, ((total - (start + len(chunk))) + window - 1) // window)
+                    if remaining_windows > 0:
+                        log.warning(
+                            "punctuate: %d consecutive service/server failures — skipping %d remaining window(s) and keeping original text",
+                            consec_outage, remaining_windows,
+                        )
+                        rejected += remaining_windows
+                    break
+            else:
+                consec_outage = 0
             continue
+        consec_outage = 0
         for seg, fixed in zip(chunk, corrected):
             if fixed != seg.get("text"):
                 seg["text"] = fixed

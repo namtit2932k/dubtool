@@ -175,6 +175,8 @@ def run_chunks_parallel(
                 idx = futures[future]
                 try:
                     collected[idx] = future.result()
+                except StageCancelled as exc:
+                    first_error = exc
                 except RateLimitError as exc:
                     rate_limited[idx] = batch[idx]
                     hint = float(getattr(exc, "retry_after", 0) or 0)
@@ -287,6 +289,8 @@ def enforce_budget(
         try:
             shortened = client.shorten_batch(items, policy=policy)
             merge_translations(entries, shortened)
+        except StageCancelled:
+            raise
         except Exception as exc:  # enforcement is best-effort; stage 5 recovers
             log.warning("s3: enforcement pass failed, leaving as is: %s", exc)
     over_after = count_over_budget(entries, tolerance)
@@ -447,6 +451,8 @@ def _completeness_pass(job, entries, config, client, cancel) -> list[dict]:
         upd = client._call_and_validate(
             complete_mod.RETRANSLATE_SYSTEM, user, _validate, _note,
         )
+    except StageCancelled:
+        raise
     except Exception as exc:  # best effort: keep the old text, still report
         log.warning("s3: completeness re-translation failed (%s) — the flagged units are kept", exc)
         upd = []
@@ -585,7 +591,9 @@ def _prepare_sentences(job, config, transcript, pid, api_keys, cancel):
     ):
         client = fast_client(config, pid, api_keys, cancel, job=job)
         try:
-            accepted, rejected = restore_punctuation(transcript, client, punct, lang=src_code)
+            accepted, rejected = restore_punctuation(transcript, client, punct, lang=src_code, cancel=cancel)
+        except StageCancelled:
+            raise
         except BudgetExhausted as exc:
             log.warning("punctuate: %s — the transcription text stays as is", exc)
             accepted = rejected = 0

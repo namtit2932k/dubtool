@@ -9,7 +9,7 @@
 
 - **Repository:** `namtit2932k/dubtool` (public), workspace `d:\Projects\Vibe\Project_K`, build root `D:\Projects\Vibe\Project_K_build`.
 - **Phiên bản đã phát hành gần nhất:** **`v1.0.17`** (commit `6bc8192adc00321c6cc6d9d720b5b7ec7c0f381f`, 2026-11-20) — Official, đã verify đầy đủ qua `scripts/release.py 17` (`DOD_REPORT.md` 9/9 PASS, `RELEASE_EVIDENCE.txt` PASS, `verify_release.py --audit` PASS, `DubTool-1.0.17-win64.zip` 220,758,408 B, SHA-256 `ed404ad5074685f4b163d0ced7b5a437a6dd9a12bfcb6ea06d50fba408d32d93`).
-- **Nhánh hiện tại (`main`):** Sạch, đồng bộ với `origin/main`. **Update 17 (`1.0.17`) đã hoàn tất 100% và phát hành chính thức.**
+- **Nhánh hiện tại (`main`):** Đã hoàn tất Update 17 (`v1.0.17`) và vừa thêm hotfix sửa lỗi **nút Hủy không dừng ở Stage 3 khi gặp 503 liên tục** (`LLMClient` bỏ qua `cancel` khi retry, `punctuate.restore_punctuation` / `s3_translate` nuốt `StageCancelled`, và thiếu phản hồi UI trên `cancel_btn`) — đã pass 585/585 test, `--layout-check` 0 violations, `--gui-smoke` 10/10. Bản `.exe` đã đóng gói hiện tại (`v1.0.17`) chưa bao gồm hotfix này; chờ xác nhận người dùng để build local `.exe` hoặc phát hành `v1.0.18`.
 
 ---
 
