@@ -15,7 +15,7 @@ FILENAME = "settings.json"
 DEFAULTS: dict = {
     "language": "vi",            # vi | en
     "model_id": "gemini-3.5-flash-lite",
-    "fallback_model": "",
+    "fallback_model": "gemini-3.1-flash-lite",
     "overload_policy": "fallback_fast",
     "known_models": [],
     "whisper_model": "small",

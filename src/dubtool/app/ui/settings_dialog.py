@@ -680,7 +680,7 @@ class SettingsDialog(QDialog):
         return sa
 
     @staticmethod
-    def _shrinkable(combo: QComboBox, min_chars: int = 10) -> QComboBox:
+    def _shrinkable(combo: QComboBox, min_chars: int = 6) -> QComboBox:
         combo.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
@@ -689,24 +689,33 @@ class SettingsDialog(QDialog):
         combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         return combo
 
+    @staticmethod
+    def _wrap_label(text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setWordWrap(True)
+        lbl.setMinimumWidth(0)
+        return lbl
+
     # ---------------------------------------------------------- general tab
     def _build_general_tab(self) -> QWidget:
         page = QWidget()
         form = QFormLayout(page)
+        form.setContentsMargins(10, 10, 14, 10)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         self.lang_combo = self._shrinkable(QComboBox())
         self.lang_combo.addItem("Tiếng Việt", "vi")
         self.lang_combo.addItem("English", "en")
-        form.addRow(i18n.tr("settings.language"), self.lang_combo)
+        form.addRow(self._wrap_label(i18n.tr("settings.language")), self.lang_combo)
         self.tts_mode_combo = self._shrinkable(QComboBox())
         self.tts_mode_combo.addItem(i18n.tr("settings.tts_mode_turbo"), "v3turbo_int8")
         self.tts_mode_combo.addItem(i18n.tr("settings.tts_mode_nano"), "v3nano")
         self.tts_mode_combo.setToolTip(i18n.tr("settings.tts_model_tip"))
         self.tts_mode_combo.currentIndexChanged.connect(self._on_tts_mode_changed)
-        form.addRow(i18n.tr("settings.tts_model"), self.tts_mode_combo)
+        form.addRow(self._wrap_label(i18n.tr("settings.tts_model")), self.tts_mode_combo)
         self.voice_combo = self._shrinkable(QComboBox())
         self._populate_voices(DEFAULT_TTS_MODE, DEFAULT_VOICE)
-        form.addRow(i18n.tr("options.voice"), self.voice_combo)
+        form.addRow(self._wrap_label(i18n.tr("options.voice")), self.voice_combo)
         from dubtool.app.voice_preview import make_preview_button
 
         self.preview_voice_btn = make_preview_button(
@@ -716,6 +725,7 @@ class SettingsDialog(QDialog):
             ),
             parent=page,
         )
+        self.preview_voice_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         form.addRow("", self.preview_voice_btn)
 
         # The translation-model group (one model, no Fast/Accurate modes):
@@ -753,8 +763,9 @@ class SettingsDialog(QDialog):
                 continue
             self.fallback_combo.addItem(f"{model_id} ({pid})", model_id)
         self.fallback_combo.setToolTip(i18n.tr("settings.fallback_model_tip"))
-        form.addRow(i18n.tr("settings.fallback_model"), self.fallback_combo)
+        form.addRow(self._wrap_label(i18n.tr("settings.fallback_model")), self.fallback_combo)
         self.refresh_models_btn = QPushButton(i18n.tr("settings.refresh_models_btn"))
+        self.refresh_models_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.refresh_models_btn.clicked.connect(self._refresh_provider_models)
         form.addRow("", self.refresh_models_btn)
         self.models_status = QLabel("")
@@ -769,7 +780,7 @@ class SettingsDialog(QDialog):
         self.overload_combo.addItem(i18n.tr("settings.overload_ask"), "ask")
         self.overload_combo.addItem(i18n.tr("settings.overload_wait"), "keep_backoff")
         self.overload_combo.setToolTip(i18n.tr("settings.overload_tooltip"))
-        form.addRow(i18n.tr("settings.overload_label"), self.overload_combo)
+        form.addRow(self._wrap_label(i18n.tr("settings.overload_label")), self.overload_combo)
         self.whisper_combo = self._shrinkable(QComboBox())
         # AGU8 task 7: base/small/medium/large-v3 with a one-line description
         # ("nhanh nhất", "cân bằng", …) baked into the item text.
@@ -789,11 +800,11 @@ class SettingsDialog(QDialog):
             )
         else:
             self.whisper_combo.setToolTip(i18n.tr("settings.whisper_size_hint"))
-        form.addRow(i18n.tr("settings.whisper_model"), self.whisper_combo)
+        form.addRow(self._wrap_label(i18n.tr("settings.whisper_model")), self.whisper_combo)
         self.device_combo = self._shrinkable(QComboBox())
         for dev in ("auto", "cpu", "cuda"):
             self.device_combo.addItem(dev, dev)
-        form.addRow(i18n.tr("settings.whisper_device"), self.device_combo)
+        form.addRow(self._wrap_label(i18n.tr("settings.whisper_device")), self.device_combo)
         # AGU8 6.3 fidelity preset: the meaning-vs-timing trade-off.
         self.priority_combo = self._shrinkable(QComboBox())
         for key in ("faithful", "balanced", "timing"):
@@ -801,19 +812,19 @@ class SettingsDialog(QDialog):
                 i18n.tr("settings.priority_" + key), key
             )
         self.priority_combo.setToolTip(i18n.tr("settings.priority_tooltip"))
-        form.addRow(i18n.tr("settings.priority"), self.priority_combo)
+        form.addRow(self._wrap_label(i18n.tr("settings.priority")), self.priority_combo)
         # AGU6 4.2: "Mức dùng CPU / CPU usage" — thread budget for Whisper
         # and the FFmpeg encode (low = 1/4 of cores, balanced = 1/2, max = all).
         self.cpu_combo = self._shrinkable(QComboBox())
         self.cpu_combo.addItem(i18n.tr("settings.cpu_low"), "low")
         self.cpu_combo.addItem(i18n.tr("settings.cpu_balanced"), "balanced")
         self.cpu_combo.addItem(i18n.tr("settings.cpu_maximum"), "maximum")
-        form.addRow(i18n.tr("settings.cpu_usage"), self.cpu_combo)
+        form.addRow(self._wrap_label(i18n.tr("settings.cpu_usage")), self.cpu_combo)
         # AGU9 10.4: the punctuation-hint checkbox — present, not decided.
         # Default stays off; the tooltip states the measured trade-off.
         self.asr_prompt_check = QCheckBox(i18n.tr("settings.asr_prompt"))
         self.asr_prompt_check.setToolTip(i18n.tr("settings.asr_prompt_tooltip"))
-        form.addRow(i18n.tr("settings.asr_prompt_label"), self.asr_prompt_check)
+        form.addRow(self.asr_prompt_check)
         return self._wrap_tab_scroll(page)
 
     def _refresh_provider_models(self) -> None:
@@ -904,7 +915,9 @@ class SettingsDialog(QDialog):
 
         page = QWidget()
         form = QFormLayout(page)
+        form.setContentsMargins(10, 10, 14, 10)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         default_jobs = str(_default_jobs_dir())
         self.jobs_edit = QLineEdit()
         self.jobs_edit.setPlaceholderText(default_jobs)
@@ -931,39 +944,68 @@ class SettingsDialog(QDialog):
         self.preset_combo.addItem("faster", "faster")
         self.preset_combo.addItem("medium", "medium")
         form.addRow(i18n.tr("settings.encode_preset"), self.preset_combo)
-        # Update 9 task 6: the jobs folder and the cleanup button live in a
-        # titled group with the plain explanation, the path, size, run count,
-        # open-folder, the days spinner with its one-line hint, and cleanup.
-        from PySide6.QtWidgets import QGroupBox, QPushButton as _PB, QSpinBox, QVBoxLayout
+        # Update 9 task 6: the jobs folder, retention knobs and cleanup actions
+        # live together in one cohesive group box with clean alignment.
+        from PySide6.QtWidgets import QGridLayout, QGroupBox, QPushButton as _PB, QSpinBox, QVBoxLayout
 
         group = QGroupBox(i18n.tr("adv.working_files_title"), page)
+        group.setMinimumWidth(0)
         gv = QVBoxLayout(group)
+        gv.setSpacing(8)
         info = QLabel(i18n.tr("adv.working_files_info"), group)
         info.setWordWrap(True)
+        info.setMinimumWidth(0)
         gv.addWidget(info)
         self.jobs_stats_label = QLabel("", group)
         self.jobs_stats_label.setWordWrap(True)
+        self.jobs_stats_label.setMinimumWidth(0)
+        self.jobs_stats_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         gv.addWidget(self.jobs_stats_label)
-        self.open_jobs_btn = _PB(i18n.tr("adv.open_jobs_dir"), group)
-        self.open_jobs_btn.clicked.connect(self._open_jobs_dir)
-        gv.addWidget(self.open_jobs_btn)
-        form.addRow(group)
 
-        self.jobs_days_spin = QSpinBox()
+        limits_grid = QGridLayout()
+        limits_grid.setContentsMargins(0, 4, 0, 4)
+        limits_grid.setHorizontalSpacing(12)
+        limits_grid.setVerticalSpacing(6)
+        limits_grid.setColumnStretch(0, 1)
+        limits_grid.setColumnStretch(1, 0)
+
+        days_lbl = QLabel(i18n.tr("settings.jobs_days"), group)
+        days_lbl.setWordWrap(True)
+        self.jobs_days_spin = QSpinBox(group)
         self.jobs_days_spin.setRange(1, 365)
-        form.addRow(i18n.tr("settings.jobs_days"), self.jobs_days_spin)
-        days_hint = QLabel(i18n.tr("adv.jobs_days_hint"), page)
+        self.jobs_days_spin.setMinimumWidth(130)
+        self.jobs_days_spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        limits_grid.addWidget(days_lbl, 0, 0)
+        limits_grid.addWidget(self.jobs_days_spin, 0, 1)
+
+        days_hint = QLabel(i18n.tr("adv.jobs_days_hint"), group)
         days_hint.setWordWrap(True)
-        form.addRow("", days_hint)
+        days_hint.setStyleSheet("color: #9aa0a6; font-size: 9pt;")
+        limits_grid.addWidget(days_hint, 1, 0, 1, 2)
         self.jobs_days_hint_label = days_hint
+
         # AGU10 5.3: trim the jobs folder when it exceeds the cap.
-        self.jobs_total_mb_spin = QSpinBox()
+        mb_lbl = QLabel(i18n.tr("settings.jobs_total_mb"), group)
+        mb_lbl.setWordWrap(True)
+        self.jobs_total_mb_spin = QSpinBox(group)
         self.jobs_total_mb_spin.setRange(200, 200000)
         self.jobs_total_mb_spin.setSuffix(" MB")
-        form.addRow(i18n.tr("settings.jobs_total_mb"), self.jobs_total_mb_spin)
-        self.clean_now_btn = _PB(i18n.tr("settings.clean_now"))
+        self.jobs_total_mb_spin.setMinimumWidth(130)
+        self.jobs_total_mb_spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        limits_grid.addWidget(mb_lbl, 2, 0)
+        limits_grid.addWidget(self.jobs_total_mb_spin, 2, 1)
+        gv.addLayout(limits_grid)
+
+        actions_row = QHBoxLayout()
+        self.open_jobs_btn = _PB(i18n.tr("adv.open_jobs_dir"), group)
+        self.open_jobs_btn.clicked.connect(self._open_jobs_dir)
+        self.clean_now_btn = _PB(i18n.tr("settings.clean_now"), group)
         self.clean_now_btn.clicked.connect(self._clean_now)
-        form.addRow("", self.clean_now_btn)
+        actions_row.addWidget(self.open_jobs_btn, 1)
+        actions_row.addWidget(self.clean_now_btn, 1)
+        gv.addLayout(actions_row)
+
+        form.addRow(group)
         return self._wrap_tab_scroll(page)
 
     def _browse_jobs_dir(self) -> None:
@@ -1108,9 +1150,13 @@ class SettingsDialog(QDialog):
         saved_fallback = str(s.get("fallback_model") or "")
         idx_f = self.fallback_combo.findData(saved_fallback)
         if saved_fallback and idx_f < 0:
-            # A saved fallback that is not in the list keeps its id (never
-            # wait silently replaced).
-            self.fallback_combo.addItem(f"{saved_fallback}", saved_fallback)
+            # A saved fallback that is not yet in the list (e.g. first run before
+            # an API key is added) keeps its catalog label instead of being dropped.
+            from dubtool.llm import catalog as catalog_mod
+
+            entry = catalog_mod.get(saved_fallback)
+            label = f"{entry.label} ({entry.provider})" if entry else saved_fallback
+            self.fallback_combo.addItem(label, saved_fallback)
             idx_f = self.fallback_combo.findData(saved_fallback)
         self.fallback_combo.setCurrentIndex(max(0, idx_f))
         self.preset_combo.setCurrentIndex(max(0, self.preset_combo.findData(s.get("video_encode_preset", "veryfast"))))

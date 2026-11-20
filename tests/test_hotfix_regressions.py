@@ -330,12 +330,20 @@ def test_settings_dialog_resizable_has_preview_and_jobs_placeholder(qtbot, monke
     dlg.show()
     assert dlg.isSizeGripEnabled() is True
     assert dlg.minimumSizeHint().width() <= 560
+    assert settings.DEFAULTS["fallback_model"] == "gemini-3.1-flash-lite"
+    assert dlg.fallback_combo.currentData() == "gemini-3.1-flash-lite"
     dlg.resize(QSize(720, 620))
     qtbot.wait(20)
     assert dlg.width() >= 700
     dlg.resize(QSize(540, 460))
     qtbot.wait(20)
     assert dlg.width() <= 560
+    from dubtool.app import layout_check
+    for tab_idx in (1, 2):
+        dlg.tabs.setCurrentIndex(tab_idx)
+        qtbot.wait(20)
+        overflow = [v for v in layout_check.violations(dlg) if "scroll-content-overflow-x" in v]
+        assert overflow == [], f"Tab {tab_idx} clipped horizontally: {overflow}"
     assert hasattr(dlg, "preview_voice_btn")
     assert str(tmp_path / "jobs") in dlg.jobs_edit.placeholderText()
     assert str(tmp_path / "jobs") in dlg.jobs_stats_label.text()

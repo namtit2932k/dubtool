@@ -321,7 +321,13 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     secrets_for_shots._save_list = lambda *a, **kw: fake.__setitem__(slice(None), list(a[1] if len(a) > 1 else a[0] if a else []))
     
     settings_dialog = SettingsDialog()
+    fake_jobs = r"C:\Users\User\AppData\Local\DubTool\jobs"
     settings_dialog.jobs_edit.setText("")
+    settings_dialog.jobs_edit.setPlaceholderText(fake_jobs)
+    settings_dialog.jobs_edit.setToolTip(i18n.tr("settings.jobs_dir_tip", path=fake_jobs))
+    settings_dialog.jobs_stats_label.setText(
+        f"{fake_jobs}\n" + i18n.tr("adv.jobs_stats", count=0, size="0 B")
+    )
     settings_dialog.output_edit.setText(str(FAKE_OUTPUT_DIR))
     settings_dialog._badges = {("gemini", 1): "quota", 1: "quota"}
     settings_dialog._refresh_rows(select=0)
