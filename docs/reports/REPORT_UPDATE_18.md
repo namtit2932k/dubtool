@@ -59,7 +59,7 @@ Pre-release `scripts/verify_release.py --audit` snapshot (live GitHub API vs loc
 - **Branding, README & Repository Hygiene:**
   - Updated `README.md` and added `docs/README.vi.md` with centered hero header, white transparent logo (`docs/images/logo.png`), badges, and download CTA.
   - Updated `packaging/icon.ico` (black-background white icon for `DubTool.exe` and app window) and preserved `docs/images/logo.png` in `scripts/update_readme_images.py`.
-  - Moved historical `REPORT_UPDATE_7.md`–`REPORT_UPDATE_17.md` into `docs/reports/` and updated `scripts/definition_of_done.py` to support `docs/reports/`.
+  - Moved historical update reports (`docs/reports/REPORT_UPDATE_7.md`–`docs/reports/REPORT_UPDATE_17.md`) into `docs/reports/` and updated `scripts/definition_of_done.py` to support `docs/reports/`.
 
 ---
 
