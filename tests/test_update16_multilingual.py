@@ -240,7 +240,7 @@ def test_vietnamese_detected_stops_before_translate_and_offers_subtitles_only(tm
     assert llm_called == []
     assert tts_called == []
 
-    # Now with subtitles_only=True (and no API key needed!)
+    # Now resume same job with subtitles_only=True (force=False, no API key needed!)
     res_sub = api.run_dub(
         video, out_dir,
         options=api.DubOptions(video_language="auto", subtitles_only=True),
@@ -249,13 +249,28 @@ def test_vietnamese_detected_stops_before_translate_and_offers_subtitles_only(tm
         cancel=threading.Event(),
         jobs_dir=jobs_dir,
         interactive=False,
-        force=True,
+        force=False,
     )
     assert res_sub.ok is True
     assert res_sub.code == "subtitles_only"
     assert res_sub.out_srt and res_sub.out_srt.is_file()
     assert res_sub.out_readable and res_sub.out_readable.is_file()
     assert "Xin chào các bạn." in res_sub.out_srt.read_text(encoding="utf-8")
+    assert llm_called == []
+    assert tts_called == []
+
+    # Resuming Vietnamese job without subtitles_only must STILL stop before s3
+    res_again = api.run_dub(
+        video, out_dir,
+        options=api.DubOptions(video_language="auto"),
+        secrets=FakeSecrets(),
+        progress=lambda _e: None,
+        cancel=threading.Event(),
+        jobs_dir=jobs_dir,
+        interactive=False,
+        force=False,
+    )
+    assert res_again.code == "source_is_vietnamese"
     assert llm_called == []
     assert tts_called == []
 
@@ -343,7 +358,16 @@ def test_prompts_include_source_lang_and_fillers_skipped_for_non_english(tmp_pat
     fill_state = s3_translate._filler_state(job, cfg, transcript)
     assert fill_state["enabled"] is False
     assert fill_state["suggestions"] == []
+    assert fill_state["count"] == 0
     assert fill_state["policy"] == ""
+
+    # Single continuous 45s VAD speech region still produces 3 spaced windows
+    wins = s2_transcribe._select_vad_windows(
+        _fake_audio(45.0),
+        speech_regions=[{"start": 0, "end": 45 * 16000}],
+    )
+    assert len(wins) == 3
+    assert wins[0][0] < wins[1][0] < wins[2][0]
 
 
 # ----------------------------------------- 3. Readable .docx XML (RTL & CJK)

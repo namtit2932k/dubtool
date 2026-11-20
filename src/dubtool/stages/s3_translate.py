@@ -353,6 +353,7 @@ def _filler_state(job, config, transcript) -> dict:
                 "policy": "",
                 "words": [],
                 "suggestions": [],
+                "count": 0,
                 "enabled": False,
             }
         settings = per_lang[src_code]

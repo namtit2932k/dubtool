@@ -485,6 +485,36 @@ def run_dub(
                     "%s: done with unchanged inputs, skipping", stage
                 )
                 progress(ProgressEvent(stage=stage, state="skipped"))
+                if stage == "s2":
+                    sl = job.state.get("source_language") if isinstance(job.state, dict) else None
+                    if options.subtitles_only:
+                        from dubtool.stages import s8_export_readable as s8
+
+                        base = options.output_name_base or video.stem
+                        srt_p, txt_p = s8.export_subtitles_only(job.dir, output_dir, base)
+                        return DubResult(
+                            ok=True,
+                            code="subtitles_only",
+                            out_srt=srt_p,
+                            out_readable=txt_p,
+                            job_id=job.dir.name,
+                            job_dir=job.dir,
+                            source_language=sl,
+                        )
+                    min_conf = float((cfg.asr or {}).get("language_min_confidence", 0.60) or 0.60)
+                    if isinstance(sl, dict) and str(sl.get("code") or "").lower() == "vi":
+                        prob = float(sl.get("probability") or 0.0)
+                        if prob >= min_conf or sl.get("method") == "manual":
+                            pct = int(round(prob * 100))
+                            msg = f"Video có vẻ đã là tiếng Việt (độ tin cậy {pct}%). Không cần dịch."
+                            return DubResult(
+                                ok=False,
+                                code="source_is_vietnamese",
+                                job_id=job.dir.name,
+                                job_dir=job.dir,
+                                source_language=sl,
+                                error=msg,
+                            )
                 continue
             progress(ProgressEvent(stage=stage, state="start"))
             stage_now["stage"] = stage

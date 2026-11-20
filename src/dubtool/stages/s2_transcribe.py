@@ -373,30 +373,43 @@ def _select_vad_windows(
             speech_regions = []
 
     starts: list[int] = []
+    eff_win_samples = win_samples
     if speech_regions:
-        # Pick first, middle, and near-end speech regions (deduplicated).
+        # Compute total active speech span across regions. If Silero VAD merges
+        # continuous speech into 1-2 long regions (>15s), sample start/mid/end
+        # inside the speech span using non-overlapping windows up to window_s.
+        first_s = max(0, int(speech_regions[0].get("start", 0)))
+        last_e = min(total_samples, int(speech_regions[-1].get("end", total_samples)))
+        span = max(0, last_e - first_s)
         n = len(speech_regions)
-        pick_indices = [0]
-        if n >= 3:
-            pick_indices.append(n // 2)
-            pick_indices.append(n - 1)
-        elif n == 2:
-            pick_indices.append(1)
-        for idx in pick_indices[:max_windows]:
-            st = max(0, int(speech_regions[idx].get("start", 0)))
-            if st not in starts:
-                starts.append(st)
+        if n >= max_windows:
+            pick_indices = [0, n // 2, n - 1]
+            for idx in pick_indices[:max_windows]:
+                st = max(0, int(speech_regions[idx].get("start", 0)))
+                if st not in starts:
+                    starts.append(st)
+        elif span >= int(15.0 * sample_rate):
+            eff_win_samples = min(win_samples, max(int(10.0 * sample_rate), span // max_windows))
+            last_start = max(first_s, last_e - eff_win_samples)
+            mid_start = first_s + max(0, (last_start - first_s) // 2)
+            starts = sorted({first_s, mid_start, last_start})[:max_windows]
+        else:
+            for reg in speech_regions[:max_windows]:
+                st = max(0, int(reg.get("start", 0)))
+                if st not in starts:
+                    starts.append(st)
     if not starts:
-        if total_samples <= win_samples:
+        if total_samples <= int(15.0 * sample_rate):
             starts = [0]
         else:
-            last_start = max(0, total_samples - win_samples)
-            mid_start = max(0, (total_samples - win_samples) // 2)
+            eff_win_samples = min(win_samples, max(int(10.0 * sample_rate), total_samples // max_windows))
+            last_start = max(0, total_samples - eff_win_samples)
+            mid_start = max(0, last_start // 2)
             starts = sorted({0, mid_start, last_start})[:max_windows]
 
     windows: list[tuple[float, Any]] = []
     for st in starts[:max_windows]:
-        end = min(total_samples, st + win_samples)
+        end = min(total_samples, st + eff_win_samples)
         if end > st:
             windows.append((round(st / float(sample_rate), 2), audio[st:end]))
     return windows
