@@ -28,7 +28,9 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -37,6 +39,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -215,6 +219,7 @@ class SettingsDialog(QDialog):
                  busy_provider=None, initial_provider: str | None = None):
         super().__init__(parent)
         self.setWindowTitle(i18n.tr("app.settings"))
+        self.setSizeGripEnabled(True)
         # No explicit global minimum width: the dialog's window minimum is
         # the tab content's own minimum, so it can never be opened narrower
         # than its buttons fit (AGENT_UPDATE_5.md task 4 layout invariant).
@@ -273,6 +278,8 @@ class SettingsDialog(QDialog):
         self._refresh_rows()
         self._load()
         self._on_key_saved = on_key_saved
+        self.setMinimumHeight(400)
+        self.resize(max(540, self.minimumSizeHint().width()), min(580, max(480, self.sizeHint().height())))
 
     # ------------------------------------------------- read-only (AGU9 2.2)
     def _apply_read_only(self) -> None:
@@ -321,7 +328,9 @@ class SettingsDialog(QDialog):
         # was selected — Remove/Up/Down/Test never became clickable).
         self.key_list.currentRowChanged.connect(lambda _row: self._update_buttons())
         self.key_list.itemSelectionChanged.connect(lambda: self._update_buttons())
-        btns = QHBoxLayout()
+        btns_row1 = QHBoxLayout()
+        btns_row2 = QHBoxLayout()
+        btns_row3 = QHBoxLayout()
         self.test_all_btn = QPushButton(i18n.tr("settings.test_all"))
         self.test_one_btn = QPushButton(i18n.tr("settings.test_selected"))
         self.add_btn = QPushButton(i18n.tr("settings.add_keys"))
@@ -329,10 +338,14 @@ class SettingsDialog(QDialog):
         self.down_btn = QPushButton(i18n.tr("settings.move_down"))
         self.remove_btn = QPushButton(i18n.tr("settings.remove"))
         self.import_env_btn = QPushButton(i18n.tr("settings.env_import"))
-        for b in (self.add_btn, self.up_btn, self.down_btn, self.remove_btn,
-                  self.test_one_btn, self.test_all_btn, self.import_env_btn):
-            btns.addWidget(b)
-        layout.addLayout(btns)
+        for b in (self.add_btn, self.up_btn, self.down_btn, self.remove_btn):
+            btns_row1.addWidget(b)
+        for b in (self.test_one_btn, self.test_all_btn):
+            btns_row2.addWidget(b)
+        btns_row3.addWidget(self.import_env_btn)
+        layout.addLayout(btns_row1)
+        layout.addLayout(btns_row2)
+        layout.addLayout(btns_row3)
 
         self.add_btn.clicked.connect(self._add_keys_manual)
         self.remove_btn.clicked.connect(self._remove_key)
@@ -656,30 +669,61 @@ class SettingsDialog(QDialog):
         self._testing_rows.clear()
         self._refresh_rows()
 
+    @staticmethod
+    def _wrap_tab_scroll(page: QWidget) -> QScrollArea:
+        page.setMinimumWidth(0)
+        sa = QScrollArea()
+        sa.setWidgetResizable(True)
+        sa.setFrameShape(QFrame.Shape.NoFrame)
+        sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        sa.setWidget(page)
+        return sa
+
+    @staticmethod
+    def _shrinkable(combo: QComboBox, min_chars: int = 10) -> QComboBox:
+        combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        combo.setMinimumContentsLength(min_chars)
+        combo.setMinimumWidth(0)
+        combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        return combo
+
     # ---------------------------------------------------------- general tab
     def _build_general_tab(self) -> QWidget:
         page = QWidget()
         form = QFormLayout(page)
-        self.lang_combo = QComboBox()
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        self.lang_combo = self._shrinkable(QComboBox())
         self.lang_combo.addItem("Tiếng Việt", "vi")
         self.lang_combo.addItem("English", "en")
         form.addRow(i18n.tr("settings.language"), self.lang_combo)
-        self.tts_mode_combo = QComboBox()
+        self.tts_mode_combo = self._shrinkable(QComboBox())
         self.tts_mode_combo.addItem(i18n.tr("settings.tts_mode_turbo"), "v3turbo_int8")
         self.tts_mode_combo.addItem(i18n.tr("settings.tts_mode_nano"), "v3nano")
         self.tts_mode_combo.setToolTip(i18n.tr("settings.tts_model_tip"))
         self.tts_mode_combo.currentIndexChanged.connect(self._on_tts_mode_changed)
         form.addRow(i18n.tr("settings.tts_model"), self.tts_mode_combo)
-        self.voice_combo = QComboBox()
+        self.voice_combo = self._shrinkable(QComboBox())
         self._populate_voices(DEFAULT_TTS_MODE, DEFAULT_VOICE)
         form.addRow(i18n.tr("options.voice"), self.voice_combo)
+        from dubtool.app.voice_preview import make_preview_button
+
+        self.preview_voice_btn = make_preview_button(
+            lambda: (
+                str(self.tts_mode_combo.currentData() or DEFAULT_TTS_MODE),
+                str(self.voice_combo.currentData() or DEFAULT_VOICE),
+            ),
+            parent=page,
+        )
+        form.addRow("", self.preview_voice_btn)
 
         # The translation-model group (one model, no Fast/Accurate modes):
         # the fallback model used when the selected model is overloaded or
         # out of quota (items = the models that have a key; “Không” = no
         # fallback), plus the overload policy dropdown and the refresh of
         # the model list from every provider that has a key.
-        self.fallback_combo = QComboBox()
+        self.fallback_combo = self._shrinkable(QComboBox())
         self.fallback_combo.addItem(i18n.tr("settings.fallback_model_none"), "")
         from dubtool.llm import catalog as catalog_mod
 
@@ -720,13 +764,13 @@ class SettingsDialog(QDialog):
         # Update 12 task 2.4: what happens when the selected model is
         # overloaded or out of quota for every key (disabled while a run is
         # busy through the dialog's read-only mode).
-        self.overload_combo = QComboBox()
+        self.overload_combo = self._shrinkable(QComboBox())
         self.overload_combo.addItem(i18n.tr("settings.overload_auto"), "fallback_fast")
         self.overload_combo.addItem(i18n.tr("settings.overload_ask"), "ask")
         self.overload_combo.addItem(i18n.tr("settings.overload_wait"), "keep_backoff")
         self.overload_combo.setToolTip(i18n.tr("settings.overload_tooltip"))
         form.addRow(i18n.tr("settings.overload_label"), self.overload_combo)
-        self.whisper_combo = QComboBox()
+        self.whisper_combo = self._shrinkable(QComboBox())
         # AGU8 task 7: base/small/medium/large-v3 with a one-line description
         # ("nhanh nhất", "cân bằng", …) baked into the item text.
         for size, desc_key in (("base", "settings.whisper_base"), ("small", "settings.whisper_small"), ("medium", "settings.whisper_medium"), ("large-v3", "settings.whisper_large")):
@@ -746,12 +790,12 @@ class SettingsDialog(QDialog):
         else:
             self.whisper_combo.setToolTip(i18n.tr("settings.whisper_size_hint"))
         form.addRow(i18n.tr("settings.whisper_model"), self.whisper_combo)
-        self.device_combo = QComboBox()
+        self.device_combo = self._shrinkable(QComboBox())
         for dev in ("auto", "cpu", "cuda"):
             self.device_combo.addItem(dev, dev)
         form.addRow(i18n.tr("settings.whisper_device"), self.device_combo)
         # AGU8 6.3 fidelity preset: the meaning-vs-timing trade-off.
-        self.priority_combo = QComboBox()
+        self.priority_combo = self._shrinkable(QComboBox())
         for key in ("faithful", "balanced", "timing"):
             self.priority_combo.addItem(
                 i18n.tr("settings.priority_" + key), key
@@ -760,7 +804,7 @@ class SettingsDialog(QDialog):
         form.addRow(i18n.tr("settings.priority"), self.priority_combo)
         # AGU6 4.2: "Mức dùng CPU / CPU usage" — thread budget for Whisper
         # and the FFmpeg encode (low = 1/4 of cores, balanced = 1/2, max = all).
-        self.cpu_combo = QComboBox()
+        self.cpu_combo = self._shrinkable(QComboBox())
         self.cpu_combo.addItem(i18n.tr("settings.cpu_low"), "low")
         self.cpu_combo.addItem(i18n.tr("settings.cpu_balanced"), "balanced")
         self.cpu_combo.addItem(i18n.tr("settings.cpu_maximum"), "maximum")
@@ -770,7 +814,7 @@ class SettingsDialog(QDialog):
         self.asr_prompt_check = QCheckBox(i18n.tr("settings.asr_prompt"))
         self.asr_prompt_check.setToolTip(i18n.tr("settings.asr_prompt_tooltip"))
         form.addRow(i18n.tr("settings.asr_prompt_label"), self.asr_prompt_check)
-        return page
+        return self._wrap_tab_scroll(page)
 
     def _refresh_provider_models(self) -> None:
         """Ask every provider that has a key for its model list (off the UI
@@ -856,14 +900,33 @@ class SettingsDialog(QDialog):
 
     # --------------------------------------------------------- advanced tab
     def _build_advanced_tab(self) -> QWidget:
+        from dubtool.app.paths import jobs_dir as _default_jobs_dir
+
         page = QWidget()
         form = QFormLayout(page)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        default_jobs = str(_default_jobs_dir())
         self.jobs_edit = QLineEdit()
-        form.addRow(i18n.tr("settings.jobs_dir"), self.jobs_edit)
+        self.jobs_edit.setPlaceholderText(default_jobs)
+        self.jobs_edit.setToolTip(i18n.tr("settings.jobs_dir_tip", path=default_jobs))
+        self.jobs_edit.textChanged.connect(lambda _t: self._refresh_jobs_stats())
+        jobs_row = QHBoxLayout()
+        jobs_row.setContentsMargins(0, 0, 0, 0)
+        jobs_row.addWidget(self.jobs_edit, 1)
+        self.jobs_browse_btn = QPushButton(i18n.tr("settings.browse"))
+        self.jobs_browse_btn.clicked.connect(self._browse_jobs_dir)
+        jobs_row.addWidget(self.jobs_browse_btn)
+        form.addRow(i18n.tr("settings.jobs_dir"), jobs_row)
         self.output_edit = QLineEdit()
-        form.addRow(i18n.tr("settings.default_output"), self.output_edit)
+        output_row = QHBoxLayout()
+        output_row.setContentsMargins(0, 0, 0, 0)
+        output_row.addWidget(self.output_edit, 1)
+        self.output_browse_btn = QPushButton(i18n.tr("settings.browse"))
+        self.output_browse_btn.clicked.connect(self._browse_output_dir)
+        output_row.addWidget(self.output_browse_btn)
+        form.addRow(i18n.tr("settings.default_output"), output_row)
         # AGU6 4.2: x264 preset for the burn encode (same CRF, speed/size).
-        self.preset_combo = QComboBox()
+        self.preset_combo = self._shrinkable(QComboBox())
         self.preset_combo.addItem("veryfast", "veryfast")
         self.preset_combo.addItem("faster", "faster")
         self.preset_combo.addItem("medium", "medium")
@@ -871,9 +934,9 @@ class SettingsDialog(QDialog):
         # Update 9 task 6: the jobs folder and the cleanup button live in a
         # titled group with the plain explanation, the path, size, run count,
         # open-folder, the days spinner with its one-line hint, and cleanup.
-        from PySide6.QtWidgets import QGroupBox, QPushButton, QSpinBox, QVBoxLayout
+        from PySide6.QtWidgets import QGroupBox, QPushButton as _PB, QSpinBox, QVBoxLayout
 
-        group = QGroupBox(i18n.tr("adv.working_files_title"), self)
+        group = QGroupBox(i18n.tr("adv.working_files_title"), page)
         gv = QVBoxLayout(group)
         info = QLabel(i18n.tr("adv.working_files_info"), group)
         info.setWordWrap(True)
@@ -881,7 +944,7 @@ class SettingsDialog(QDialog):
         self.jobs_stats_label = QLabel("", group)
         self.jobs_stats_label.setWordWrap(True)
         gv.addWidget(self.jobs_stats_label)
-        self.open_jobs_btn = QPushButton(i18n.tr("adv.open_jobs_dir"), group)
+        self.open_jobs_btn = _PB(i18n.tr("adv.open_jobs_dir"), group)
         self.open_jobs_btn.clicked.connect(self._open_jobs_dir)
         gv.addWidget(self.open_jobs_btn)
         form.addRow(group)
@@ -898,10 +961,22 @@ class SettingsDialog(QDialog):
         self.jobs_total_mb_spin.setRange(200, 200000)
         self.jobs_total_mb_spin.setSuffix(" MB")
         form.addRow(i18n.tr("settings.jobs_total_mb"), self.jobs_total_mb_spin)
-        self.clean_now_btn = QPushButton(i18n.tr("settings.clean_now"))
+        self.clean_now_btn = _PB(i18n.tr("settings.clean_now"))
         self.clean_now_btn.clicked.connect(self._clean_now)
         form.addRow("", self.clean_now_btn)
-        return page
+        return self._wrap_tab_scroll(page)
+
+    def _browse_jobs_dir(self) -> None:
+        start = self.jobs_edit.text().strip() or str(self._jobs_root())
+        chosen = QFileDialog.getExistingDirectory(self, i18n.tr("settings.jobs_dir"), start)
+        if chosen:
+            self.jobs_edit.setText(chosen)
+
+    def _browse_output_dir(self) -> None:
+        start = self.output_edit.text().strip() or str(Path.home())
+        chosen = QFileDialog.getExistingDirectory(self, i18n.tr("settings.default_output"), start)
+        if chosen:
+            self.output_edit.setText(chosen)
 
     def _jobs_root(self):
         """The jobs folder from the dialog's current edit value, or the default."""
@@ -915,10 +990,12 @@ class SettingsDialog(QDialog):
         a manual jobs-dir edit is applied)."""
         from dubtool.app import housekeeping
 
-        count, size, _oldest = housekeeping.job_stats(self._jobs_root())
-        self.jobs_stats_label.setText(i18n.tr(
+        root = self._jobs_root()
+        count, size, _oldest = housekeeping.job_stats(root)
+        stats_line = i18n.tr(
             "adv.jobs_stats", count=count, size=housekeeping.human(size)
-        ))
+        )
+        self.jobs_stats_label.setText(f"{root}\n{stats_line}")
 
     def _open_jobs_dir(self) -> None:
         """Open the jobs root with the fixed (non-hidden) open path —

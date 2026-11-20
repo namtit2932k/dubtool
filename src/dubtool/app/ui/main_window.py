@@ -210,6 +210,15 @@ class OptionsWidget(QGroupBox):
         _make_shrinkable_combo(self.voice_combo)
         self._tts_mode = str(s.get("tts_model") or "v3turbo_int8")
         self.reload_voices(s)
+        from dubtool.app.voice_preview import make_preview_button
+
+        self.preview_voice_btn = make_preview_button(
+            lambda: (
+                self._tts_mode,
+                str(self.voice_combo.currentData() or self.voice_combo.currentText() or ""),
+            ),
+            parent=self,
+        )
         grid.setColumnStretch(1, 1)
         self.setMinimumWidth(0)
         grid.addWidget(self.burn_check, 0, 0, 1, 3)
@@ -223,6 +232,7 @@ class OptionsWidget(QGroupBox):
         grid.addWidget(self.gain_value, 4, 2)
         grid.addWidget(QLabel(i18n.tr("options.voice")), 5, 0)
         grid.addWidget(self.voice_combo, 5, 1, 1, 2)
+        grid.addWidget(self.preview_voice_btn, 6, 1, 1, 2)
 
     def reload_voices(self, loaded_settings: dict | None = None) -> None:
         from dubtool.tts.vieneu import list_preset_voices, normalize_mode, resolve_voice
@@ -276,10 +286,13 @@ class ProgressWidget(QGroupBox):
         self.stages = StageList()
         layout.addWidget(self.stages)
         line = QHBoxLayout()
+        line.setContentsMargins(0, 0, 0, 0)
         self.bar = QProgressBar()
+        self.bar.setTextVisible(False)
         line.addWidget(self.bar, 1)
         self.counter = QLabel("")
         self.counter.setWordWrap(False)
+        self.counter.setVisible(False)
         line.addWidget(self.counter)
         layout.addLayout(line)
 
@@ -329,9 +342,8 @@ class ProgressWidget(QGroupBox):
         self.details_open_btn.setObjectName("details_open_log")
         self.details_open_btn.clicked.connect(self._open_log_folder)
         details_row = QHBoxLayout()
-        details_row.addWidget(self.details_copy_btn)
-        details_row.addWidget(self.details_open_btn)
-        details_row.addStretch(1)
+        details_row.addWidget(self.details_copy_btn, 1)
+        details_row.addWidget(self.details_open_btn, 1)
         for w in (self.details_header, self.details_liveness, self.details_copy_btn,
                   self.details_open_btn):
             w.setVisible(False)
@@ -418,6 +430,7 @@ class ProgressWidget(QGroupBox):
         self.bar.setRange(0, 0)
         self.bar.setValue(0)
         self.counter.setText("")
+        self.counter.setVisible(False)
         self.cancel_btn.setText(i18n.tr("progress.cancel"))
         self.cancel_btn.setEnabled(True)
         self.cancel_btn.hide()
@@ -451,6 +464,9 @@ class ProgressWidget(QGroupBox):
         self._last_desc = ""
         self.lang_status_lbl.setText("")
         self.lang_status_lbl.setVisible(False)
+        self.bar.setRange(0, 0)
+        self.counter.setText("")
+        self.counter.setVisible(False)
         self.cancel_btn.setText(i18n.tr("progress.cancel"))
         self.cancel_btn.setEnabled(True)
         self.cancel_btn.show()
@@ -466,10 +482,14 @@ class ProgressWidget(QGroupBox):
         if state == "progress" and total > 0 and done >= 0:
             self.bar.setRange(0, total)
             self.bar.setValue(done)
+            pct = int(round(100 * done / max(total, 1)))
             eta_text = f"  ·  ETA {eta:.0f} s" if eta == eta and eta >= 0 else ""
-            self.counter.setText(f"{done}/{total}{eta_text}")
+            self.counter.setText(f"{pct}% · {done}/{total}{eta_text}")
+            self.counter.setVisible(True)
         elif state == "start":
             self.bar.setRange(0, 0)
+            self.counter.setText("")
+            self.counter.setVisible(False)
         # Update 9 task 3.2 header content: the stage being worked on and
         # exactly what it is doing (item count or the event message).
         if state == "start":
@@ -514,6 +534,8 @@ class ProgressWidget(QGroupBox):
         if result.ok:
             self.bar.setRange(0, 1)
             self.bar.setValue(1)
+            self.counter.setText("100%")
+            self.counter.setVisible(True)
             self.open_btn.show()
             self.play_btn.show()
             if result.out_readable:
@@ -532,6 +554,8 @@ class ProgressWidget(QGroupBox):
             if result.readable_warning:
                 self._show_readable_warning()
         else:
+            self.counter.setText("")
+            self.counter.setVisible(False)
             self.resume_btn.show()
             self.over_btn.show()
 

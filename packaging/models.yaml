@@ -17,29 +17,62 @@ gemini-3.5-flash-lite:
   request_timeout_s: 90
   chunk_max_chars: 1200
   max_output_tokens: 8000
-  verified: ai.google.dev/gemini-api/docs/models (2026-10-26)
-gemini-3.8-flash:
+  verified: ai.google.dev/gemini-api/docs/models (2026-11-20)
+gemini-3.1-flash-lite:
   provider: gemini
-  label: Gemini 3.8 Flash
+  label: Gemini 3.1 Flash-Lite
+  paid: false
+  structured: json_schema
+  reasoning: false
+  translate_concurrency: 3
+  request_timeout_s: 90
+  chunk_max_chars: 1200
+  max_output_tokens: 8000
+  verified: ai.google.dev/gemini-api/docs/models (2026-11-20)
+gemini-3-flash-preview:
+  provider: gemini
+  label: Gemini 3 Flash Preview
   paid: false
   structured: json_schema
   reasoning: false
   translate_concurrency: 2
-  request_timeout_s: 180
+  request_timeout_s: 120
   chunk_max_chars: 1200
   max_output_tokens: 8000
-  verified: ai.google.dev/gemini-api/docs/models (2026-10-26)
+  verified: ai.google.dev/gemini-api/docs/models (2026-11-20)
+gemini-flash-lite-latest:
+  provider: gemini
+  label: Gemini Flash-Lite Latest
+  paid: false
+  structured: json_schema
+  reasoning: false
+  translate_concurrency: 3
+  request_timeout_s: 90
+  chunk_max_chars: 1200
+  max_output_tokens: 8000
+  verified: ai.google.dev/gemini-api/docs/models (2026-11-20)
 gemini-3.6-flash:
   provider: gemini
   label: Gemini 3.6 Flash
   paid: false
   structured: json_schema
   reasoning: false
-  translate_concurrency: 2
+  translate_concurrency: 1
   request_timeout_s: 180
   chunk_max_chars: 1200
   max_output_tokens: 8000
-  verified: ai.google.dev/gemini-api/docs/models (2026-10-26)
+  verified: ai.google.dev/gemini-api/docs/models (2026-11-20)
+gemini-3.8-flash:
+  provider: gemini
+  label: Gemini 3.8 Flash
+  paid: false
+  structured: json_schema
+  reasoning: false
+  translate_concurrency: 1
+  request_timeout_s: 180
+  chunk_max_chars: 1200
+  max_output_tokens: 8000
+  verified: ai.google.dev/gemini-api/docs/models (2026-11-20)
 gpt-5.4-nano:
   provider: openai
   label: GPT-5.4 nano

@@ -16,8 +16,9 @@
   4. Fix S4 `'NoneType' object has no attribute 'write'` trên `.exe` windowed (`_ensure_stdio` + `_hf_cache_context`) + fail-fast `TTSEngineInitError`.
   5. Fix lệch mốc thời gian giọng lồng tiếng (`repair_word_timings` chữa chữ mồ côi đầu đoạn & tách khoảng lặng nội bộ `>= 1.5s`, guard `max_gap_s=0.5` cho `merge_short`, `vad_parameters={"min_silence_duration_ms": 500}`).
   6. Fix header `Chi tiết tiến trình` không còn giữ dòng cũ từ S5 khi sang S7/hoàn tất (`Hoàn tất`).
-  7. Nâng cấp `README.md` + `docs/README.vi.md` theo phong cách hiện đại với logo trắng không viền (`docs/images/logo.png`), đổi icon `.exe` và icon cửa sổ (`packaging/icon.ico`).
+  7. Nâng cấp `README.md` + `docs/README.vi.md` theo phong cách hiện đại với logo trắng không viền (`docs/images/logo.png`), đổi icon `.exe` và icon cửa sổ sang logo trắng nền đen (`packaging/icon.ico`).
   8. Dọn gọn thư mục gốc (`REPORT_UPDATE_*.md` → `docs/reports/`, xóa rác untracked) và giảm tổng dung lượng `Project_K` + `Project_K_build` hơn **5.5 GB**.
+  9. Tinh chỉnh UI/UX & Gemini catalog: căn thẳng thanh tiến trình (`setTextVisible(False)`, `counter` ẩn khi rỗng) & 2 nút `Sao chép chi tiết`/`Mở thư mục log` 50/50, thêm nút **Nghe thử giọng** offline (`voice_preview.py`) ngay dưới chọn giọng đọc ở cả màn hình chính và Cài đặt, cho phép resize & thu gọn `SettingsDialog`, hiển thị rõ đường dẫn mặc định thư mục job + nút `Chọn…`, bổ sung các model Gemini chạy ổn định (`gemini-3.1-flash-lite`, `gemini-3-flash-preview`, `gemini-flash-lite-latest`), giảm concurrency của `3.6-flash`/`3.8-flash` xuống 1 và giữ `gemini-3.5-flash-lite` làm mặc định lần đầu.
 
 ---
 

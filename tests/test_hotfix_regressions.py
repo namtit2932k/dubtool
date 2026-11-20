@@ -307,4 +307,70 @@ def test_progress_details_header_clears_stale_desc_on_stage_change_and_finish(qt
     assert pg.details_header.text() == i18n.tr("details.done")
     assert "Đang làm" not in pg.details_header.text()
     assert pg.details_liveness.text() == ""
+    assert pg.bar.isTextVisible() is False
+    assert pg.counter.text() == "100%"
+    assert pg.counter.isHidden() is False
+
+
+def test_settings_dialog_resizable_has_preview_and_jobs_placeholder(qtbot, monkeypatch, tmp_path):
+    """SettingsDialog must be resizable down to ~480px, expose a voice preview
+    button, and display the real default jobs folder as placeholder text."""
+    from PySide6.QtCore import QSize
+
+    from dubtool.app import paths, secrets, settings
+    from dubtool.app.ui.settings_dialog import SettingsDialog
+
+    monkeypatch.setattr(settings, "path", lambda: tmp_path / "settings.json")
+    monkeypatch.setattr(paths, "jobs_dir", lambda: tmp_path / "jobs")
+    monkeypatch.setattr(secrets, "has_key", lambda *a, **k: True)
+    monkeypatch.setattr(secrets, "get_keys", lambda *a, **k: [])
+
+    dlg = SettingsDialog()
+    qtbot.addWidget(dlg)
+    dlg.show()
+    assert dlg.isSizeGripEnabled() is True
+    assert dlg.minimumSizeHint().width() <= 560
+    dlg.resize(QSize(720, 620))
+    qtbot.wait(20)
+    assert dlg.width() >= 700
+    dlg.resize(QSize(540, 460))
+    qtbot.wait(20)
+    assert dlg.width() <= 560
+    assert hasattr(dlg, "preview_voice_btn")
+    assert str(tmp_path / "jobs") in dlg.jobs_edit.placeholderText()
+    assert str(tmp_path / "jobs") in dlg.jobs_stats_label.text()
+
+
+def test_voice_preview_cache_and_default_gemini_catalog(monkeypatch, tmp_path):
+    """Voice preview caches synthesized WAV per (mode, voice), and the Gemini
+    catalog ships 3.5-flash-lite as default alongside 3.1-flash-lite."""
+    from dubtool.app import paths, voice_preview
+    from dubtool.llm import catalog
+
+    assert catalog.DEFAULT_MODEL_ID == "gemini-3.5-flash-lite"
+    items = catalog.load()
+    assert "gemini-3.5-flash-lite" in items
+    assert "gemini-3.1-flash-lite" in items
+    assert "gemini-3-flash-preview" in items
+    assert "gemini-flash-lite-latest" in items
+    assert items["gemini-3.6-flash"].translate_concurrency == 1
+    assert items["gemini-3.8-flash"].translate_concurrency == 1
+
+    monkeypatch.setattr(paths, "app_data_root", lambda: tmp_path / "appdata")
+    calls = 0
+
+    class _FakeProv:
+        def synthesize(self, text, voice, out_path):
+            nonlocal calls
+            calls += 1
+            Path(out_path).write_bytes(b"RIFF" + b"\x00" * 500)
+
+        def close(self):
+            pass
+
+    p1 = voice_preview.ensure_preview_wav("v3turbo_int8", "Trúc Ly", provider_factory=lambda _m: _FakeProv())
+    p2 = voice_preview.ensure_preview_wav("v3turbo_int8", "Trúc Ly", provider_factory=lambda _m: _FakeProv())
+    assert p1 == p2 and p1.is_file()
+    assert calls == 1  # second call hits cache immediately
+
 
