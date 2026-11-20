@@ -80,14 +80,15 @@ $reqFileUnit = Join-Path $buildRoot ".req-units.tmp"
 $Pinned = @(@"
 faster-whisper>=1.0
 ctranslate2>=4.0
-onnxruntime>=1.16
+onnxruntime>=1.20
 # PyAV 19 removed metadata_errors, which faster-whisper 1.2.1's decode passes;
 # the exe selftest guards this (av_decode_compat).
 av>=11,<19
-tokenizers>=0.15
+tokenizers>=0.20
 huggingface_hub>=0.20
 certifi
-edge-tts>=6.1
+sea-g2p>=0.10
+soundfile>=0.12
 google-genai>=2.33.0,<3
 openai>=1.0
 anthropic>=0.40
@@ -111,6 +112,10 @@ pytest-qt
 pytest-timeout
 "@.TrimEnd())
 
+# Installed with --no-deps so gradio/librosa/numba/scipy (WebUI/cloning only)
+# are never pulled into the build venv or packaged exe.
+$NoDepsPinned = @("vieneu>=3.8,<4")
+
 try {
     # AGU10 task 3.1: the shared model cache for every sanitized run —
 # a fresh temporary HOME must never re-download the 483 MB Whisper model.
@@ -124,7 +129,7 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
     Write-Host "== [1/6] build environment"
     $reqHash = ""
     $enc = [System.Text.Encoding]::UTF8
-    $pinnedNorm = (($Pinned -join "`n") -replace "`r`n", "`n").TrimEnd()
+    $pinnedNorm = ((($Pinned + $NoDepsPinned) -join "`n") -replace "`r`n", "`n").TrimEnd()
     $ms = New-Object System.IO.MemoryStream (, $enc.GetBytes($pinnedNorm))
     $reqHash = [BitConverter]::ToString(
         [System.Security.Cryptography.SHA256]::Create().ComputeHash($ms)
@@ -150,6 +155,8 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
         $reqs = $Pinned -split "`r?`n" | Where-Object { $_ -and $_ -notmatch '^#' }   # comments are not pip requirements
         & $py -m pip install -q @reqs --cache-dir $pyCache
         if ($LASTEXITCODE -ne 0) { throw "dependency install failed" }
+        & $py -m pip install -q --no-deps @NoDepsPinned --cache-dir $pyCache
+        if ($LASTEXITCODE -ne 0) { throw "no-deps dependency install failed" }
         Set-Content -Path $hashFile -Value $reqHash -NoNewline -Encoding UTF8
     }
     $py = Join-Path $venvDir "Scripts\python.exe"

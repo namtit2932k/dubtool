@@ -40,12 +40,14 @@ The one-dir bundle embeds these libraries; each keeps its own license:
 | PySide6-Essentials | LGPL-3.0 | `licenses/LGPL-3.0.txt` | Qt for Python; bundled as dynamic libraries |
 | faster-whisper | MIT | `licenses/MIT-faster-whisper.txt` | Includes Silero VAD assets |
 | ctranslate2 | MIT | `licenses/MIT-faster-whisper.txt` | Inference runtime for Whisper |
-| onnxruntime | MIT | `licenses/MIT-faster-whisper.txt` | Used for Silero VAD |
+| onnxruntime | MIT | `licenses/MIT-faster-whisper.txt` | Used for Silero VAD & VieNeu-TTS v3 ONNX inference |
 | PyAV (`av`) | BSD-3 / LGPL / GPL | `licenses/BSD-3-PyAV.txt` | FFmpeg bindings |
 | tokenizers | Apache-2.0 | `licenses/Apache-2.0.txt` | |
 | huggingface_hub | Apache-2.0 | `licenses/Apache-2.0.txt` | |
 | certifi | MPL-2.0 | `licenses/THIRD_PARTY_NOTICES.txt` | TLS CA bundle |
-| edge-tts | LGPL-3.0 / MIT | `licenses/LGPL-3.0.txt` | Unofficial interface to Microsoft Read Aloud service |
+| VieNeu-TTS (`vieneu`, `vieneu_utils`) | Apache-2.0 | `licenses/Apache-2.0.txt` | Offline Vietnamese TTS engine (v3 Turbo INT8 & v3 Nano; ONNX weights downloaded on demand from Hugging Face, including `OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX`, Apache-2.0) |
+| sea-g2p | Apache-2.0 | `licenses/Apache-2.0.txt` | Vietnamese grapheme-to-phoneme frontend for VieNeu-TTS |
+| soundfile (+ `libsndfile`) | BSD-3 / LGPL-2.1+ | `licenses/BSD-3-PyAV.txt`, `licenses/LGPL-3.0.txt` | PCM WAV I/O for local TTS synthesis |
 | google-genai | Apache-2.0 | `licenses/Apache-2.0.txt` | Gemini SDK |
 | openai | Apache-2.0 | `licenses/Apache-2.0.txt` | OpenAI Responses API SDK |
 | anthropic | MIT | `licenses/MIT-faster-whisper.txt` | Anthropic Claude SDK |

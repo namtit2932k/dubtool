@@ -35,7 +35,8 @@ Everything goes through the spec (`packaging/dubtool.spec`):
   bundle; `dubtool.app.paths.bundle_root()` resolves them at runtime.
 - `packaging/modes.yaml` (shipped mode/model list) into `_internal/packaging/`.
 - `faster_whisper`, `ctranslate2`, `onnxruntime`, `av` binaries and data
-  (Silero VAD assets, model tokenizers), `edge_tts` data, `certifi` CA bundle,
+  (Silero VAD assets, model tokenizers), `vieneu` / `vieneu_utils` / `sea_g2p` /
+  `soundfile` (`libsndfile`) for offline VieNeu-TTS v3 ONNX, `certifi` CA bundle,
   `keyring` backends (`keyring.backends.Windows` explicitly), `psutil`
   (the `--profile` CPU sampler, AGENT_UPDATE_6.md 4.1), and PySide6
   plugins via PyInstaller's hooks.

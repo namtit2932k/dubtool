@@ -98,14 +98,16 @@ def test_segment_tts_trims_and_reports_trimmed_duration(tmp_path: Path):
 
 def test_tts_options_from_config():
     class C:
-        tts_rate = "+0%"
         tts_trim_silence = True
         tts_silence_threshold_db = -35
         tts_silence_margin_s = 0.05
-        tts_voice = "vi-VN-HoaiMyNeural"
+        tts_voice = "Trúc Ly"
+        tts = {"provider": "vieneu", "mode": "v3turbo_int8"}
 
     opts = tts_options(C())
-    assert opts["rate"] == "+0%"
+    assert opts["provider"] == "vieneu"
+    assert opts["mode"] == "v3turbo_int8"
+    assert opts["precision"] == "int8"
     assert opts["trim"] == {"threshold_db": -35, "margin_s": 0.05}
     built = build_tts(C(), Path("cache"))
     assert built.key_for({"id": 1, "vi": "x"}) != SegmentTTS(

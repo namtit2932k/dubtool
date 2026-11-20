@@ -21,37 +21,13 @@ import urllib.request
 log = logging.getLogger("dubtool")
 
 GEMINI_HOST = "generativelanguage.googleapis.com"  # google-genai SDK endpoint
-HF_HOST = "huggingface.co"                          # Whisper model downloads
-
-
-def edge_tts_hosts() -> list[str]:
-    """Hosts the installed edge_tts package connects to, read from its own
-    constants (never hardcoded here). Empty when discovery fails."""
-    hosts: list[str] = []
-    try:
-        import edge_tts.constants as c
-    except Exception:
-        return hosts
-    for name in dir(c):
-        if "URL" not in name:
-            continue
-        value = getattr(c, name, "")
-        if not isinstance(value, str):
-            continue
-        for prefix in ("https://", "wss://"):
-            if value.startswith(prefix):
-                host = value.split("//", 1)[1].split("/", 1)[0].split(":", 1)[0]
-                if host and host not in hosts:
-                    hosts.append(host)
-    return hosts
+HF_HOST = "huggingface.co"                          # Whisper & VieNeu TTS model downloads
 
 
 def check_hosts(timeout_s: float = 10.0) -> list[dict]:
     """One row per host: dns, tls, and (once) clock_offset_s from an HTTPS
     response's Date header."""
-    hosts: dict[str, str] = {GEMINI_HOST: "gemini api", HF_HOST: "whisper models"}
-    for host in edge_tts_hosts():
-        hosts.setdefault(host, "edge-tts")
+    hosts: dict[str, str] = {GEMINI_HOST: "gemini api", HF_HOST: "model downloads"}
 
     rows: list[dict] = []
     clock_measured = False

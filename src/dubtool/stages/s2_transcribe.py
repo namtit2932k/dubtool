@@ -760,6 +760,7 @@ def run(job, config, force: bool = False) -> None:
         "s2: loading whisper model %s on %s (%s, %d threads)",
         config.whisper_model, config.device, config.compute_type, threads,
     )
+    model = None
     try:
         model = WhisperModel(
             config.whisper_model,
@@ -776,4 +777,9 @@ def run(job, config, force: bool = False) -> None:
         if detected_code == "vi" and (detected_prob >= min_conf or lang_info.get("method") == "manual"):
             raise VietnameseSourceDetected(detected_prob, transcript_path=job.transcript_path)
     finally:
+        # Release Whisper weights before Stage 4 loads VieNeu ONNX into RAM.
+        del model
+        import gc as _gc
+
+        _gc.collect()
         cpu_mod.restore_app_priority()

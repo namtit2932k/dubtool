@@ -23,7 +23,8 @@ DEFAULTS: dict = {
     "burn_subtitles": True,
     "save_srt": False,
     "original_gain_db": -14.0,
-    "voice": "vi-VN-HoaiMyNeural",
+    "voice": "Trúc Ly",
+    "tts_model": "v3turbo_int8",  # v3turbo_int8 | v3nano (VieNeu-TTS v3 ONNX offline)
     "keep_level": "light",       # none | light | full (AGU10 5.2)
     "default_output_dir": "",
     "jobs_dir": "",              # empty = app default
@@ -74,6 +75,12 @@ def load(raw_path: Path | None = None) -> dict:
         legacy_keep = bool(data.get("keep_intermediate"))
         merged["keep_level"] = "light" if legacy_keep else "none"
     merged.pop("keep_intermediate", None)  # the old key is never written back
+    # Migrate legacy edge-tts voice & backup voice keys to VieNeu-TTS v3.
+    from dubtool.tts.vieneu import normalize_mode, resolve_voice
+
+    merged["tts_model"] = normalize_mode(merged.get("tts_model"))
+    merged["voice"] = resolve_voice(merged.get("voice"), merged["tts_model"])
+    merged.pop("tts_backup_voice", None)
     return merged
 
 
@@ -105,9 +112,14 @@ def validate(settings: dict) -> list[str]:
     gain = settings.get("original_gain_db")
     if not isinstance(gain, (int, float)) or not (-24 <= float(gain) <= -6):
         problems.append("original_gain_db must be between -24 and -6 dB")
-    voice = str(settings.get("voice", ""))
-    if voice not in ("vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural"):
-        problems.append("voice must be a known edge-tts Vietnamese voice")
+    tts_model = str(settings.get("tts_model", "v3turbo_int8"))
+    if tts_model not in ("v3turbo_int8", "v3nano"):
+        problems.append("tts_model must be 'v3turbo_int8' or 'v3nano'")
+    from dubtool.tts.vieneu import migrate_voice, valid_voice_ids
+
+    voice = migrate_voice(str(settings.get("voice", "")))
+    if voice not in valid_voice_ids(tts_model if tts_model in ("v3turbo_int8", "v3nano") else "v3turbo_int8"):
+        problems.append("voice must be a valid VieNeu-TTS Vietnamese preset voice")
     if str(settings.get("cpu_usage", "")).lower() not in ("low", "balanced", "maximum"):
         problems.append("cpu_usage must be low|balanced|maximum")
     if str(settings.get("readable_format", "docx")).lower() not in ("docx", "txt"):

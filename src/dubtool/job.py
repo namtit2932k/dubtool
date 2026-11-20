@@ -356,8 +356,15 @@ def _cfg_part(cfg, stage: str):
             "fillers": cfg.fillers,
         }
     if stage == "s4":
-        return [cfg.tts_voice, cfg.tts_rate, cfg.tts_trim_silence,
-                cfg.chars_per_sec, cfg.max_stretch]
+        tts_cfg = getattr(cfg, "tts", None) or {}
+        return [
+            cfg.tts_voice,
+            tts_cfg.get("provider", "vieneu"),
+            tts_cfg.get("mode", "v3turbo_int8"),
+            cfg.tts_trim_silence,
+            cfg.chars_per_sec,
+            cfg.max_stretch,
+        ]
     if stage == "s6":
         return {"mix": cfg.mix, "schedule": cfg.schedule}
     if stage == "s7":

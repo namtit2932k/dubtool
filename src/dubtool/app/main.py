@@ -262,9 +262,8 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     dialog.grab().save(str(out_dir / "dialog_error.png"))
     dialog.hide()
 
-    # AGU11 dialogs (spec 5.5): the overload policy dialog and the TTS
-    # budget dialog, offscreen, without any dialog callbacks attached.
-    from dubtool.app.ui.fillers_dialog import OverloadDialog, TtsBudgetDialog
+    # Overload policy dialog offscreen, without callbacks attached.
+    from dubtool.app.ui.fillers_dialog import OverloadDialog
 
     overload = OverloadDialog("gemini-3.8-flash", waited_s=240)  # real model name
     overload.setMinimumWidth(600)
@@ -276,17 +275,6 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     assert overload.isVisible()
     overload.grab().save(str(out_dir / "dialog_overload.png"))
     overload.accept()
-    
-    tts_budget = TtsBudgetDialog(13, "09:37", True, "Windows SAPI (Hỏa My)")
-    tts_budget.setMinimumWidth(600)
-    tts_budget.show()
-    app.processEvents()
-    tts_budget.adjustSize()
-    
-    # Assertion: TTS budget dialog visible
-    assert tts_budget.isVisible()
-    tts_budget.grab().save(str(out_dir / "dialog_tts_budget.png"))
-    tts_budget.accept()
 
     # Tabbed Settings dialog
     from dubtool.app import secrets as secrets_for_shots
@@ -993,6 +981,8 @@ def run_headless(
     model: str | None = None,
     source_language: str = "auto",
     subtitles_only: bool = False,
+    tts_mode: str | None = None,
+    voice: str | None = None,
 ) -> int:
     """Automated end-to-end verification without a window (AGU4 11.1).
     With `profile` (AGU6 4.1), a 1 Hz sampler writes profile.csv in the job
@@ -1012,8 +1002,14 @@ def run_headless(
         chosen_model = "gemini-3.5-flash-lite"
     elif chosen_model == "accurate":
         chosen_model = "gemini-3.8-flash"
+    from dubtool.tts.vieneu import normalize_mode, resolve_voice
+
+    resolved_tts_mode = normalize_mode(tts_mode or saved.get("tts_model"))
+    resolved_voice = resolve_voice(voice or saved.get("voice"), resolved_tts_mode)
     options = DubOptions(
         model=chosen_model,
+        voice=resolved_voice,
+        tts_mode=resolved_tts_mode,
         video_language=str(source_language or "auto"),
         subtitles_only=bool(subtitles_only),
         keep_level=str(saved.get("keep_level") or "light"),
@@ -1089,6 +1085,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--headless-run", nargs=2, metavar=("VIDEO", "OUTDIR"))
     parser.add_argument("--source-language", default="auto",
                         help="with --headless-run: source language code or 'auto'")
+    parser.add_argument("--tts-mode", default=None, choices=("v3turbo_int8", "v3nano"),
+                        help="with --headless-run: VieNeu-TTS ONNX mode")
+    parser.add_argument("--voice", default=None,
+                        help="with --headless-run: VieNeu-TTS Vietnamese preset voice")
     parser.add_argument("--subtitles-only", action="store_true",
                         help="with --headless-run: stop after ASR and export .srt + transcript only")
     parser.add_argument("--profile", action="store_true",
@@ -1096,11 +1096,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=None, help="catalog model id")
     parser.add_argument("--mode", default=None, choices=("fast", "accurate"),
                         help="deprecated: fast -> gemini-3.5-flash-lite, accurate -> gemini-3.8-flash")
-    parser.add_argument("--tts-probe", nargs="?", const="tts_probe_results.json",
-                        default=None, metavar="JSON",
-                        help="run the interleaved voice-request experiment (same code from source and from the exe) and print the table")
-    parser.add_argument("--tts-probe-ab", nargs=3, default=None, metavar=("OUT_JSON", "START_IDX", "COUNT"),
-                        help="run an interleaved A/B voice validation slice")
     parser.add_argument("--fault", action="append", default=[], metavar="STAGE:SPEC=N",
                         help="debug-only fault injection, e.g. --fault tts:fail-first=6 (debug-only; ignored by the GUI)")
     args = parser.parse_args(argv)
@@ -1109,18 +1104,6 @@ def main(argv: list[str] | None = None) -> int:
         print("Warning: --mode is deprecated; use --model instead", file=sys.stderr)
     if args.version:
         _print_version()
-        return 0
-    if args.tts_probe:
-        from dubtool.config import Config
-        from dubtool.tts_probe import run_experiment
-
-        run_experiment(Config(), out_path=args.tts_probe)
-        return 0
-    if args.tts_probe_ab:
-        from dubtool.tts_probe import run_ab_slice
-
-        out_p, s_idx, cnt = args.tts_probe_ab
-        run_ab_slice(out_p, start_idx=int(s_idx), count=int(cnt))
         return 0
     if args.fault:
         from dubtool import faults as faults_mod
@@ -1181,6 +1164,8 @@ def main(argv: list[str] | None = None) -> int:
             profile=args.profile,
             source_language=args.source_language,
             subtitles_only=args.subtitles_only,
+            tts_mode=args.tts_mode,
+            voice=args.voice,
         )
     return run_gui()
 

@@ -26,8 +26,6 @@ from dubtool import api, cli, config as config_mod, languages as lang_mod, punct
 from dubtool.job import Job, stage_inputs_hash, write_json
 from dubtool.llm import prompts
 from dubtool.stages import s2_transcribe, s3_translate, s8_export_readable as s8
-from dubtool.tts.base import TTSFailure
-from dubtool.tts_probe import classify_exact
 
 W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
@@ -468,31 +466,3 @@ def test_english_auto_vs_manual_regression_and_inputs_hash(tmp_path):
     assert h_en != h_ja
 
 
-# ----------------------------------------- 5. TTS root-cause test (Task 3.1)
-
-def test_tts_classify_exact_unwraps_nested_cause_and_context():
-    class NoAudioReceived(Exception):
-        pass
-
-    class WSServerHandshakeError(Exception):
-        pass
-
-    # Explicit __cause__ chain: TTSFailure <- RuntimeError <- NoAudioReceived
-    try:
-        try:
-            raise NoAudioReceived("No audio was received.")
-        except NoAudioReceived as inner:
-            raise RuntimeError("synth attempt failed") from inner
-    except RuntimeError as mid:
-        wrapped = TTSFailure("all retries failed")
-        wrapped.__cause__ = mid
-    assert classify_exact(wrapped) == "NoAudioReceived"
-
-    # Implicit __context__ chain: TTSFailure <- WSServerHandshakeError(503)
-    try:
-        try:
-            raise WSServerHandshakeError("503, message='Invalid response status'")
-        except WSServerHandshakeError:
-            raise TTSFailure("edge-tts failed")
-    except TTSFailure as exc:
-        assert classify_exact(exc) == "handshake_503"

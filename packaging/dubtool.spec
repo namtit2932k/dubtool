@@ -85,7 +85,17 @@ datas += collect_data_files("faster_whisper")
 datas += collect_dynamic_libs("ctranslate2", destdir=".")
 datas += collect_dynamic_libs("onnxruntime", destdir=".")
 datas += collect_dynamic_libs("av", destdir=".")
-datas += collect_data_files("edge_tts")
+# Offline VieNeu-TTS v3 ONNX (preset JSONs, Rust G2P dictionary/extension, libsndfile DLL).
+datas += [
+    (src, dst) for (src, dst) in collect_data_files("vieneu")
+    if "/assets/samples/" not in src.replace("\\", "/")
+    and not src.replace("\\", "/").endswith("/assets/samples")
+]
+datas += collect_data_files("vieneu_utils")
+datas += collect_data_files("sea_g2p")
+datas += collect_dynamic_libs("sea_g2p")
+datas += collect_data_files("_soundfile_data")
+datas += collect_dynamic_libs("_soundfile_data")
 datas += collect_data_files("certifi")
 # AGENT_UPDATE_7.md 5.6: python-docx ships its default template as data
 # files — a frozen app without them fails at runtime when saving a docx.
@@ -95,7 +105,22 @@ hiddenimports = []
 hiddenimports += collect_submodules("keyring.backends")
 hiddenimports += ["keyring.backends.Windows"]
 hiddenimports += collect_submodules("faster_whisper")
-hiddenimports += collect_submodules("edge_tts")
+hiddenimports += [
+    "vieneu",
+    "vieneu.factory",
+    "vieneu.base",
+    "vieneu.v3turbo",
+    "vieneu.v3nano",
+    "vieneu._v3_turbo_engine",
+    "vieneu._v3_turbo_engine.onnx_runtime_lite",
+    "vieneu._v3_turbo_engine.rep_history",
+    "soundfile",
+    "_soundfile_data",
+    "cffi",
+    "dubtool.tts.vieneu",
+]
+hiddenimports += collect_submodules("vieneu_utils")
+hiddenimports += collect_submodules("sea_g2p")
 hiddenimports += collect_submodules("openai")
 hiddenimports += collect_submodules("anthropic")
 hiddenimports += ["pydantic", "httpx"]
@@ -143,7 +168,12 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "test", "unittest", "xmlrpc", "pydoc_data"],
+    excludes=[
+        "tkinter", "test", "unittest", "xmlrpc", "pydoc_data",
+        "gradio", "gradio_client", "fastapi", "starlette", "uvicorn",
+        "pandas", "PIL", "librosa", "scipy", "numba", "llvmlite",
+        "sklearn", "torch", "torchaudio", "transformers",
+    ],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

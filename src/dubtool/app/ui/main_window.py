@@ -188,8 +188,8 @@ class OptionsWidget(QGroupBox):
         self.gain_value = QLabel(f"{s['original_gain_db']} dB")
         self.gain_slider.valueChanged.connect(lambda v: self.gain_value.setText(f"{v} dB"))
         self.voice_combo = QComboBox()
-        self.voice_combo.addItems(VOICE_KEYS)
-        self.voice_combo.setCurrentText(s["voice"])
+        self._tts_mode = str(s.get("tts_model") or "v3turbo_int8")
+        self.reload_voices(s)
         grid.addWidget(self.burn_check, 0, 0, 1, 3)
         grid.addWidget(self.srt_check, 1, 0, 1, 3)
         grid.addWidget(QLabel(i18n.tr("options.keep_label")), 2, 0)
@@ -202,15 +202,35 @@ class OptionsWidget(QGroupBox):
         grid.addWidget(QLabel(i18n.tr("options.voice")), 5, 0)
         grid.addWidget(self.voice_combo, 5, 1, 1, 2)
 
+    def reload_voices(self, loaded_settings: dict | None = None) -> None:
+        from dubtool.tts.vieneu import list_preset_voices, normalize_mode, resolve_voice
+
+        s = loaded_settings if loaded_settings is not None else settings.load()
+        self._tts_mode = normalize_mode(s.get("tts_model"))
+        target = resolve_voice(s.get("voice"), self._tts_mode)
+        self.voice_combo.blockSignals(True)
+        try:
+            self.voice_combo.clear()
+            for item in list_preset_voices(self._tts_mode):
+                self.voice_combo.addItem(item["label"], item["id"])
+            idx = self.voice_combo.findData(target)
+            self.voice_combo.setCurrentIndex(max(0, idx))
+        finally:
+            self.voice_combo.blockSignals(False)
+
     def to_options(self, model: str, brief: str) -> api.DubOptions:
         from dubtool.brief import normalize_brief
+        from dubtool.tts.vieneu import DEFAULT_VOICE, normalize_mode, resolve_voice
 
+        mode = normalize_mode(self._tts_mode)
+        raw_voice = self.voice_combo.currentData() or self.voice_combo.currentText() or DEFAULT_VOICE
         return api.DubOptions(
             model=model,
             burn_subtitles=self.burn_check.isChecked(),
             save_srt=self.srt_check.isChecked(),
             original_gain_db=float(self.gain_slider.value()),
-            voice=self.voice_combo.currentText(),
+            voice=resolve_voice(str(raw_voice), mode),
+            tts_mode=mode,
             keep_level=str(self.keep_combo.currentData() or "light"),
             export_readable=self.readable_check.isChecked(),
             readable_format=str(self.readable_format_combo.currentData() or "docx"),
@@ -1084,7 +1104,7 @@ class MainWindow(QMainWindow):
         self.progress_group.show_running()
         self.set_busy(True)
         from dubtool.app.ui.fillers_dialog import (
-            DialogBridge, FillersDialog, OverloadDialog, TtsBudgetDialog,
+            DialogBridge, FillersDialog, OverloadDialog,
         )
 
         bridge = DialogBridge(self)  # lives on the GUI thread
@@ -1116,24 +1136,6 @@ class MainWindow(QMainWindow):
             waited = int(float((info or {}).get("waited_s") or 0))
             return _run_modal(lambda: OverloadDialog(model=model, parent=self, waited_s=waited))
 
-        def _tts_budget_dialog(
-            missing: int,
-            waited_mmss: str,
-            fallback_ok: bool,
-            backup_voice: str | None = None,
-        ):
-            # AGU11 3.4: voice generation over its wait budget — wait 10 min,
-            # backup voice or stop (the worker thread blocks until answered).
-            return _run_modal(
-                lambda: TtsBudgetDialog(
-                    int(missing),
-                    str(waited_mmss),
-                    bool(fallback_ok),
-                    backup_voice=backup_voice,
-                    parent=self,
-                )
-            )
-
         def _language_dialog(candidates: list[dict], mixed: bool = False):
             from dubtool.app.ui.language_dialogs import LanguageUncertainDialog
 
@@ -1150,7 +1152,6 @@ class MainWindow(QMainWindow):
             jobs_dir=self._jobs_dir(),
             overload_dialog=_overload_dialog,
             fillers_dialog=_fillers_dialog,
-            tts_budget_dialog=_tts_budget_dialog,
             language_dialog=_language_dialog,
         )
         if not started:
@@ -1297,6 +1298,8 @@ class MainWindow(QMainWindow):
             initial_provider=provider,
         )
         dialog.exec()
+        if hasattr(self, "options") and hasattr(self.options, "reload_voices"):
+            self.options.reload_voices()
         self._update_mode_tips()
 
     def _provider_label(self, provider: str) -> str:

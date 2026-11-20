@@ -17,14 +17,14 @@ DEFAULTS: dict = {
     "whisper_model": "small",
     "device": "cpu",
     "compute_type": "auto",
-    "chars_per_sec": 14,
+    "chars_per_sec": 16.5,
     "max_stretch": 1.15,
     "max_fit_attempts": 3,
     "tts_rate": "+0%",
     "tts_trim_silence": True,
     "tts_silence_threshold_db": -35,
     "tts_silence_margin_s": 0.05,
-    "tts_voice": "vi-VN-HoaiMyNeural",
+    "tts_voice": "Trúc Ly",
 }
 
 MIX_DEFAULTS: dict = {
@@ -44,32 +44,16 @@ SCHEDULE_DEFAULTS: dict = {
     "max_shift_s": 2.0, # cap on how far a clip may be delayed (AGU3 task 3)
 }
 
-# AGENT_UPDATE_8 task 1: TTS resilience.
+# Offline Vietnamese TTS (VieNeu-TTS v3 ONNX, CPU).
 TTS_DEFAULTS: dict = {
-    "retry_rounds": 3,
-    "round_cooldown_s": [15, 30, 60],  # AGU11 3.3: short cooldowns
-    "breaker_consecutive": 6,
-    "breaker_pause_s": 15,
-    "breaker_pause_schedule_s": [10, 20, 30],
-    "request_timeout_s": 45,     # AGU11 3.1: hard cap per edge-tts request
-    "attempt_delays_s": [1.5, 4],  # AGU11 3.3: waits between ladder steps
-    "direct_retries": 1,         # quick retry for short <=max_chars segments
-    "max_chars_per_request": 200, # Update 12 task 3.3: split cap (one voice)
-    "alt_voice": "vi-VN-NamMinhNeural",  # AGU11 3.3 ladder step 3
-    "join_silence_s": 0.08,      # AGU11 3.3: silence between joined parts
-    "unit_budget_s": 60,         # AGU11 3.3: minutes a segment may burn
-    "stage_budget_s": 600,       # AGU11 3.4: failing-wait budget for the stage
-    "budget_policy": "ask",      # ask | fallback_remaining | switch_all | stop
-    "concurrency": 2,            # staggered edge-tts workers (adaptive step-down on refusals)
-    "max_rps": 1.5,              # conservative global pacing to prevent burst NoAudioReceived
-    "limiter_floor_interval_s": 2.5,
-    "pacing_delay_s": 0.0,
-    "max_delay_s": 2.0,
-    "max_cooldown_s": 120.0,
-    "fallback": "none",  # none | windows_winrt | windows_sapi | piper
-    "winrt_voice": "",   # local Windows WinRT (OneCore) voice display name
-    "sapi_voice": "",    # AGU11 3.5: legacy .NET System.Speech voice name
-    "piper_voice": "",
+    "provider": "vieneu",
+    "mode": "v3turbo_int8",      # v3turbo_int8 (48 kHz) | v3nano (24 kHz, low RAM)
+    "steps": 16,                 # Euler steps for v3nano
+    "threads": 0,                # 0 = auto from CPU usage setting
+    "direct_retries": 1,         # quick retry on transient local error
+    "max_chars_per_request": 200,
+    "join_silence_s": 0.08,
+    "concurrency": 1,
 }
 
 # AGENT_UPDATE_8 task 3.3: LLM punctuation restoration.
@@ -370,6 +354,12 @@ def load(root: Path, overrides: dict | None = None) -> Config:
                         data[key][sub_key] = sub_value
             else:
                 data[key] = value
+
+    from dubtool.tts.vieneu import migrate_voice, normalize_mode
+
+    data["tts_voice"] = migrate_voice(data.get("tts_voice"))
+    if isinstance(data.get("tts"), dict):
+        data["tts"]["mode"] = normalize_mode(data["tts"].get("mode"))
 
     kwargs = {name: data[name] for name in DEFAULTS if name in data}
     cfg = Config(**kwargs)

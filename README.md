@@ -24,7 +24,7 @@ Seven resumable stages, all driven by the same code from the CLI and the app:
 | s1 extract audio | mono 16 kHz WAV from the input video (FFmpeg) |
 | s2 transcribe | faster-whisper (local, no upload) → `transcript.json`, then cleanup: merges too-short segments, splits too-long ones, dedupes boundary repeats |
 | s3 translate | Gemini (pluggable) sentence-level units with context, glossary, optional video brief, pronoun consistency, then an enforcement pass on segments over the character budget |
-| s4 text-to-speech | edge-tts Vietnamese voices with silence trimming and a content-addressed clip cache |
+| s4 text-to-speech | offline VieNeu-TTS v3 ONNX (`v3turbo_int8` 48 kHz default, `v3nano` 24 kHz low-RAM) with silence trimming and a content-addressed WAV clip cache |
 | s5 fit duration | stretch (atempo), LLM shortening with re-TTS, or overflow — never silently rewrites a reviewed translation |
 | s6 mix and mux | lowers the original audio (default −14 dB), places clips on the schedule, never lets Vietnamese clips overlap, closes with `alimiter` |
 | s7 burn subtitles | SRT + libass burn, Vietnamese-safe font sizing, temp file + atomic replace |
@@ -60,7 +60,7 @@ dubtool doctor
 ## Command-line usage
 
 ```bash
-dubtool run sample.mp4 [--source-language auto|en|ja|...] [--subtitles-only] [--model gemini-3.5-flash-lite] [--voice vi-VN-HoaiMyNeural] [--whisper-model small] [--force]
+dubtool run sample.mp4 [--source-language auto|en|ja|...] [--subtitles-only] [--model gemini-3.5-flash-lite] [--tts-mode v3turbo_int8|v3nano] [--voice "Trúc Ly"] [--whisper-model small] [--force]
 dubtool stage <job_id> <s1..s7> [--source-language auto|<code>] [--force]
 dubtool status <job_id>
 dubtool retts <job_id> --ids 3,7,12
@@ -109,9 +109,12 @@ python -m dubtool.app.main --headless-run video.mp4 outdir/ --mode fast
   Open translation.
 - The Gemini key is stored in **Windows Credential Manager** (keyring), never
   in `settings.json`, logs, or the job folder.
-- Audio/video never leaves the machine except: English transcript text → Google
-  (translation), Vietnamese text → Microsoft's speech service (edge-tts,
-  unofficial interface) for the voice.
+- Audio, video, speech recognition (`faster-whisper`), and Vietnamese voice
+  synthesis (**VieNeu-TTS v3 ONNX**) all run **100% locally** on your machine.
+  Only the recognized source-language transcript text is sent to your chosen
+  LLM provider for translation. An internet connection is needed on the first
+  run to download local Whisper and VieNeu-TTS models (~244–269 MB) from
+  Hugging Face.
 
 ![Source-language selector — Auto-detect, curated languages, and Other…](docs/images/lang_dropdown_open.png)
 
@@ -161,5 +164,5 @@ Key internals:
 
 MIT License. Copyright (c) 2026 sickyturtlez.
 Bundled third-party runtime components — FFmpeg (GPL build compliance note in
-`packaging/THIRD_PARTY.md`), faster-whisper models, edge-tts voices, Qt — keep
+`packaging/THIRD_PARTY.md`), faster-whisper, VieNeu-TTS / sea-g2p / soundfile, Qt — keep
 their own licenses and are **not** committed to this repository.

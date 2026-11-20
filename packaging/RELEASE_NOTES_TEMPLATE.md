@@ -9,8 +9,8 @@
 - **Chữ ký số:** Chưa có chữ ký số (Windows SmartScreen có thể cảnh báo khi chạy lần đầu — bấm *More info* → *Run anyway*).
 - **Trạng thái giấy phép ứng dụng:** **MIT License** (`Copyright (c) 2026 sickyturtlez`) cho mã nguồn của ứng dụng DubTool; các thành phần bên thứ ba giữ nguyên giấy phép riêng (xem `THIRD_PARTY.md` và thư mục `licenses/`).
 - **Lưu ý dịch vụ & quyền riêng tư:**
-  - `edge-tts` là giao diện không chính thức tới dịch vụ đọc văn bản trực tuyến của Microsoft; dịch vụ có thể giới hạn tần suất (HTTP 503 / `NoAudioReceived`) hoặc thay đổi bất kỳ lúc nào.
-  - Âm thanh và video gốc được xử lý cục bộ trên máy của bạn (Whisper chạy trên máy). Khi bạn chọn mô hình dịch (bao gồm các nhà cung cấp trả phí như OpenAI hoặc Anthropic, hoặc Gemini), **văn bản gốc (ngôn ngữ nhận diện được) của video sẽ được gửi tới nhà cung cấp đó** để dịch sang tiếng Việt.
+  - Âm thanh, video, nhận diện tiếng nói (Whisper) và tạo giọng đọc tiếng Việt (**VieNeu-TTS v3 ONNX**) đều chạy **100% cục bộ trên máy của bạn** (không còn phụ thuộc `edge-tts` hay dịch vụ đọc trực tuyến bên thứ ba). Lần chạy đầu tiên cần Internet để tải mô hình Whisper và VieNeu-TTS (~244–269 MB) từ Hugging Face.
+  - Khi bạn chọn mô hình dịch (bao gồm các nhà cung cấp trả phí như OpenAI hoặc Anthropic, hoặc Gemini), **văn bản gốc (ngôn ngữ nhận diện được) của video sẽ được gửi tới nhà cung cấp đó** để dịch sang tiếng Việt.
 
 ### Phần mềm bên thứ ba & Giấy phép (Third-Party Notices)
 
@@ -29,9 +29,9 @@ Bản đóng gói kèm theo các thành phần bên thứ ba sau đây (toàn v�
    - URL bản dựng FFmpeg đã tải: `https://github.com/BtbN/FFmpeg-Builds/releases` (`ffmpeg-N-118281-gb76053d8bf-win64-gpl.zip`)
    - URL mã nguồn FFmpeg tương ứng: `https://github.com/FFmpeg/FFmpeg/tree/b76053d8bf` (`https://ffmpeg.org/download.html#repositories`)
 2. **Phông chữ Noto Sans (`_internal/vendor/fonts/NotoSans.ttf`):** SIL Open Font License 1.1 (`licenses/OFL-NotoSans.txt`).
-3. **PySide6-Essentials (Qt for Python) & `edge-tts`:** GNU LGPL v3 (`licenses/LGPL-3.0.txt`).
+3. **PySide6-Essentials (Qt for Python) & `libsndfile` (`soundfile`):** GNU LGPL v3 / LGPL-2.1+ / BSD-3 (`licenses/LGPL-3.0.txt`, `licenses/BSD-3-PyAV.txt`).
 4. **faster-whisper, ctranslate2, onnxruntime, anthropic, keyring, python-docx, pydub, pydantic, pyyaml, python-dotenv, psutil, tqdm:** MIT / BSD-3 (`licenses/MIT-faster-whisper.txt`, `licenses/BSD-3-PyAV.txt`).
-5. **google-genai, openai, huggingface_hub, tokenizers:** Apache License 2.0 (`licenses/Apache-2.0.txt`).
+5. **VieNeu-TTS (`vieneu`), `sea-g2p`, MOSS-Audio-Tokenizer-Nano-ONNX, google-genai, openai, huggingface_hub, tokenizers:** Apache License 2.0 (`licenses/Apache-2.0.txt`).
 6. **Danh sách tệp trong `licenses/` của gói zip:**
    - `licenses/GPL-3.0.txt`
    - `licenses/LGPL-3.0.txt`
@@ -52,8 +52,8 @@ Bản đóng gói kèm theo các thành phần bên thứ ba sau đây (toàn v�
 - **Code Signing:** Unsigned binary (Windows SmartScreen may show a warning on first launch — click *More info* → *Run anyway*).
 - **Application License Status:** **MIT License** (`Copyright (c) 2026 sickyturtlez`) for DubTool's own application source code; bundled third-party components keep their own licenses (see `THIRD_PARTY.md` and `licenses/`).
 - **Service & Privacy Notes:**
-  - `edge-tts` is an unofficial interface to Microsoft's online read-aloud service and may be rate-limited or changed without notice.
-  - Audio extraction and speech recognition (Whisper) run locally on your machine. When translating (including with paid providers such as OpenAI or Anthropic, or with Gemini), **the recognized source-language transcript text of the video is sent to the selected provider**.
+  - Audio extraction, speech recognition (Whisper), and Vietnamese voice synthesis (**VieNeu-TTS v3 ONNX**) all run **100% locally on your machine** (no `edge-tts` or online TTS service dependency). An internet connection is needed on the first run to download local Whisper and VieNeu-TTS ONNX weights (~244–269 MB) from Hugging Face.
+  - When translating (including with paid providers such as OpenAI or Anthropic, or with Gemini), **the recognized source-language transcript text of the video is sent to the selected provider**.
 
 ### Third-Party Components & Licenses
 
@@ -64,5 +64,5 @@ Bundled third-party components and their license locations inside the `.zip` arc
    - Downloaded build URL: `https://github.com/BtbN/FFmpeg-Builds/releases` (`ffmpeg-N-118281-gb76053d8bf-win64-gpl.zip`)
    - Upstream source URL: `https://github.com/FFmpeg/FFmpeg/tree/b76053d8bf` (`https://ffmpeg.org/download.html#repositories`)
 2. **Noto Sans Font (`_internal/vendor/fonts/NotoSans.ttf`):** SIL Open Font License 1.1 (`licenses/OFL-NotoSans.txt`).
-3. **PySide6-Essentials & `edge-tts`:** GNU LGPL v3 (`licenses/LGPL-3.0.txt`).
-4. **faster-whisper, ctranslate2, onnxruntime, PyAV, google-genai, openai, anthropic, keyring, python-docx, certifi:** MIT / BSD-3 / Apache-2.0 / MPL-2.0 (`licenses/MIT-faster-whisper.txt`, `licenses/BSD-3-PyAV.txt`, `licenses/Apache-2.0.txt`, `licenses/THIRD_PARTY_NOTICES.txt`).
+3. **PySide6-Essentials & `libsndfile` (`soundfile`):** GNU LGPL v3 / LGPL-2.1+ / BSD-3 (`licenses/LGPL-3.0.txt`, `licenses/BSD-3-PyAV.txt`).
+4. **VieNeu-TTS (`vieneu`), `sea-g2p`, MOSS-Audio-Tokenizer-Nano-ONNX, faster-whisper, ctranslate2, onnxruntime, PyAV, google-genai, openai, anthropic, keyring, python-docx, certifi:** Apache-2.0 / MIT / BSD-3 / MPL-2.0 (`licenses/Apache-2.0.txt`, `licenses/MIT-faster-whisper.txt`, `licenses/BSD-3-PyAV.txt`, `licenses/THIRD_PARTY_NOTICES.txt`).

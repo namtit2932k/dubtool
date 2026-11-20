@@ -108,7 +108,7 @@ def run(job, config, force: bool = False, cancel=None, api_keys: list[str] | Non
 
     from dubtool.llm import LLMClient, RateLimitExhausted, get_provider
     from dubtool.llm.budget import BudgetExhausted
-    from dubtool.stages.s4_tts import build_tts
+    from dubtool.stages.s4_tts import build_tts, existing_tts_clip_path, tts_clip_path
     from dubtool.tts_failures import TTSFailureLog, Timer
 
     failures = TTSFailureLog(job.dir)
@@ -119,7 +119,71 @@ def run(job, config, force: bool = False, cancel=None, api_keys: list[str] | Non
     tts = build_tts(config, job.tts_dir / "cache", media_cache=media_cache)
     tts.cancel = cancel
     max_attempts = int(getattr(config, "max_fit_attempts", 3))
-    chunk_max = 40  # AGU6 5.1: at most 40 shortening items per request
+    chunk_max = 40  # at most 40 shortening items per request
+
+    try:
+        _run_fit_body(
+            job=job,
+            config=config,
+            force=force,
+            cancel=cancel,
+            api_keys=api_keys,
+            entries=entries,
+            persist=persist,
+            base=base,
+            counts=counts,
+            overflow_ids=overflow_ids,
+            done_early=done_early,
+            tts=tts,
+            failures=failures,
+            media_cache=media_cache,
+            max_attempts=max_attempts,
+            chunk_max=chunk_max,
+            existing_tts_clip_path=existing_tts_clip_path,
+            tts_clip_path=tts_clip_path,
+            LLMClient=LLMClient,
+            RateLimitExhausted=RateLimitExhausted,
+            get_provider=get_provider,
+            BudgetExhausted=BudgetExhausted,
+            StageCancelled=StageCancelled,
+            Timer=Timer,
+        )
+    finally:
+        provider = getattr(tts, "provider", None)
+        if provider is not None and hasattr(provider, "close"):
+            try:
+                provider.close()
+            except Exception:
+                pass
+
+
+def _run_fit_body(
+    *,
+    job,
+    config,
+    force,
+    cancel,
+    api_keys,
+    entries,
+    persist,
+    base,
+    counts,
+    overflow_ids,
+    done_early,
+    tts,
+    failures,
+    media_cache,
+    max_attempts,
+    chunk_max,
+    existing_tts_clip_path,
+    tts_clip_path,
+    LLMClient,
+    RateLimitExhausted,
+    get_provider,
+    BudgetExhausted,
+    StageCancelled,
+    Timer,
+) -> None:
 
     # ------------------------------------------------ batched fitting (5.1)
     # AGENT_UPDATE_6.md task 5.1: the per-segment `llm.shorten` loop is
@@ -145,8 +209,8 @@ def run(job, config, force: bool = False, cancel=None, api_keys: list[str] | Non
         if cancel is not None and cancel.is_set():
             raise StageCancelled(f"s5: cancelled by user at segment {entry['id']}")
         seg_id = entry["id"]
-        source = job.tts_dir / f"{base(entry)}.mp3"
-        if not entry.get("vi") or not source.exists():
+        source = existing_tts_clip_path(job.tts_dir, base(entry))
+        if not entry.get("vi") or source is None or not source.exists():
             log.warning("s5: entry id=%d missing vi/tts clip, skipping", seg_id)
             log.info("s5: progress %d/%d", processed, len(entries))
             continue
@@ -299,7 +363,11 @@ def run(job, config, force: bool = False, cancel=None, api_keys: list[str] | Non
                             "text and clip (falls through to overflow)", entry["id"],
                         )
                         continue
-                    shutil.copyfile(str(cache_path), str(ctx.source))
+                    target_src = tts_clip_path(job.tts_dir, base(entry))
+                    shutil.copyfile(str(cache_path), str(target_src))
+                    if ctx.source != target_src and ctx.source.exists():
+                        ctx.source.unlink(missing_ok=True)
+                    ctx.source = target_src
                     entry["tts_duration"] = round(duration, 3)
                     log.info(
                         "s5: id=%d shortened (round %d/%d) -> %.2fs (slot %.2fs)",

@@ -88,9 +88,12 @@ def test_brief_truncate_preserves_cursor(qtbot, window):
 
 
 def test_options_produce_options(qtbot, window):
+    from dubtool.tts.vieneu import valid_voice_ids
+
     opts = window.options.to_options("gemini-3.5-flash-lite", brief="desc text")
     assert opts.model == "gemini-3.5-flash-lite"
-    assert opts.voice.startswith("vi-VN-")
+    assert opts.voice in valid_voice_ids(opts.tts_mode)
+    assert opts.tts_mode in ("v3turbo_int8", "v3nano")
     assert opts.original_gain_db == float(window.options.gain_slider.value())
     assert opts.description == "desc text"
 
@@ -776,8 +779,8 @@ def test_clean_now_nothing_stored_shows_notice(qtbot, dialog, tmp_path, monkeypa
     assert FakeBox.last is None
 
 
-def test_start_run_modal_dialogs_exec_and_tts_budget_accepts_backup_voice(qtbot, window, monkeypatch, tmp_path):
-    """MainWindow modal callbacks must call .exec() and pass backup_voice."""
+def test_start_run_modal_dialogs_exec(qtbot, window, monkeypatch, tmp_path):
+    """MainWindow modal callbacks must call .exec() for overload and fillers dialogs."""
     from dubtool.app import secrets
     from dubtool.app.ui import fillers_dialog as fd
     from dubtool.app.ui import first_run
@@ -795,10 +798,6 @@ def test_start_run_modal_dialogs_exec_and_tts_budget_accepts_backup_voice(qtbot,
 
     exec_calls: list[str] = []
     monkeypatch.setattr(
-        fd.TtsBudgetDialog, "exec",
-        lambda self: (exec_calls.append("tts"), setattr(self, "choice", "wait10"), 1)[2],
-    )
-    monkeypatch.setattr(
         fd.OverloadDialog, "exec",
         lambda self: (exec_calls.append("overload"), setattr(self, "choice", "fallback_fast"), 1)[2],
     )
@@ -815,43 +814,28 @@ def test_start_run_modal_dialogs_exec_and_tts_budget_accepts_backup_voice(qtbot,
     window.generate_btn.setEnabled(True)
     window.start_run()
 
-    assert captured["tts_budget_dialog"](12, "09:10", True, "Windows SAPI: Zira") == "wait10"
     assert captured["overload_dialog"]({"model": "gemini-3.5-flash", "waited_s": 5}) == "fallback_fast"
     assert captured["fillers_dialog"]([{"token": "girl", "count": 2}]) == {"girl": "drop"}
-    assert exec_calls == ["tts", "overload", "fillers"]
+    assert exec_calls == ["overload", "fillers"]
 
 
-def test_tts_budget_dialog_fallback_remaining_button_and_winrt_settings(qtbot, monkeypatch):
-    """TtsBudgetDialog offers fallback_remaining and Settings lists WinRT voices."""
+def test_settings_dialog_persists_tts_mode_and_voice(qtbot, tmp_path, monkeypatch):
+    """SettingsDialog saves selected VieNeu TTS mode and preset voice."""
     from dubtool.app import settings as settings_mod
-    from dubtool.app.ui.fillers_dialog import TtsBudgetDialog
     from dubtool.app.ui.settings_dialog import SettingsDialog
-    from dubtool.tts import fallback as fallback_mod
 
-    dlg_ok = TtsBudgetDialog(3, "10:00", True, backup_voice="Microsoft An (vi-VN)")
-    qtbot.addWidget(dlg_ok)
-    assert dlg_ok.fallback_remaining_btn.isEnabled()
-    assert dlg_ok.switch_btn.isEnabled()
-    assert "Microsoft An (vi-VN)" in dlg_ok.fallback_remaining_btn.text()
-    dlg_ok.fallback_remaining_btn.click()
-    assert dlg_ok.choice == "fallback_remaining"
-
-    dlg_no = TtsBudgetDialog(3, "10:00", False, backup_voice="")
-    qtbot.addWidget(dlg_no)
-    assert not dlg_no.fallback_remaining_btn.isEnabled()
-    assert not dlg_no.switch_btn.isEnabled()
-
-    monkeypatch.setattr(fallback_mod, "detect_winrt_voices", lambda: [("Microsoft An", "vi-VN")])
-    monkeypatch.setattr(fallback_mod, "detect_sapi_voices", lambda: [])
-    monkeypatch.setattr(fallback_mod.PiperTTSProvider, "detect_piper_voices", staticmethod(lambda: []))
-
+    settings_file = tmp_path / "settings.json"
+    monkeypatch.setattr(settings_mod, "path", lambda: settings_file)
     sd = SettingsDialog()
     qtbot.addWidget(sd)
-    idx = sd.backup_combo.findData("windows_winrt:Microsoft An")
-    assert idx > 0
-    sd.backup_combo.setCurrentIndex(idx)
-    assert sd._selected_backup() == "windows_winrt:Microsoft An"
-    assert not sd.backup_warn.isVisible()
+    nano_idx = sd.tts_mode_combo.findData("v3nano")
+    assert nano_idx >= 0
+    sd.tts_mode_combo.setCurrentIndex(nano_idx)
+    v_idx = sd.voice_combo.findData("Mai Anh")
+    assert v_idx >= 0
+    sd.voice_combo.setCurrentIndex(v_idx)
     saved = sd.apply_changes()
     assert saved is not None
-    assert settings_mod.load()["tts_backup_voice"] == "windows_winrt:Microsoft An"
+    loaded = settings_mod.load(settings_file)
+    assert loaded["tts_model"] == "v3nano"
+    assert loaded["voice"] == "Mai Anh"

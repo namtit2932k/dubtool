@@ -40,13 +40,18 @@ def _exc_kind(error: Exception | str) -> str:
     return "message"
 
 
-def _edge_tts_version() -> str:
+def _tts_engine_version() -> str:
     try:
-        import edge_tts
+        import importlib.metadata as _meta
 
-        return str(getattr(edge_tts, "__version__", "unknown"))
+        return f"vieneu {_meta.version('vieneu')}"
     except Exception:
-        return "unavailable"
+        try:
+            import vieneu
+
+            return f"vieneu {getattr(vieneu, '__version__', 'unknown')}"
+        except Exception:
+            return "vieneu unavailable"
 
 
 class TTSFailureLog:
@@ -71,15 +76,17 @@ class TTSFailureLog:
         elapsed_s: float,
         *,
         voice: str = "",
+        mode: str = "",
         rate: str = "",
         details: dict | None = None,
     ) -> None:
         message = str(error)
+        engine_ver = _tts_engine_version()
         log.warning(
             "tts failure: kind=%s id=%s attempt=%d chars=%d elapsed=%.1fs error=%s "
-            "voice=%s rate=%s edge-tts=%s text=%r",
+            "voice=%s mode=%s engine=%s text=%r",
             _exc_kind(error), seg_id, attempt, len(text), elapsed_s, message,
-            voice or "?", rate or "?", _edge_tts_version(),
+            voice or "?", mode or "?", engine_ver,
             text[:MAX_TEXT_LOG_CHARS],
         )
         record: dict = {
@@ -90,10 +97,12 @@ class TTSFailureLog:
             "error": message,
             "error_kind": _exc_kind(error),
             "voice": voice or "?",
-            "rate": rate or "?",
-            "edge_tts_version": _edge_tts_version(),
+            "mode": mode or "?",
+            "tts_engine": engine_ver,
             "elapsed_s": round(elapsed_s, 2),
         }
+        if rate:
+            record["rate"] = rate
         if details:
             record.update({k: v for k, v in details.items() if k not in record})
         with self._lock:

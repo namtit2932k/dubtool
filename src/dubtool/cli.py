@@ -262,11 +262,13 @@ def cmd_run(args) -> int:
     jobs_root = jobs_root_default()
     jobs_root.mkdir(exist_ok=True)
     asr_ov = {"language": str(getattr(args, "source_language", "auto") or "auto")}
+    tts_ov = {"mode": args.tts_mode} if getattr(args, "tts_mode", None) else None
     conf = config_mod.load(
         Path.cwd(),
         overrides={
             "llm_provider": args.llm,
             "tts_voice": args.voice,
+            "tts": tts_ov,
             "whisper_model": args.whisper_model,
             "asr": asr_ov,
             "mix": _mix_overrides(args),
@@ -383,6 +385,10 @@ def cmd_stage(args) -> int:
     }
     if getattr(args, "source_language", None):
         stage_overrides["asr"] = {"language": str(args.source_language)}
+    if getattr(args, "tts_mode", None):
+        stage_overrides["tts"] = {"mode": str(args.tts_mode)}
+    if getattr(args, "voice", None):
+        stage_overrides["tts_voice"] = str(args.voice)
     conf = config_mod.load(Path.cwd(), overrides=stage_overrides)
     if args.stage in ("s3", "s5"):
         _require_provider(conf)
@@ -516,7 +522,13 @@ def cmd_doctor(args) -> int:
         else:
             ok = False
             print(f"{conf.llm_provider}: {exc}")
-    for pkg, pip_name in (("edge_tts", "edge-tts"), ("faster_whisper", "faster-whisper")):
+    for pkg, pip_name in (
+        ("vieneu", "vieneu"),
+        ("sea_g2p", "sea-g2p"),
+        ("onnxruntime", "onnxruntime"),
+        ("soundfile", "soundfile"),
+        ("faster_whisper", "faster-whisper"),
+    ):
         try:
             importlib.import_module(pkg)
             print(f"{pip_name}: OK")
@@ -555,7 +567,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_p = sub.add_parser("run", help="process one video end-to-end")
     run_p.add_argument("video", help="path to the input video")
     run_p.add_argument("--llm", choices=("gemini", "ollama", "anthropic"), default=None)
-    run_p.add_argument("--voice", default=None, help="edge-tts voice (Vietnamese)")
+    run_p.add_argument("--voice", default=None, help="VieNeu-TTS Vietnamese preset voice (default: Trúc Ly)")
+    run_p.add_argument("--tts-mode", choices=("v3turbo_int8", "v3nano"), default=None, help="VieNeu-TTS ONNX mode")
     run_p.add_argument("--whisper-model", default=None)
     run_p.add_argument("--out", default=None, help="copy the final dubbed video to this path")
     run_p.add_argument("--force", action="store_true", help="redo finished stages / overwrite --out")
@@ -612,6 +625,8 @@ def build_parser() -> argparse.ArgumentParser:
     stage_p.add_argument("--brief-file", default=None, help="path to a video brief text file")
     stage_p.add_argument("--model", default=None, help="override the provider's configured model id")
     stage_p.add_argument("--source-language", default="auto", help="Source language (e.g. auto, en, vi, ja)")
+    stage_p.add_argument("--voice", default=None, help="VieNeu-TTS Vietnamese preset voice")
+    stage_p.add_argument("--tts-mode", choices=("v3turbo_int8", "v3nano"), default=None, help="VieNeu-TTS ONNX mode")
     stage_p.add_argument("--translate-concurrency", type=int, default=None, help="parallel translation chunk calls")
     stage_p.set_defaults(func=cmd_stage)
 

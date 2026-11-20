@@ -371,6 +371,36 @@ def check_av_decode_compat() -> dict:
         return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
 
 
+def check_vieneu_tts() -> dict:
+    """Offline check that VieNeu-TTS v3 ONNX modules & preset catalogs are intact."""
+    try:
+        import importlib.metadata as _meta
+        import onnxruntime
+        import sea_g2p
+        import soundfile
+        import vieneu
+        from dubtool.tts.vieneu import DEFAULT_VOICE, list_preset_voices
+
+        try:
+            vn_ver = _meta.version("vieneu")
+        except Exception:
+            vn_ver = str(getattr(vieneu, "__version__", "?"))
+        turbo = list_preset_voices("v3turbo_int8")
+        nano = list_preset_voices("v3nano")
+        ok = bool(turbo) and bool(nano) and any(v["id"] == DEFAULT_VOICE for v in turbo)
+        return {
+            "ok": ok,
+            "detail": (
+                f"vieneu {vn_ver}; "
+                f"ort {getattr(onnxruntime, '__version__', '?')}; "
+                f"soundfile {getattr(soundfile, '__version__', '?')}; "
+                f"presets turbo={len(turbo)}, nano={len(nano)}"
+            ),
+        }
+    except Exception as exc:
+        return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
+
+
 CHECKS: dict[str, callable] = {
     "ffmpeg": check_ffmpeg,
     "filters_encoders": check_filters_and_encoder,
@@ -379,8 +409,9 @@ CHECKS: dict[str, callable] = {
     "keys_and_tabs": check_keys_and_tabs,
     "dirs_writable": check_dirs_writable,
     "imports": lambda: check_imports(
-        ("faster_whisper", "ctranslate2", "av", "tokenizers", "huggingface_hub", "edge_tts", "docx", "openai", "anthropic")
+        ("faster_whisper", "ctranslate2", "av", "tokenizers", "huggingface_hub", "vieneu", "sea_g2p", "onnxruntime", "soundfile", "docx", "openai", "anthropic")
     ),
+    "vieneu_tts": check_vieneu_tts,
     "av_decode_compat": check_av_decode_compat,   # AGU7: faster-whisper/PyAV 19 breakage
     "qt_offscreen": check_qt_offscreen,
     "gemini_client": check_gemini_client,      # AGU7 4.2 (real SDK, no network)

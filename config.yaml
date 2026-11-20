@@ -2,18 +2,16 @@
 llm_provider: gemini          # gemini | ollama | anthropic
 whisper_model: small          # small | medium | large-v3 (large-v3 if GPU present)
 device: cpu                   # cpu | cuda
-chars_per_sec: 12.5  # AGENT_UPDATE_4 task A1, re-measured on TRIMMED clips (job test1-e5df32ffda, 82 segments, chars incl. spaces / trimmed tts_duration): p25 12.88, median 15.02, p75 17.31, min 7.81, max 20.36 -> p25 floored to 12.5. Old value 8.0 came from untrimmed clips (median 9.98, p25 8.03, ~0.94 s avg silence/clip).
+chars_per_sec: 16.5  # Update 17: measured on VieNeu-TTS v3 Turbo INT8 trimmed clips (median 18.1, p25 17.5 -> 16.5 safe budget)
 max_stretch: 1.15
 max_fit_attempts: 3
-tts_voice: vi-VN-HoaiMyNeural # or vi-VN-NamMinhNeural
+tts_voice: Trúc Ly            # VieNeu-TTS v3 preset voice (default: Trúc Ly)
 
-# edge-tts extras (AGENT_UPDATE_3 task 2). rate is the edge-tts speaking-rate
-# parameter; a small positive rate (e.g. +5%) is an option if clips still
-# overflow — the user decides, the default stays +0%.
+# Offline TTS post-processing (VieNeu-TTS v3 ONNX, CPU).
 tts_rate: "+0%"
-tts_trim_silence: true  # measured: avg 1.148 s of lead+tail silence per clip (10-clip sample) -> trimming is on
+tts_trim_silence: true        # trim lead/tail silence for tight subtitle & timing sync
 
-tts_silence_threshold_db: -35  # silencedetect threshold used both for measuring and trimming
+tts_silence_threshold_db: -35  # silencedetect threshold used for trimming
 tts_silence_margin_s: 0.05     # keep ~0.05 s of margin so word on/endings are never cut
 
 # Per-provider LLM settings. chunk_size is smaller for free/local models
@@ -112,38 +110,16 @@ schedule:
 # Update 12 task 2: the unit of dubbing — one clip per whole sentence.
 dub:
   granularity: sentence        # sentence (default) | segment (old jobs resume)
-# AGENT_UPDATE_8 task 1: TTS resilience.
+# Offline Vietnamese TTS (VieNeu-TTS v3 ONNX, CPU).
 tts:
-  retry_rounds: 3              # deferred retry rounds after the first pass
-  round_cooldown_s:            # cooldowns before each retry round
-    - 15                       # AGU11 3.3: short cooldowns, the ladder replaces long waits
-    - 30
-    - 60
-  request_timeout_s: 45        # AGU11 3.1: hard cap per edge-tts request
-  attempt_delays_s:            # AGU11 3.3: waits between the repair-ladder steps
-    - 1.5
-    - 4
-  direct_retries: 1            # quick same-voice retry for short segments before counting toward breaker
-  max_chars_per_request: 200   # Update 12 task 3.3: split cap (one voice)
-  alt_voice: vi-VN-NamMinhNeural  # DEPRECATED (Update 12: one voice per video) — ignored
-  join_silence_s: 0.08         # silence between the split pieces, same voice
-  unit_budget_s: 60            # one unit's first-pass budget
-  stage_budget_s: 600          # budget for failing waits before the budget dialog
-  budget_policy: stop          # headless: stop (default) | fallback_remaining | switch_all; the GUI shows the dialog
-  concurrency: 2               # staggered edge-tts workers (drops to 1 automatically on throttling)
-  max_rps: 1.5                 # conservative start pacing to avoid initial burst refusals
-  limiter_floor_interval_s: 2.5 # slowest adaptive limiter interval on refusals
-  breaker_consecutive: 6       # tolerate sporadic NoAudioReceived before pausing stage
-  breaker_pause_s: 15
-  breaker_pause_schedule_s:    # graduated breaker pauses instead of flat 60 s stalls
-    - 10
-    - 20
-    - 30
-  pacing_delay_s: 0.0          # extra per-call sleep when limiter is disabled
-  max_delay_s: 2               # pacing delay cap
-  max_cooldown_s: 120          # provider cooldown cap (was 30)
-  fallback: none               # none | windows_winrt | windows_sapi | piper (AGU8 2.3)
-  piper_voice: ""              # path of the voice model when fallback: piper
+  provider: vieneu             # local offline CPU ONNX engine
+  mode: v3turbo_int8           # v3turbo_int8 (48 kHz, natural) | v3nano (24 kHz, low RAM)
+  steps: 16                    # Euler steps for v3nano (ignored by v3turbo_int8)
+  threads: 0                   # 0 = auto from CPU usage setting
+  direct_retries: 1            # retry once on transient local synthesis error
+  max_chars_per_request: 200   # split very long sentences on punctuation
+  join_silence_s: 0.08         # pause inserted between split pieces
+  concurrency: 1               # ONNX Runtime parallelizes internally via threads
 
 # AGENT_UPDATE_8 task 3.3: LLM punctuation restoration for the transcript.
 punctuate:

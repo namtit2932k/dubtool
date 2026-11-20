@@ -97,6 +97,7 @@ def _effective_config() -> dict:
             "whisper_model": cfg.whisper_model,
             "device": cfg.device,
             "compute_type": cfg.compute_type,
+            "tts_mode": (cfg.tts or {}).get("mode", "v3turbo_int8"),
             "tts_voice": cfg.tts_voice,
             "llm_provider": pid,
             "llm_model": (cfg.provider_config(pid) or {}).get("model", ""),
@@ -105,6 +106,7 @@ def _effective_config() -> dict:
             "stage_models": {
                 "s2_transcribe": cfg.whisper_model,
                 "s3_translate": (cfg.provider_config(pid) or {}).get("model", ""),
+                "s4_tts_mode": (cfg.tts or {}).get("mode", "v3turbo_int8"),
                 "s4_tts_voice": cfg.tts_voice,
                 "s5_fit_duration": (cfg.provider_config(pid) or {}).get("model", ""),
             },
@@ -204,7 +206,8 @@ def _tts_summary(jobs_dir: Path) -> dict:
             "error": str(rec.get("error", ""))[:80],
             "text": str(rec.get("text", ""))[:80],
             "voice": rec.get("voice"),
-            "edge_tts_version": rec.get("edge_tts_version"),
+            "mode": rec.get("mode"),
+            "tts_engine": rec.get("tts_engine") or rec.get("edge_tts_version"),
             "elapsed_s": rec.get("elapsed_s"),
         }
 
@@ -256,7 +259,10 @@ def collect_info() -> dict:
         ("PySide6", "PySide6"),
         ("faster_whisper", "faster-whisper"),
         ("ctranslate2", "ctranslate2"),
-        ("edge_tts", "edge-tts"),
+        ("vieneu", "vieneu"),
+        ("sea_g2p", "sea-g2p"),
+        ("onnxruntime", "onnxruntime"),
+        ("soundfile", "soundfile"),
         ("keyring", "keyring"),
         ("google.genai", "google-genai"),
     ):

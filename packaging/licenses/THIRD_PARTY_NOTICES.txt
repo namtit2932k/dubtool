@@ -3,7 +3,7 @@ DubTool Third-Party Notices & License Information
 
 Application License Status
 --------------------------
-DubTool: Chưa chọn giấy phép — bảo lưu mọi quyền (No license selected yet — all rights reserved).
+DubTool: MIT License — Copyright (c) 2026 sickyturtlez (full text in LICENSE).
 Note: This document records bundled third-party components and their licenses for compliance and transparency; it is not legal advice.
 
 1. FFmpeg (bundled in _internal/vendor/ffmpeg.exe)
@@ -29,7 +29,8 @@ Note: This document records bundled third-party components and their licenses fo
 ---------------------------------------
 - Python Runtime (CPython 3.13): PSF License Version 2
 - PySide6-Essentials (Qt for Python): LGPL-3.0 (see `licenses/LGPL-3.0.txt`)
-- edge-tts: LGPL-3.0 / MIT (see `licenses/LGPL-3.0.txt`). Note: `edge-tts` is an unofficial client interface to Microsoft Edge's online read-aloud service and may be rate-limited or changed by Microsoft at any time.
+- VieNeu-TTS (`vieneu`, `vieneu_utils`) & `sea-g2p`: Apache License 2.0 (see `licenses/Apache-2.0.txt`). Offline Vietnamese ONNX TTS engine; weights (including `OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX`, Apache-2.0) are downloaded on demand from Hugging Face.
+- soundfile (+ bundled `libsndfile`): BSD-3-Clause / LGPL-2.1+ (see `licenses/BSD-3-PyAV.txt` and `licenses/LGPL-3.0.txt`)
 - faster-whisper / ctranslate2 / onnxruntime: MIT License (see `licenses/MIT-faster-whisper.txt`)
 - PyAV (`av`): BSD-3-Clause (bindings; see `licenses/BSD-3-PyAV.txt`) + FFmpeg libraries
 - google-genai / tokenizers / huggingface_hub: Apache License 2.0 (see `licenses/Apache-2.0.txt`)
@@ -39,9 +40,9 @@ Note: This document records bundled third-party components and their licenses fo
 4. License Texts Included in `licenses/` (inside the package & zip)
 -------------------------------------------------------------------
 - `licenses/GPL-3.0.txt` — GNU General Public License v3.0 (FFmpeg GPL build)
-- `licenses/LGPL-3.0.txt` — GNU Lesser General Public License v3.0 (PySide6, edge-tts)
+- `licenses/LGPL-3.0.txt` — GNU Lesser General Public License v3.0 (PySide6, libsndfile)
 - `licenses/OFL-NotoSans.txt` — SIL Open Font License 1.1 (Noto Sans font)
-- `licenses/Apache-2.0.txt` — Apache License 2.0 (google-genai, huggingface_hub, tokenizers, openai)
+- `licenses/Apache-2.0.txt` — Apache License 2.0 (VieNeu-TTS, sea-g2p, MOSS-Audio-Tokenizer-Nano-ONNX, google-genai, huggingface_hub, tokenizers, openai)
 - `licenses/MIT-faster-whisper.txt` — MIT License (faster-whisper, ctranslate2, onnxruntime, anthropic, etc.)
 - `licenses/BSD-3-PyAV.txt` — BSD 3-Clause License (PyAV)
 - `licenses/THIRD_PARTY_NOTICES.txt` — This summary file

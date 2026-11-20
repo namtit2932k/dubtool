@@ -37,7 +37,8 @@ class DubOptions:
     burn_subtitles: bool = True
     save_srt: bool = False
     original_gain_db: float = -14.0
-    voice: str = "vi-VN-HoaiMyNeural"
+    voice: str = "Trúc Ly"
+    tts_mode: str = "v3turbo_int8"
     video_language: str = "auto"
     keep_level: str = "light"          # none | light | full (AGU10 5.2)
     description: str | None = None     # video brief text (user-supplied)
@@ -145,6 +146,7 @@ def _stable_job_id(video: Path, options: DubOptions) -> str:
         "srt" if options.save_srt else "nosrt",
         f"{options.original_gain_db}",
         options.voice,
+        options.tts_mode,
         options.output_name_base or "",
     ):
         h.update(part.encode("utf-8"))
@@ -354,13 +356,12 @@ def run_dub(
         prio = str(user_settings.get("translate_priority", "balanced") or "balanced").lower()
         if prio in ("faithful", "timing"):
             overrides["translate"]["priority"] = prio
-        # AGU11 3.5: the Settings → General backup voice rides into the TTS
-        # config (windows_winrt, windows_sapi, or piper).
-        from dubtool.tts.fallback import tts_overrides_for_backup
+        # Offline VieNeu-TTS v3 ONNX mode (v3turbo_int8 | v3nano).
+        from dubtool.tts.vieneu import normalize_mode as _norm_tts_mode, resolve_voice as _resolve_tts_voice
 
-        _tts_backup = tts_overrides_for_backup(user_settings.get("tts_backup_voice", ""))
-        if _tts_backup:
-            overrides["tts"] = _tts_backup
+        tts_mode = _norm_tts_mode(options.tts_mode or user_settings.get("tts_model"))
+        overrides["tts"] = {"mode": tts_mode}
+        overrides["tts_voice"] = _resolve_tts_voice(options.voice, tts_mode)
         # AGU9 10.4: optional punctuation hint for stage 2 — present, not
         # decided; the default stays off (Update 8 measured 41.0% -> 52.5%
         # sentence-final segments on test2 with no extra time).

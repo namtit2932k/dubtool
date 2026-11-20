@@ -212,97 +212,50 @@ def test_exhausted_failure_preserves_clips_and_raises_unavailable(tmp_path, monk
     assert all(e["tts_duration"] is not None for e in resumed)
 
 
-def test_circuit_breaker_pauses_after_consecutive_failures(tmp_path, monkeypatch):
-    """AGU8 2.1: after `breaker_consecutive` failures in a row the pass stops
-    calling the service (bounded calls) and goes to the round cooldown."""
+def test_failed_segments_bounded_and_all_reported(tmp_path, monkeypatch):
+    """Offline VieNeu stage bounds local retries per segment and raises
+    TTSUnavailableError listing all failed ids at end of stage."""
     job = FakeJob(tmp_path, n_segments=6)
-    cfg = FakeConfig(tmp_path, breaker_consecutive=3, retry_rounds=0)
+    cfg = FakeConfig(tmp_path, direct_retries=0)
     s4 = _import_stage()
     provider = AlwaysFailProvider()
     monkeypatch.setattr(s4.audio_utils, "require_ffmpeg", lambda: None)
     monkeypatch.setattr(s4, "build_tts", lambda config, cache_dir, media_cache=None: _fake_tts(cfg, provider, tmp_path))
 
-    with pytest.raises(globals()["TTSUnavailableError"]):
+    with pytest.raises(globals()["TTSUnavailableError"]) as exc_info:
         s4.run(job, cfg)
-    # Update 12: one voice per video — the ladder lost its alternate-voice
-    # steps, and a short text makes exactly one bounded step (the sentence
-    # as is). After breaker_consecutive exhausted segments the pass pauses
-    # (bounded) and continues — it never hangs. retry_rounds=0 -> a second
-    # pass never runs. 6 segments x 1 step = 6.
     assert provider.calls == 6
+    assert exc_info.value.ids == [0, 1, 2, 3, 4, 5]
 
 
 def test_cancel_during_cooldown(tmp_path, monkeypatch):
-    """AGU8 2.1: Cancel during the round cooldown aborts at once (fake clock
-    steps sleep(1) -- nothing sleeps because cooldowns are 0 and cancel is set
-    before the wait)."""
+    """Cancel event stops stage 4 immediately before synthesizing."""
     import threading
 
     from dubtool.job import StageCancelled
 
     job = FakeJob(tmp_path, n_segments=2)
-    cfg = FakeConfig(tmp_path, round_cooldown_s=[5.0, 5.0, 5.0])
+    cfg = FakeConfig(tmp_path)
     s4 = _import_stage()
     provider = AlwaysFailProvider()
     monkeypatch.setattr(s4.audio_utils, "require_ffmpeg", lambda: None)
     monkeypatch.setattr(s4, "build_tts", lambda config, cache_dir, media_cache=None: _fake_tts(cfg, provider, tmp_path))
     cancel = threading.Event()
-    cancel.set()  # the cooldown wait sees this immediately
+    cancel.set()
 
     with pytest.raises(StageCancelled):
         s4.run(job, cfg, cancel=cancel)
 
 
-def test_fallback_voice_used_and_counted(tmp_path, monkeypatch):
-    """Update 12 task 3: the backup voice is an explicit whole-video switch —
-    every unit regenerates with it and the result keeps exactly one voice."""
-    job = FakeJob(tmp_path, n_segments=4)
-    cfg = FakeConfig(tmp_path, fallback="piper", budget_policy="switch_all")
-    s4 = _import_stage()
-
-    class CountingBackup:
-        name = "piper"
-        uses = 0
-
-        def synthesize(self, text, voice, out_path):
-            CountingBackup.uses += 1
-            _write_wav(out_path)
-
-    primary = AlwaysFailProvider()
-    fallback = CountingBackup()
-
-    monkeypatch.setattr(s4.audio_utils, "require_ffmpeg", lambda: None)
-    monkeypatch.setattr(
-        s4, "build_tts", lambda config, cache_dir, media_cache=None: _fake_tts(cfg, primary, tmp_path)
-    )
-    import dubtool.tts.fallback as fallback_mod
-
-    monkeypatch.setattr(fallback_mod, "build_backup", lambda config: fallback)
-    s4.run(job, cfg)
-
-    entries = json.loads(job.translated_path.read_text(encoding="utf-8"))
-    assert all(e["tts_duration"] is not None for e in entries)
-    # Update 12: the whole-video switch — first pass 4 segments x 1 step = 4;
-    # three retry rounds revisit all 4 = 12; the switch pass uses ONLY the
-    # backup (the failing primary is never retried) for all 4 units.
-    assert CountingBackup.uses == 4
-    assert primary.calls == 16
-    # Exactly one voice in the finished data (and it is not the primary).
-    assert len({e["voice"] for e in entries}) == 1
-
-
 def test_failure_log_fields_present_no_key(tmp_path, monkeypatch):
-    """AGU8 2.2: every failed attempt records the diagnostic fields
-    (exception type, voice, rate, text) and never any key material."""
+    """Every failed attempt records diagnostic fields (exception type, voice,
+    mode, engine, text) and never any key material."""
     job = FakeJob(tmp_path, n_segments=2)
-    cfg = FakeConfig(tmp_path, retry_rounds=0)
+    cfg = FakeConfig(tmp_path, direct_retries=0)
     s4 = _import_stage()
     provider = AlwaysFailProvider()
     monkeypatch.setattr(s4.audio_utils, "require_ffmpeg", lambda: None)
     monkeypatch.setattr(s4, "build_tts", lambda config, cache_dir, media_cache=None: _fake_tts(cfg, provider, tmp_path))
-    monkeypatch.setattr(
-        s4, "_fail_rate", lambda config: "+0%"
-    )
 
     with pytest.raises(globals()["TTSUnavailableError"]):
         s4.run(job, cfg)
@@ -313,10 +266,8 @@ def test_failure_log_fields_present_no_key(tmp_path, monkeypatch):
     assert records
     text_blob = json.dumps(records)
     assert "TTSFailure" in text_blob
-    assert cfg.tts_voice in text_blob
-    for field in ("error", "text", "chars", "attempt", "elapsed_s"):
+    for field in ("error", "text", "chars", "attempt", "elapsed_s", "voice", "mode", "tts_engine"):
         assert field in records[0]
     for name in ("GEMINI_API_KEY", "AIza", "api_key"):
         assert name not in text_blob
-    # voice/rate fields added by AGU8 2.2
-    assert records[0].get("voice") and records[0].get("rate")
+    assert records[0].get("voice") and records[0].get("mode")

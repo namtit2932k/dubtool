@@ -148,63 +148,6 @@ class OverloadDialog(QDialog):
         self.accept()
 
 
-class TtsBudgetDialog(QDialog):
-    """Update 12 task 4: the voice service is unstable — fill only the
-    remaining segments with the local/backup voice, wait 10 more minutes,
-    switch the WHOLE video to the backup voice (every unit is regenerated;
-    one voice per video), or stop. The backup-voice buttons are disabled with
-    tooltips when no backup voice is configured."""
-
-    def __init__(self, missing: int, waited_mmss: str, fallback_ok: bool,
-                 backup_voice: str | None = None,
-                 parent: QWidget | None = None):
-        super().__init__(parent)
-        self.setWindowTitle("DubTool")
-        self.setMinimumWidth(520)
-        layout = QVBoxLayout(self)
-        missing_count = int(missing)
-        voice_label = backup_voice or "?"
-        header = QLabel(i18n.tr("tts.budget_exceeded", n=missing_count, mmss=waited_mmss))
-        header.setWordWrap(True)
-        layout.addWidget(header)
-
-        self.fallback_remaining_btn = QPushButton(
-            i18n.tr("tts.budget.fallback_remaining", n=missing_count, voice=voice_label)
-            if fallback_ok else i18n.tr("tts.budget.fallback_remaining_disabled", n=missing_count)
-        )
-        if fallback_ok:
-            self.fallback_remaining_btn.setToolTip(
-                i18n.tr("tts.budget.fallback_remaining_tooltip", n=missing_count, voice=voice_label)
-            )
-        else:
-            self.fallback_remaining_btn.setToolTip(
-                i18n.tr("tts.budget.fallback_remaining_disabled_tooltip")
-            )
-        self.wait_btn = QPushButton(i18n.tr("tts.budget.wait10"))
-        self.switch_btn = QPushButton(
-            i18n.tr("tts.budget.switch", voice=voice_label)
-            if fallback_ok else i18n.tr("tts.budget.switch_disabled")
-        )
-        if fallback_ok:
-            self.switch_btn.setToolTip(i18n.tr("tts.budget.switch_tooltip", voice=voice_label))
-        else:
-            self.switch_btn.setToolTip(i18n.tr("tts.budget.switch_disabled_tooltip"))
-        self.stop_btn = QPushButton(i18n.tr("tts.budget.stop"))
-        for btn in (self.fallback_remaining_btn, self.wait_btn, self.switch_btn, self.stop_btn):
-            layout.addWidget(btn)
-        self.fallback_remaining_btn.setEnabled(bool(fallback_ok))
-        self.fallback_remaining_btn.clicked.connect(lambda: self._pick("fallback_remaining"))
-        self.wait_btn.clicked.connect(lambda: self._pick("wait10"))
-        self.switch_btn.setEnabled(bool(fallback_ok))
-        self.switch_btn.clicked.connect(lambda: self._pick("switch_all"))
-        self.stop_btn.clicked.connect(lambda: self._pick("stop"))
-        self.choice = "stop"
-
-    def _pick(self, value: str) -> None:
-        self.choice = value
-        self.accept()
-
-
 class DialogBridge(QObject):
     """Runs a dialog opener callable on the object's thread — the GUI
     thread — and BLOCKS the calling (worker) thread until it finished.

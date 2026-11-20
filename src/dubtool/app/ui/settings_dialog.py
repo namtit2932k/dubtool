@@ -65,7 +65,16 @@ def _asr_progress() -> dict:
 
 log = logging.getLogger("dubtool")
 
-VOICE_KEYS = ("vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural")
+from dubtool.tts.vieneu import (
+    DEFAULT_TTS_MODE,
+    DEFAULT_VOICE,
+    list_preset_voices,
+    normalize_mode,
+    resolve_voice,
+    valid_voice_ids,
+)
+
+VOICE_KEYS = valid_voice_ids(DEFAULT_TTS_MODE)
 
 CUSTOM = "__custom__"  # data value of the old Custom… dropdown item (kept for ids)
 MODEL_ID_RE = re.compile(r"[A-Za-z0-9._/\-]{1,128}")
@@ -655,57 +664,15 @@ class SettingsDialog(QDialog):
         self.lang_combo.addItem("Tiếng Việt", "vi")
         self.lang_combo.addItem("English", "en")
         form.addRow(i18n.tr("settings.language"), self.lang_combo)
+        self.tts_mode_combo = QComboBox()
+        self.tts_mode_combo.addItem(i18n.tr("settings.tts_mode_turbo"), "v3turbo_int8")
+        self.tts_mode_combo.addItem(i18n.tr("settings.tts_mode_nano"), "v3nano")
+        self.tts_mode_combo.setToolTip(i18n.tr("settings.tts_model_tip"))
+        self.tts_mode_combo.currentIndexChanged.connect(self._on_tts_mode_changed)
+        form.addRow(i18n.tr("settings.tts_model"), self.tts_mode_combo)
         self.voice_combo = QComboBox()
-        for voice in VOICE_KEYS:
-            self.voice_combo.addItem(voice, voice)
+        self._populate_voices(DEFAULT_TTS_MODE, DEFAULT_VOICE)
         form.addRow(i18n.tr("options.voice"), self.voice_combo)
-        # AGU11 3.5: the backup voice — the languages' voices that actually
-        # exist on this machine (Windows SAPI, piper models), or None.
-        self.backup_combo = QComboBox()
-        self.backup_combo.addItem(i18n.tr("settings.fallback_none"), "none")
-        self._backup_winrt: list[tuple[str, str]] = []
-        self._backup_sapi = self._backup_piper = []
-        self._backup_choices: dict[str, str] = {"none": "none"}
-        try:
-            from dubtool.tts.fallback import detect_winrt_voices
-
-            self._backup_winrt = detect_winrt_voices()
-        except Exception:
-            self._backup_winrt = []
-        try:
-            from dubtool.tts.fallback import detect_sapi_voices
-
-            self._backup_sapi = detect_sapi_voices()
-        except Exception:
-            self._backup_sapi = []
-        try:
-            from dubtool.tts.fallback import PiperTTSProvider
-
-            self._backup_piper = PiperTTSProvider.detect_piper_voices()
-        except Exception:
-            self._backup_piper = []
-        for name, lang in self._backup_winrt:
-            key = f"windows_winrt:{name}"
-            tag = f"{lang}, trên máy" if lang else "trên máy"
-            self.backup_combo.addItem(f"Windows — {name} ({tag})", key)
-            self._backup_choices[key] = "none"
-        for name in self._backup_sapi:
-            key = f"windows_sapi:{name}"
-            self.backup_combo.addItem(f"Windows SAPI — {name} (trên máy)", key)
-            self._backup_choices[key] = "none"
-        for path in self._backup_piper:
-            key = f"piper:{path}"
-            self.backup_combo.addItem(f"Piper — {Path(path).name} (trên máy)", key)
-        form.addRow(i18n.tr("settings.fallback_voice"), self.backup_combo)
-        # Update 12 task 3 item 4: a one-line warning when the chosen backup
-        # uses the same Microsoft online service as the primary voice — it
-        # may then fail for the same reason.
-        self.backup_warn = QLabel(i18n.tr("settings.fallback_same_service"))
-        self.backup_warn.setWordWrap(True)
-        self.backup_warn.setStyleSheet("color: #e6b800;")
-        self.backup_warn.setVisible(False)
-        form.addRow("", self.backup_warn)
-        self.backup_combo.currentIndexChanged.connect(self._on_backup_changed)
 
         # The translation-model group (one model, no Fast/Accurate modes):
         # the fallback model used when the selected model is overloaded or
@@ -759,9 +726,6 @@ class SettingsDialog(QDialog):
         self.overload_combo.addItem(i18n.tr("settings.overload_wait"), "keep_backoff")
         self.overload_combo.setToolTip(i18n.tr("settings.overload_tooltip"))
         form.addRow(i18n.tr("settings.overload_label"), self.overload_combo)
-        self.backup_listen_btn = QPushButton(i18n.tr("settings.fallback_listen"))
-        self.backup_listen_btn.clicked.connect(self._listen_backup)
-        form.addRow("", self.backup_listen_btn)
         self.whisper_combo = QComboBox()
         # AGU8 task 7: base/small/medium/large-v3 with a one-line description
         # ("nhanh nhất", "cân bằng", …) baked into the item text.
@@ -871,60 +835,24 @@ class SettingsDialog(QDialog):
         settings.save(s)
         self.models_status.setText(i18n.tr("settings.refresh_added", n=added_total))
 
-    # ------------------------------------------------ backup voice (AGU11 3.5)
-    def _selected_backup(self) -> str:
-        return str(self.backup_combo.currentData() or "none")
-
-    def _listen_backup(self) -> None:
-        """Nghe thử: synthesize one short sample with the chosen backup voice
-        and play it through Qt's media backend (bundled, no extra window)."""
-        choice = self._selected_backup()
-        if choice == "none":
-            QMessageBox.information(self, i18n.tr("settings.fallback_voice"),
-                                    i18n.tr("settings.fallback_none"))
-            return
-        import tempfile
-
-        from dubtool.tts.base import TTSFailure
-
-        btn = self.backup_listen_btn
-        btn.setEnabled(False)
-        btn.setText("…")
+    # ------------------------------------------------ offline VieNeu voices
+    def _populate_voices(self, mode: str, preferred_voice: str | None = None) -> None:
+        m = normalize_mode(mode)
+        target = resolve_voice(preferred_voice, m)
+        self.voice_combo.blockSignals(True)
         try:
-            sample_dir = Path(tempfile.gettempdir()) / "dubtool-samples"
-            sample_dir.mkdir(parents=True, exist_ok=True)
-            out_path = sample_dir / "backup-sample.mp3"
-            from dubtool.tts.fallback import build_backup_for_setting
-
-            provider = build_backup_for_setting(choice)
-            provider.synthesize(
-                "Xin chào, đây là bản nghe thử của giọng đọc dự phòng.", "", out_path,
-            )
-            if not out_path.exists() or out_path.stat().st_size < 400:
-                QMessageBox.warning(
-                    self, i18n.tr("settings.fallback_listen"),
-                    i18n.tr("settings.fallback_sample_failed", detail="no audio"),
-                )
-                return
-            # AGU11: QtMultimedia is an addons-only module the exe does not
-            # bundle; the sample opens in the OS default player instead.
-            from PySide6.QtGui import QDesktopServices
-            from PySide6.QtCore import QUrl
-
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(out_path)))
-        except TTSFailure as exc:
-            QMessageBox.warning(
-                self, i18n.tr("settings.fallback_listen"),
-                i18n.tr("settings.fallback_sample_failed", detail=str(exc)),
-            )
-        except Exception as exc:  # a preview can never break the dialog
-            QMessageBox.warning(
-                self, i18n.tr("settings.fallback_listen"),
-                i18n.tr("settings.fallback_sample_failed", detail=str(exc)),
-            )
+            self.voice_combo.clear()
+            for item in list_preset_voices(m):
+                self.voice_combo.addItem(item["label"], item["id"])
+            idx = self.voice_combo.findData(target)
+            self.voice_combo.setCurrentIndex(max(0, idx))
         finally:
-            btn.setText(i18n.tr("settings.fallback_listen"))
-            btn.setEnabled(True)
+            self.voice_combo.blockSignals(False)
+
+    def _on_tts_mode_changed(self) -> None:
+        mode = str(self.tts_mode_combo.currentData() or DEFAULT_TTS_MODE)
+        current_voice = str(self.voice_combo.currentData() or DEFAULT_VOICE)
+        self._populate_voices(mode, current_voice)
 
     # --------------------------------------------------------- advanced tab
     def _build_advanced_tab(self) -> QWidget:
@@ -1084,17 +1012,14 @@ class SettingsDialog(QDialog):
             )
         self._refresh_jobs_stats()
 
-    def _on_backup_changed(self) -> None:
-        """Show the same-service warning when the chosen backup would fail
-        for the same reason as the primary (Update 12 task 3 item 4)."""
-        key = self._selected_backup()
-        same = key.startswith("edge:") or key.startswith("edge_voice:")
-        self.backup_warn.setVisible(bool(same))
-
     def _load(self) -> None:
         s = settings.load()
         self.lang_combo.setCurrentIndex(max(0, self.lang_combo.findData(s["language"])))
-        self.voice_combo.setCurrentIndex(max(0, self.voice_combo.findData(s["voice"])))
+        tts_mode = normalize_mode(s.get("tts_model"))
+        self.tts_mode_combo.blockSignals(True)
+        self.tts_mode_combo.setCurrentIndex(max(0, self.tts_mode_combo.findData(tts_mode)))
+        self.tts_mode_combo.blockSignals(False)
+        self._populate_voices(tts_mode, s.get("voice"))
         self.whisper_combo.setCurrentIndex(max(0, self.whisper_combo.findData(s["whisper_model"])))
         self.device_combo.setCurrentIndex(max(0, self.device_combo.findData(s["whisper_device"])))
         self.priority_combo.setCurrentIndex(max(0, self.priority_combo.findData(s.get("translate_priority", "balanced"))))
@@ -1111,7 +1036,6 @@ class SettingsDialog(QDialog):
             self.fallback_combo.addItem(f"{saved_fallback}", saved_fallback)
             idx_f = self.fallback_combo.findData(saved_fallback)
         self.fallback_combo.setCurrentIndex(max(0, idx_f))
-        self._load_backup_choice(s)
         self.preset_combo.setCurrentIndex(max(0, self.preset_combo.findData(s.get("video_encode_preset", "veryfast"))))
         self.jobs_days_spin.setValue(int(s.get("jobs_max_days", 14) or 14))
         self.jobs_total_mb_spin.setValue(int(s.get("jobs_max_total_mb", 3000) or 3000))
@@ -1122,7 +1046,8 @@ class SettingsDialog(QDialog):
     def apply_changes(self) -> dict | None:
         s = settings.load()
         s["language"] = self.lang_combo.currentData() or "vi"
-        s["voice"] = self.voice_combo.currentData() or s["voice"]
+        s["tts_model"] = normalize_mode(self.tts_mode_combo.currentData())
+        s["voice"] = resolve_voice(self.voice_combo.currentData() or s["voice"], s["tts_model"])
         s["whisper_model"] = self.whisper_combo.currentData() or s["whisper_model"]
         s["whisper_device"] = self.device_combo.currentData() or s["whisper_device"]
         s["translate_priority"] = self.priority_combo.currentData() or "balanced"
@@ -1130,7 +1055,7 @@ class SettingsDialog(QDialog):
         s["asr_punctuation_prompt"] = bool(self.asr_prompt_check.isChecked())
         s["overload_policy"] = self.overload_combo.currentData() or "fallback_fast"
         s["fallback_model"] = str(self.fallback_combo.currentData() or "")
-        s["tts_backup_voice"] = self._selected_backup()
+        s.pop("tts_backup_voice", None)
         s["video_encode_preset"] = self.preset_combo.currentData() or "veryfast"
         s["jobs_max_days"] = int(self.jobs_days_spin.value())
         s["jobs_max_total_mb"] = int(self.jobs_total_mb_spin.value())
@@ -1146,14 +1071,6 @@ class SettingsDialog(QDialog):
         settings.save(s)
         i18n.set_language(s["language"])
         return s
-
-    def _load_backup_choice(self, s: dict) -> None:
-        """AGU11 3.5: restore the backup-voice choice; when the saved voice
-        vanished from the machine, fall back to None (silent harm-free)."""
-        saved = str(s.get("tts_backup_voice", "none") or "none")
-        if self.backup_combo.findData(saved) < 0:
-            saved = "none"
-        self.backup_combo.setCurrentIndex(max(0, self.backup_combo.findData(saved)))
 
     def accept(self) -> None:  # noqa: D102
         # Update 9 task 2.2: a read-only dialog must never apply changes

@@ -21,10 +21,10 @@ class TTSUnavailableError(RuntimeError):
 
     def __init__(self, ids: list[int], finished: int):
         super().__init__(
-            f"the voice service did not respond for segment(s) {ids[:5]}"
+            f"local Vietnamese TTS failed for segment(s) {ids[:5]}"
             f"{'…' if len(ids) > 5 else ''}; {finished} finished clips are "
-            "saved — the run can be resumed in a few minutes, the voice can "
-            "be changed in Settings, or a backup voice can be enabled"
+            "saved — check your network (for first-time model download) or "
+            "switch to Nano mode in Settings"
         )
         self.ids = ids
         self.finished = finished
