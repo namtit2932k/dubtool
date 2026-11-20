@@ -71,22 +71,26 @@ class PipelineService(QObject):
             )
 
         def worker() -> None:
-            result: DubResult = api.run_dub(
-                video,
-                output_dir,
-                options=options,
-                secrets=secrets,
-                progress=emit,
-                cancel=self.cancel_event,
-                jobs_dir=jobs_dir,
-                force=force,
-                extra_overrides=extra_overrides,
-                overload_dialog=overload_dialog,
-                fillers_dialog=fillers_dialog,
-                tts_budget_dialog=tts_budget_dialog,
-                language_dialog=language_dialog,
-            )
-            self.running = False
+            try:
+                result: DubResult = api.run_dub(
+                    video,
+                    output_dir,
+                    options=options,
+                    secrets=secrets,
+                    progress=emit,
+                    cancel=self.cancel_event,
+                    jobs_dir=jobs_dir,
+                    force=force,
+                    extra_overrides=extra_overrides,
+                    overload_dialog=overload_dialog,
+                    fillers_dialog=fillers_dialog,
+                    tts_budget_dialog=tts_budget_dialog,
+                    language_dialog=language_dialog,
+                )
+            except Exception as exc:
+                result = DubResult(ok=False, code="error", error=str(exc), detail=repr(exc))
+            finally:
+                self.running = False
             self.finishedRun.emit(result)
 
         self._thread = threading.Thread(target=worker, name="dubtool-run", daemon=True)

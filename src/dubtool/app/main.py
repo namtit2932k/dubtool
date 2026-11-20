@@ -755,7 +755,7 @@ def _run_gui_smoke_body(workspace) -> int:
     def fake_run_dub(video, outdir, options, secrets=None, progress=None,
                      cancel=None, jobs_dir=None, force=False, extra_overrides=None,
                      overload_dialog=None, fillers_dialog=None,
-                     tts_budget_dialog=None):  # AGU11 3.4 dialog travels too
+                     tts_budget_dialog=None, language_dialog=None, **_extra):
         run_calls.append(getattr(options, "model", getattr(options, "mode", "default")))
         for name in ("s1_extract_audio", "s2_transcribe", "s3_translate",
                      "s4_tts", "s5_fit_duration", "s6_mix", "s7_subtitles"):
