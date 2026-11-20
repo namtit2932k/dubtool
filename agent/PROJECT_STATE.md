@@ -49,29 +49,23 @@
 - [x] **Khôi phục `packaging/THIRD_PARTY.md` & cập nhật `packaging/RELEASE_NOTES_TEMPLATE.md` (Bước 1):** Đã khôi phục đầy đủ chuỗi `ffmpeg -version`, `--enable-gpl`, URL bản dựng/mã nguồn, Noto Sans SHA-256, bảng package; cập nhật license sang MIT (`Copyright (c) 2026 sickyturtlez`) và cập nhật privacy notice sang ngôn ngữ nguồn nhận diện được.
 - [x] **`scripts/verify_release.py --audit` & `scripts/definition_of_done.py` Rule 9 (Bước 1):** Đã thay phần hardcode bằng kiểm toán thực tế tag/GitHub release/RELEASE_EVIDENCE.txt/docs/RELEASES.md, nối vào Rule 9 của `definition_of_done.py`, thêm unit test (4/4 PASS) và chạy kiểm chứng thật (`v1.0.15` `ok`, `v1.0.14` `pre-release, superseded`).
 - [x] **Cập nhật `docs/RELEASES.md` & `README_BUILD.md` (Bước 1):** Đã sửa hash `v1.0.8` (`262f9ebd`), ghi rõ các release lịch sử, và ghi nhận trung thực giới hạn `pre-push` hook với `gh release create`.
-- [ ] **CLI `--source-language` đang là dead code (Bước 2):** trong `src/dubtool/cli.py` (parse xong không truyền vào `DubOptions` / `config.asr["language"]`; chưa có ở `--headless-run`).
-- [ ] **UI dropdown ngôn ngữ bị trùng & lỗi (Bước 2):** trong `src/dubtool/app/ui/main_window.py` (trùng `ui_lang_combo` và `lang_video_combo`, thiếu 6 i18n keys `ru/pt/it/th/hi/id`, chưa disable khi chạy, thiếu `"Khác…"`, chưa có nhãn bản địa + tiếng Việt).
+- [x] **CLI `--source-language` & `--subtitles-only` (Bước 2):** Đã nối thật `--source-language` và `--subtitles-only` trong `src/dubtool/cli.py` (`cmd_run`, `cmd_stage`) và `src/dubtool/app/main.py` (`--headless-run`).
+- [x] **UI dropdown ngôn ngữ (Bước 2):** Đã xóa `OptionsWidget.ui_lang_combo` trùng lặp; giữ duy nhất `MainWindow.lang_video_combo` với mặc định `"Tự động nhận diện"`, 14 ngôn ngữ (tên bản địa + Việt) + `"Khác…"` (`OtherLanguageDialog` liệt kê 100 ngôn ngữ Whisper), thêm vào `_busy_widgets()`, thêm `lang_status_lbl` hiển thị ngôn ngữ nhận diện + gợi ý `medium`.
 
 ### Phần còn thiếu theo `agent/AGENT_UPDATE_16.md` (trừ A/B `edge-tts` Task 3 đã lược bỏ)
-- [ ] **Task 1.1–1.2 (Detection & UI):**
-  - Detect trên tối đa 3 cửa sổ có giọng nói (VAD) và lưu `windows: [{start, language, probability}]` vào `state.json`.
-  - Xử lý không chắc chắn (`<0.60` hoặc 2 ngôn ngữ `>=25%` số cửa sổ): GUI hiện dialog 3 ứng viên; CLI/headless đi tiếp với ứng viên tốt nhất + cảnh báo + `uncertain: true`.
-  - Kiểm tra hỗ trợ `multilingual=True` của `faster-whisper` 1.2.1; xử lý video trộn ngôn ngữ hoặc cảnh báo rõ.
-  - Video đã là tiếng Việt: dừng trước dịch + thông báo rõ + nút GUI / flag CLI `--subtitles-only` xuất `.srt` & transcript (không gọi LLM/TTS).
-  - Hiển thị ngôn ngữ nhận diện + độ tin cậy trên stage row / details panel; tip dùng `medium` cho non-English; từ chối model `*.en` với video không phải tiếng Anh; cập nhật privacy notice; đưa `source_language` + cài đặt ngôn ngữ vào `inputs_hash`.
-- [ ] **Task 1.3 (Language-aware text & readable export):**
-  - `units.py` / `dub_units.py`: dấu câu đa ngôn ngữ, abbreviation stop-list chỉ cho tiếng Anh, ngắt theo pause cho tiếng Thái/Lào/Khmer, tắt luật tách theo dấu cách cho chữ không dấu cách.
-  - `punctuate.py`: truyền ngôn ngữ vào prompt và validate ký tự không dấu câu cho chữ không dấu cách.
-  - `fillers.py` / `s3_translate.py`: bỏ qua filler detector và hướng dẫn filler tiếng Anh cho ngôn ngữ không phải tiếng Anh (trừ khi có danh sách riêng).
-  - `s8_export_readable.py`: tiêu đề `{ngôn ngữ} → Tiếng Việt`, cột `Bản gốc ({ngôn ngữ})`, `w:bidi` + căn phải cho ngôn ngữ RTL (Arabic/Hebrew/Persian/Urdu), font fallback Windows cho CJK/Arabic/Thai/Devanagari, lưu `source_language`.
-- [ ] **Task 1.5–1.6 (Tests & Verify thật):**
-  - Thêm đầy đủ unit/widget tests cho Task 1 (detection, dialog 3 ứng viên, Vietnamese stop, đa ngôn ngữ splitting/prompts/fillers/readable XML RTL+CJK, UI dropdown, CLI flag, regression `auto` == `en`).
-  - Chạy verify thật trên `.exe` 1.0.16 (clip đa ngôn ngữ + trộn + tiếng Việt + regression `test9.mp4` chế độ `auto`).
-- [ ] **Task 2.3 (Screenshots mới):** Chụp thêm 4 trạng thái mới (dropdown ngôn ngữ đóng/mở, dialog không chắc ngôn ngữ, thông báo video tiếng Việt, details panel có ngôn ngữ nhận diện) và cập nhật `README.md`.
-- [ ] **Task 4 (Docs & Report & Release):**
-  - Cập nhật `docs/RELEASES.md` (commit thật + ghi chú `gh release create`), cập nhật `README_BUILD.md` (giới hạn `pre-push` guard), sửa typo `claude-haiku` nếu còn.
-  - Hoàn thiện `REPORT_UPDATE_16.md` (<= 400 dòng, đầy đủ bảng bằng chứng thật, ghi rõ quyết định lược bỏ A/B `edge-tts` để chuyển sang VieNeu-TTS ở Update 17).
-  - Chạy `scripts/release.py 16` để build sạch, verify DoD, push, tag `v1.0.16` và verify release.
+- [x] **Task 1.1–1.2 (Detection & UI — Bước 2):**
+  - Đã tạo `src/dubtool/languages.py` và hoàn thiện nhận diện 3 cửa sổ VAD (`detect_source_language`) lưu `windows: [{start, language, probability}]` vào `state.json`.
+  - Đã hoàn thiện `LanguageUncertainDialog` (3 ứng viên GUI) + cảnh báo CLI/headless (`uncertain: true`), hỗ trợ `multilingual=True` cho video trộn ngôn ngữ (ghi cảnh báo rõ vì `faster-whisper 1.2.1` `Segment` không có field `language`).
+  - Đã hoàn thiện luồng dừng video tiếng Việt (`VietnameseSourceDetected`, 0 LLM/TTS) kèm `VietnameseSourceDialog` (nút xuất `.srt` + bản chép lời) và CLI/headless `--subtitles-only`.
+  - Đã từ chối model `*.en` cho non-English, cập nhật `first_run.privacy`, đưa `source_language` vào `stage_inputs_hash` (`s3`, `s5`).
+- [x] **Task 1.3 (Language-aware text & readable export — Bước 2):**
+  - Đã cập nhật `units.py`, `dub_units.py`, `punctuate.py`, `s3_translate.py`, `s5_fit_duration.py`, `llm/prompts.py`, `llm/client.py` (dấu câu đa ngôn ngữ, abbreviation chỉ cho English, Thai ngắt theo pause, tắt filler tiếng Anh cho non-English, `initial_prompt` chỉ cho English).
+  - Đã cập nhật `s8_export_readable.py` (`{ngôn ngữ} → Tiếng Việt`, `Bản gốc ({ngôn ngữ})`, `w:bidi` + `w:rtl` + căn phải cho RTL, font fallback Windows cho CJK/Arabic/Thai/Devanagari, `export_subtitles_only()`).
+- [x] **Task 1.5, Task 2.3 & Task 3.1 (Tests & Screenshots — Bước 3):**
+  - Đã thêm 15 test toàn diện trong `tests/test_update16_multilingual.py` (kèm Task 3.1 root-cause test); toàn bộ bộ test đạt **599 passed, 2 skipped (SKIPS.md), 0 failed**; `--layout-check` **0 violations**.
+  - Đã thêm 5 screenshot mới (`lang_dropdown_closed.png`, `lang_dropdown_open.png`, `dialog_language_uncertain.png`, `dialog_vietnamese_source.png`, `details_detected_language.png`), đồng bộ `README.md`, cập nhật `packaging/dubtool.spec` (MIT copyright, `LICENSE` + `fillers.yaml` + hiddenimports).
+- [ ] **Task 1.6 (Verify thật trên `.exe` 1.0.16 — Bước 4):** Build `.exe` 1.0.16 sạch, chạy bộ clip đa ngôn ngữ + trộn + tiếng Việt + regression `test9.mp4` (`auto`).
+- [ ] **Task 4 (Report & Release — Bước 5):** Hoàn thiện `REPORT_UPDATE_16.md` (<= 400 dòng, đủ bằng chứng thật), cập nhật commit hash thật vào `docs/RELEASES.md`, chạy `scripts/release.py 16`.
 
 ---
 

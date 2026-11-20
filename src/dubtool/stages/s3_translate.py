@@ -224,7 +224,9 @@ def count_over_budget(
     ]
 
 
-def units_for(entries: list[dict[str, Any]], units_cfg: dict) -> list[dict[str, Any]]:
+def units_for(
+    entries: list[dict[str, Any]], units_cfg: dict, lang: str = "en"
+) -> list[dict[str, Any]]:
     """Group the translated entries into units; each unit carries the sum of
     its segments' max_chars and its segments list."""
     segs = [
@@ -237,6 +239,7 @@ def units_for(entries: list[dict[str, Any]], units_cfg: dict) -> list[dict[str, 
         max_duration_s=float(units_cfg.get("max_duration_s", 14.0)),
         max_gap_s=float(units_cfg.get("max_gap_s", 1.0)),
         pause_split_s=float(units_cfg.get("pause_split_s", 0.5)),
+        lang=lang,
     )
     by_id = {e["id"]: e for e in entries}
     for u in units:
@@ -332,10 +335,27 @@ def _filler_state(job, config, transcript) -> dict:
     (set by api.run_dub). CLI/headless runs never ask.
     """
     from dubtool import fillers as fillers_mod
+    from dubtool import languages as lang_mod
     from dubtool.punctuate import read_words
 
+    src_code = _resolved_source_lang_code(job, config)
     fill_cfg = getattr(config, "fillers", {}) or {}
     settings = fillers_mod.load_settings()
+    if not lang_mod.is_english(src_code):
+        # Update 16 Task 1.3: filler lists are English-only; skip detector for
+        # other languages unless a per-language list exists in fillers.yaml.
+        per_lang = settings.get("languages") if isinstance(settings, dict) else None
+        if not (isinstance(per_lang, dict) and isinstance(per_lang.get(src_code), dict)):
+            log.info("s3: skipping English filler detector for source language=%s", src_code)
+            return {
+                "settings": {"vocative": {}, "discourse": {}, "protected": [], "idioms": {}},
+                "actions": {},
+                "policy": "",
+                "words": [],
+                "suggestions": [],
+                "enabled": False,
+            }
+        settings = per_lang[src_code]
     words = read_words(job) or []
     scanned: list[dict] = []
     for seg in transcript:
@@ -550,6 +570,7 @@ def _prepare_sentences(job, config, transcript, pid, api_keys, cancel):
         restore_punctuation,
     )
 
+    src_code = _resolved_source_lang_code(job, config)
     changed = False
     punct = getattr(config, "punctuate", {}) or {}
     enabled = str(punct.get("enabled", "auto")).lower()
@@ -558,11 +579,12 @@ def _prepare_sentences(job, config, transcript, pid, api_keys, cancel):
             transcript,
             max_missing_ratio=float(punct.get("max_missing_ratio", 0.30)),
             max_unpunct_run=int(punct.get("max_unpunct_run", 25)),
+            lang=src_code,
         ) or enabled == "on"
     ):
-        client = fast_client(config, pid, api_keys, cancel)
+        client = fast_client(config, pid, api_keys, cancel, job=job)
         try:
-            accepted, rejected = restore_punctuation(transcript, client, punct)
+            accepted, rejected = restore_punctuation(transcript, client, punct, lang=src_code)
         except BudgetExhausted as exc:
             log.warning("punctuate: %s — the transcription text stays as is", exc)
             accepted = rejected = 0
@@ -574,7 +596,7 @@ def _prepare_sentences(job, config, transcript, pid, api_keys, cancel):
     if bool(getattr(config, "asr", {}).get("sentence_resegment", True)):
         words = read_words(job)
         if words:
-            reseg = resegment_by_sentences(transcript, words)
+            reseg = resegment_by_sentences(transcript, words, lang=src_code)
             if reseg is not None:
                 transcript = reseg
                 changed = True
@@ -1018,7 +1040,9 @@ def run(
     budget_err: BudgetExhausted | None = None
 
     if unit_mode == "sentence":
-        units = units_for(entries, config.units or {})
+        units = units_for(
+            entries, config.units or {}, lang=_resolved_source_lang_code(job, config)
+        )
         write_units_file(job, units)
 
         # Units to (re)translate: skip any unit containing a reviewed segment;
@@ -1068,17 +1092,20 @@ def run(
             chunk_spans: list[dict] = []
             from dubtool import fillers as fillers_mod
             chunk_texts = [u["text"] for u in chunk]
-            for u in chunk:
-                uw = _words_in_range(
-                    fill_state["words"], float(u["start"]), float(u["end"])
-                )
-                chunk_spans.extend(fillers_mod.tag_fillers(
-                    u["text"], uw, fill_state["settings"],
-                    float((getattr(config, "fillers", {}) or {}).get("pause_s", 0.25)),
-                ))
-            chunk_policy = fillers_mod.render_policy(
-                chunk_spans, fill_state["actions"], fill_state["settings"]
-            ) or base_policy
+            if fill_state.get("enabled", True):
+                for u in chunk:
+                    uw = _words_in_range(
+                        fill_state["words"], float(u["start"]), float(u["end"])
+                    )
+                    chunk_spans.extend(fillers_mod.tag_fillers(
+                        u["text"], uw, fill_state["settings"],
+                        float((getattr(config, "fillers", {}) or {}).get("pause_s", 0.25)),
+                    ))
+                chunk_policy = fillers_mod.render_policy(
+                    chunk_spans, fill_state["actions"], fill_state["settings"]
+                ) or base_policy
+            else:
+                chunk_policy = ""
             chunk_glossary = _filter_glossary(
                 glossary, chunk_texts + [s["text"] for s in chunk_spans]
             )
@@ -1165,7 +1192,10 @@ def run(
             )
             if not is_reviewed and not str(vi or "").strip():
                 missing_units += 1
-        write_dub_units(job, build_dub_units(units, translations))
+        write_dub_units(
+            job,
+            build_dub_units(units, translations, source_language=_resolved_source_lang_code(job, config)),
+        )
         log.info("s3: dub_units.json written (%d sentence units)", len(units))
     else:
         missing_units = sum(

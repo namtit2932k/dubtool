@@ -45,6 +45,7 @@ class PipelineService(QObject):
         overload_dialog=None,
         fillers_dialog=None,
         tts_budget_dialog=None,
+        language_dialog=None,
     ) -> bool:
         """Start a run (resume happens automatically via the stable job id).
         Returns False if a run is already active.
@@ -83,6 +84,7 @@ class PipelineService(QObject):
                 overload_dialog=overload_dialog,
                 fillers_dialog=fillers_dialog,
                 tts_budget_dialog=tts_budget_dialog,
+                language_dialog=language_dialog,
             )
             self.running = False
             self.finishedRun.emit(result)

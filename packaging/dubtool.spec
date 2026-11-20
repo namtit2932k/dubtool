@@ -39,11 +39,11 @@ _vinfo = _vi.VSVersionInfo(
                 "040904b0",
                 [
                     _vi.StringStruct("CompanyName", "DubTool project"),
-                    _vi.StringStruct("FileDescription", "DubTool - English to Vietnamese video dubbing"),
+                    _vi.StringStruct("FileDescription", "DubTool - Multilingual to Vietnamese video dubbing"),
                     _vi.StringStruct("FileVersion", _VERSION),
                     _vi.StringStruct("InternalName", "DubTool"),
                     _vi.StringStruct(
-                        "LegalCopyright", "All rights reserved - see packaging/THIRD_PARTY.md"
+                        "LegalCopyright", "MIT License - Copyright (c) 2026 sickyturtlez (third-party: see THIRD_PARTY.md)"
                     ),
                     _vi.StringStruct("OriginalFilename", "DubTool.exe"),
                     _vi.StringStruct("ProductName", "DubTool"),
@@ -61,7 +61,9 @@ _txt_version.write_text(str(_vinfo), encoding="utf-8")
 
 datas = [
     (str(ROOT / "config.yaml"), "."),
+    (str(ROOT / "LICENSE"), "."),
     (str(ROOT / "packaging" / "models.yaml"), "packaging"),
+    (str(ROOT / "packaging" / "fillers.yaml"), "packaging"),
     (str(ROOT / "packaging" / "licenses"), "licenses"),
 ]
 
@@ -97,6 +99,7 @@ hiddenimports += collect_submodules("edge_tts")
 hiddenimports += collect_submodules("openai")
 hiddenimports += collect_submodules("anthropic")
 hiddenimports += ["pydantic", "httpx"]
+hiddenimports += ["dubtool.languages", "dubtool.app.ui.language_dialogs"]
 # python-docx + its lxml dependency (readable translation export, AGU7 5.6)
 hiddenimports += ["docx", "docx.oxml", "docx.oxml.ns", "lxml", "lxml.etree"]
 

@@ -392,6 +392,10 @@ def stage_inputs_hash(job: "Job", cfg, stage: str) -> str:
         orig = (job.state.get("original") or {}) if isinstance(job.state, dict) else {}
         if orig:
             feed(["original", orig.get("size"), orig.get("mtime"), orig.get("fingerprint")])
+    if stage in ("s3", "s5"):
+        sl = (job.state.get("source_language") or {}) if isinstance(job.state, dict) else {}
+        if sl:
+            feed(["source_language", sl.get("code"), sl.get("method")])
     feed(_cfg_part(cfg, stage))
     recorded = job.state.get("inputs") or {}
     idx = STAGE_ORDER.index(stage)

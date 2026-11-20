@@ -1,17 +1,19 @@
-# DubTool — English → Vietnamese video dubbing
+# DubTool — Multilingual → Vietnamese video dubbing
 
-DubTool takes an English-speaking video, transcribes it locally, translates it to
-Vietnamese with an LLM, generates a Vietnamese voice with TTS, fits the speech
-into the original timing, mixes it over the original audio, and burns Vietnamese
-subtitles — ending in a dubbed MP4.
+DubTool detects the spoken source language of a video automatically (or uses a
+manual language choice), transcribes it locally with `faster-whisper`, translates
+it to Vietnamese with a configurable LLM (Gemini, OpenAI, Anthropic, or Ollama),
+generates a Vietnamese voice track, fits the speech into the original timing,
+mixes it over the lowered original audio, burns Vietnamese subtitles, and exports
+a customer-readable translation file (`.docx`/`.txt`).
 
-It ships as a **command-line tool** for full control over every stage, and
-(staged, in development) as a **Windows desktop app** with two one-click
-modes: *Fast* and *Accurate*.
+If the input video is already in Vietnamese, DubTool stops before translation
+and offers to export `.srt` subtitles and a readable transcript without calling
+any translation or voice service.
 
 > Only dub videos you own or have permission to modify.
 
-![Main window with a video imported — the file card replaces the drop zone](docs/images/ready.png)
+![Main window with a video imported and the source-language selector](docs/images/ready.png)
 
 ## How it works
 
@@ -58,8 +60,8 @@ dubtool doctor
 ## Command-line usage
 
 ```bash
-dubtool run sample.mp4 [--mode fast|accurate via config] [--voice vi-VN-HoaiMyNeural] [--whisper-model small] [--force]
-dubtool stage <job_id> <s1..s7> [--force]
+dubtool run sample.mp4 [--source-language auto|en|ja|...] [--subtitles-only] [--model gemini-3.5-flash-lite] [--voice vi-VN-HoaiMyNeural] [--whisper-model small] [--force]
+dubtool stage <job_id> <s1..s7> [--source-language auto|<code>] [--force]
 dubtool status <job_id>
 dubtool retts <job_id> --ids 3,7,12
 dubtool compare-translate <job_id> --models gemini:gemini-3.5-flash-lite,gemini:gemini-3.8-flash
@@ -110,6 +112,10 @@ python -m dubtool.app.main --headless-run video.mp4 outdir/ --mode fast
 - Audio/video never leaves the machine except: English transcript text → Google
   (translation), Vietnamese text → Microsoft's speech service (edge-tts,
   unofficial interface) for the voice.
+
+![Source-language selector — Auto-detect, curated languages, and Other…](docs/images/lang_dropdown_open.png)
+
+![Running — progress details with detected language and confidence](docs/images/details_detected_language.png)
 
 ![Running — the progress details panel with the live header and liveness line](docs/images/running.png)
 

@@ -190,11 +190,6 @@ class OptionsWidget(QGroupBox):
         self.voice_combo = QComboBox()
         self.voice_combo.addItems(VOICE_KEYS)
         self.voice_combo.setCurrentText(s["voice"])
-        self.ui_lang_combo = QComboBox()
-        self.ui_lang_combo.addItem(i18n.tr("language.auto"), "auto")
-        for lang_code in ["en", "vi", "es", "fr", "de", "zh", "ja", "ko", "ar"]:
-            self.ui_lang_combo.addItem(i18n.tr(f"language.{lang_code}"), lang_code)
-        self.ui_lang_combo.setCurrentIndex(0)
         grid.addWidget(self.burn_check, 0, 0, 1, 3)
         grid.addWidget(self.srt_check, 1, 0, 1, 3)
         grid.addWidget(QLabel(i18n.tr("options.keep_label")), 2, 0)
@@ -204,10 +199,8 @@ class OptionsWidget(QGroupBox):
         grid.addWidget(QLabel(i18n.tr("options.gain")), 4, 0)
         grid.addWidget(self.gain_slider, 4, 1)
         grid.addWidget(self.gain_value, 4, 2)
-        grid.addWidget(QLabel(i18n.tr("language.header")), 5, 0)
-        grid.addWidget(self.ui_lang_combo, 5, 1, 1, 2)
-        grid.addWidget(QLabel(i18n.tr("options.voice")), 6, 0)
-        grid.addWidget(self.voice_combo, 6, 1, 1, 2)
+        grid.addWidget(QLabel(i18n.tr("options.voice")), 5, 0)
+        grid.addWidget(self.voice_combo, 5, 1, 1, 2)
 
     def to_options(self, model: str, brief: str) -> api.DubOptions:
         from dubtool.brief import normalize_brief
@@ -218,7 +211,6 @@ class OptionsWidget(QGroupBox):
             save_srt=self.srt_check.isChecked(),
             original_gain_db=float(self.gain_slider.value()),
             voice=self.voice_combo.currentText(),
-            video_language=str(self.ui_lang_combo.currentData() or "auto"),
             keep_level=str(self.keep_combo.currentData() or "light"),
             export_readable=self.readable_check.isChecked(),
             readable_format=str(self.readable_format_combo.currentData() or "docx"),
@@ -273,6 +265,11 @@ class ProgressWidget(QGroupBox):
         layout.addLayout(self.action_row)
 
         self.log = LogView()
+        self.lang_status_lbl = QLabel("")
+        self.lang_status_lbl.setWordWrap(True)
+        self.lang_status_lbl.setObjectName("lang_status_lbl")
+        self.lang_status_lbl.setVisible(False)
+        layout.addWidget(self.lang_status_lbl)
         # Update 9 task 3: the details area — header line, liveness line,
         # copy and open-log-folder buttons — all hidden while collapsed.
         self.details_header = QLabel("")
@@ -386,10 +383,14 @@ class ProgressWidget(QGroupBox):
         self._deadline_note = False
         self.details_header.setText("")
         self.details_liveness.setText("")
+        self.lang_status_lbl.setText("")
+        self.lang_status_lbl.setVisible(False)
         self.log.text.clear()
 
     def show_running(self) -> None:
         self.show()
+        self.lang_status_lbl.setText("")
+        self.lang_status_lbl.setVisible(False)
         self.cancel_btn.show()
         for b in (self.resume_btn, self.over_btn, self.open_btn, self.play_btn, self.readable_btn):
             b.hide()
@@ -419,6 +420,9 @@ class ProgressWidget(QGroupBox):
         # the ProgressGate upstream as before.
         stamp = _time.strftime("%H:%M:%S")
         if message:
+            if message.startswith("Ngôn ngữ:") or message.startswith("Language:"):
+                self.lang_status_lbl.setText(message)
+                self.lang_status_lbl.setVisible(True)
             self.log.append(f"[{stamp}] [{stage}] {message}")
         elif state in ("start", "done", "error", "skipped"):
             self.log.append(f"[{stamp}] [{stage}] {state}")
@@ -644,16 +648,23 @@ class MainWindow(QMainWindow):
         self.options = OptionsWidget()
         self.left_layout.addWidget(self.options)
 
-        # 5. Language row (AGU16 3.1)
+        # 5. Language row (single source-language dropdown; starts at Auto every run)
+        from dubtool import languages as lang_mod
+
         self.lang_video_row = QWidget()
         self.lang_video_row.setObjectName("lang_video_row")
         lang_video_layout = QHBoxLayout(self.lang_video_row)
         lang_video_layout.setContentsMargins(0, 0, 0, 0)
         lang_video_layout.addWidget(QLabel(i18n.tr("language.video_label")))
         self.lang_video_combo = QComboBox()
+        self.lang_video_combo.setObjectName("lang_video_combo")
+        ui_lang = "en" if i18n.language() == "en" else "vi"
         self.lang_video_combo.addItem(i18n.tr("language.auto"), "auto")
-        for lang_code in ["en", "ja", "zh", "ko", "es", "fr", "de", "ru", "pt", "it", "th", "hi", "ar", "id"]:
-            self.lang_video_combo.addItem(i18n.tr(f"language.{lang_code}"), lang_code)
+        for lang_code, _en, _nat, _vi in lang_mod.CURATED_LANGUAGES:
+            self.lang_video_combo.addItem(lang_mod.dropdown_label(lang_code, ui_lang), lang_code)
+        self.lang_video_combo.addItem(i18n.tr("language.other"), "__other__")
+        self._last_lang_idx = 0
+        self.lang_video_combo.activated.connect(self._on_lang_combo_activated)
         lang_video_layout.addWidget(self.lang_video_combo, 1)
         self.left_layout.addWidget(self.lang_video_row)
 
@@ -983,7 +994,7 @@ class MainWindow(QMainWindow):
         The enumerate test in tests/test_app_ui.py sweeps the window for
         widgets forgotten here."""
         out = [self.drop_zone, self.output_btn, self.options,
-               self.generate_btn, self.model_combo]
+               self.lang_video_combo, self.generate_btn, self.model_combo]
         if getattr(self, "file_card", None) is not None:
             out.append(self.file_card)
         return out
@@ -1001,6 +1012,30 @@ class MainWindow(QMainWindow):
 
     def is_busy(self) -> bool:
         return bool(getattr(self, "_busy", False))
+
+    def _on_lang_combo_activated(self, index: int) -> None:
+        code = str(self.lang_video_combo.itemData(index) or "auto")
+        if code != "__other__":
+            self._last_lang_idx = index
+            return
+        from dubtool import languages as lang_mod
+        from dubtool.app.ui.language_dialogs import OtherLanguageDialog
+
+        dlg = OtherLanguageDialog(self)
+        if dlg.exec() == dlg.DialogCode.Accepted and dlg.selected_code:
+            chosen = dlg.selected_code
+            existing = self.lang_video_combo.findData(chosen)
+            if existing >= 0:
+                self.lang_video_combo.setCurrentIndex(existing)
+                self._last_lang_idx = existing
+            else:
+                ui_lang = "en" if i18n.language() == "en" else "vi"
+                insert_at = max(1, self.lang_video_combo.count() - 1)
+                self.lang_video_combo.insertItem(insert_at, lang_mod.dropdown_label(chosen, ui_lang), chosen)
+                self.lang_video_combo.setCurrentIndex(insert_at)
+                self._last_lang_idx = insert_at
+        else:
+            self.lang_video_combo.setCurrentIndex(self._last_lang_idx)
 
     def start_run(self, _checked: bool = False, force: bool = False) -> None:
         model_id = self._selected_model_id()
@@ -1029,7 +1064,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, i18n.tr("output.header"), self.output_warn.text())
             return
         options = self.options.to_options(model_id, brief=self.brief_edit.toPlainText())
-        options.video_language = str(self.lang_video_combo.currentData() or "auto")
+        sel_lang = str(self.lang_video_combo.currentData() or "auto")
+        options.video_language = "auto" if sel_lang == "__other__" else sel_lang
         # The selected model id persists for the next run.
         try:
             s = settings.load()
@@ -1098,6 +1134,13 @@ class MainWindow(QMainWindow):
                 )
             )
 
+        def _language_dialog(candidates: list[dict], mixed: bool = False):
+            from dubtool.app.ui.language_dialogs import LanguageUncertainDialog
+
+            return _run_modal(
+                lambda: LanguageUncertainDialog(candidates, mixed=mixed, parent=self)
+            )
+
         started = self.service.start(
             video=self.video_path,
             output_dir=self.output_dir,
@@ -1108,6 +1151,7 @@ class MainWindow(QMainWindow):
             overload_dialog=_overload_dialog,
             fillers_dialog=_fillers_dialog,
             tts_budget_dialog=_tts_budget_dialog,
+            language_dialog=_language_dialog,
         )
         if not started:
             self._refresh_buttons()
@@ -1144,7 +1188,9 @@ class MainWindow(QMainWindow):
         self.progress_group.on_finished(result)
         self._refresh_buttons()
         self._validate_output()
-        if result.code == "output_exists":
+        if result.code == "source_is_vietnamese":
+            self._handle_vietnamese_source(result)
+        elif result.code == "output_exists":
             answer = QMessageBox.question(
                 self,
                 i18n.tr("progress.header"),
@@ -1157,6 +1203,30 @@ class MainWindow(QMainWindow):
             # panel automatically.
             self.progress_group.log.set_open(True)
             self._show_error(result)
+
+    def _handle_vietnamese_source(self, result: api.DubResult) -> None:
+        from dubtool.app.ui.language_dialogs import VietnameseSourceDialog
+
+        sl = result.source_language or {}
+        prob = float(sl.get("probability") or 1.0)
+        dlg = VietnameseSourceDialog(prob, parent=self)
+        dlg.exec()
+        if dlg.choice == "subtitles" and result.job_dir and self.output_dir:
+            from dubtool.stages import s8_export_readable as s8
+
+            base = (self.video_path.stem if self.video_path else "video")
+            try:
+                srt_p, txt_p = s8.export_subtitles_only(result.job_dir, self.output_dir, base)
+                self.progress_group.log.append(
+                    i18n.tr("language.vi_subtitles_done", srt=srt_p.name, txt=txt_p.name)
+                )
+                result.out_srt = srt_p
+                result.out_readable = txt_p
+                self.progress_group._last_result = result
+                self.progress_group.open_btn.show()
+                self.progress_group.readable_btn.show()
+            except Exception as exc:
+                self.progress_group.log.append(f"Error exporting subtitles: {exc}")
 
     def _show_error(self, result: api.DubResult) -> None:
         def _export_diag() -> None:

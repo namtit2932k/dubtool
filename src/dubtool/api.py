@@ -48,6 +48,7 @@ class DubOptions:
     # AGENT_UPDATE_7.md task 4: the customer-readable translation file.
     export_readable: bool = True
     readable_format: str = "docx"      # docx | txt
+    subtitles_only: bool = False       # stop after ASR and export .srt + transcript only
     mode: str | None = None
 
     def __post_init__(self) -> None:
@@ -77,6 +78,8 @@ class DubResult:
     out_srt: Path | None = None
     out_readable: Path | None = None   # <name>_vi_translation.docx|.txt (AGU7 task 4)
     job_id: str | None = None
+    job_dir: Path | None = None
+    source_language: dict | None = None
     readable_warning: str | None = None  # set when the video is ok but the export failed
     error: str | None = None
     detail: str | None = None
@@ -275,6 +278,7 @@ def run_dub(
     overload_dialog: Callable[[], str] | None = None,
     fillers_dialog: Callable[[list], dict | None] | None = None,
     tts_budget_dialog: Callable[..., str] | None = None,
+    language_dialog: Callable[[list[dict], bool], str | None] | None = None,
 ) -> DubResult:
     """Run the full pipeline on one video. Never raises; returns a DubResult.
 
@@ -321,7 +325,7 @@ def run_dub(
                             provider_keys = [one]
                 if provider_keys:
                     keys[normalize_provider(pid)] = provider_keys
-        if not any(keys.values()):
+        if not any(keys.values()) and not options.subtitles_only:
             return DubResult(code="invalid_key", error="no API key (set it in Settings)")
 
         # Model -> provider + per-model defaults from the catalog
@@ -415,6 +419,7 @@ def run_dub(
         cfg.fillers_dialog = llm_volatility["fillers_dialog"]
         cfg.fillers_video = llm_volatility["fillers_video"]
         cfg.tts_budget_dialog = llm_volatility["tts_budget_dialog"]
+        cfg.language_dialog = language_dialog if interactive else None
         _saved = _user_settings()
         _preset = str(_saved.get("video_encode_preset", "")) or None
         if _preset in ("veryfast", "faster", "medium"):
@@ -489,6 +494,34 @@ def run_dub(
             logging.getLogger("dubtool").addHandler(bridge)
             try:
                 stage_map[stage](job, cfg, force=force)
+            except s2_transcribe.VietnameseSourceDetected as exc:
+                done_s = round(time.monotonic() - started, 1)
+                job.finish_stage(stage, inputs_hash=current_hash, elapsed_s=done_s)
+                progress(ProgressEvent(stage=stage, state="done", message=str(exc), elapsed_s=done_s))
+                sl = job.state.get("source_language") if isinstance(job.state, dict) else None
+                if options.subtitles_only:
+                    from dubtool.stages import s8_export_readable as s8
+
+                    base = options.output_name_base or video.stem
+                    srt_p, txt_p = s8.export_subtitles_only(job.dir, output_dir, base)
+                    return DubResult(
+                        ok=True,
+                        code="subtitles_only",
+                        out_srt=srt_p,
+                        out_readable=txt_p,
+                        job_id=job.dir.name,
+                        job_dir=job.dir,
+                        source_language=sl,
+                        error=str(exc),
+                    )
+                return DubResult(
+                    ok=False,
+                    code="source_is_vietnamese",
+                    job_id=job.dir.name,
+                    job_dir=job.dir,
+                    source_language=sl,
+                    error=str(exc),
+                )
             except StageCancelled:
                 done_s = round(time.monotonic() - started, 1)
                 progress(ProgressEvent(stage=stage, state="error", message="cancelled", elapsed_s=done_s))
@@ -534,6 +567,21 @@ def run_dub(
             progress(
                 ProgressEvent(stage=stage, state="done", elapsed_s=stage_elapsed)
             )
+            if stage == "s2" and options.subtitles_only:
+                from dubtool.stages import s8_export_readable as s8
+
+                base = options.output_name_base or video.stem
+                srt_p, txt_p = s8.export_subtitles_only(job.dir, output_dir, base)
+                sl = job.state.get("source_language") if isinstance(job.state, dict) else None
+                return DubResult(
+                    ok=True,
+                    code="subtitles_only",
+                    out_srt=srt_p,
+                    out_readable=txt_p,
+                    job_id=job.dir.name,
+                    job_dir=job.dir,
+                    source_language=sl,
+                )
 
         # Deliver the outputs atomically; never overwrite silently (AGU4 6.3).
         base_name = (options.output_name_base or video.stem) + "_vi.mp4"
@@ -610,8 +658,11 @@ def run_dub(
             prune_light(job.dir)
 
         job.save()
+        sl = job.state.get("source_language") if isinstance(job.state, dict) else None
         result = DubResult(
             ok=True, code="ok", out_video=target, out_srt=out_srt, job_id=job_id,
+            job_dir=job.dir,
+            source_language=sl,
             llm_requests=budget.used,
             llm_requests_per_stage=requests_per_stage,
         )

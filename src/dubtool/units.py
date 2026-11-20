@@ -14,50 +14,30 @@ from __future__ import annotations
 import logging
 import re
 
+from dubtool import languages as lang_mod
+
 log = logging.getLogger("dubtool")
 
-SENTENCE_FINAL = set(".!?…" + "\u2026")  # includes the single-char ellipsis
-CLOSERS = "\"'”’)】]"
-ABBREVIATIONS = {
-    "mr", "mrs", "ms", "dr", "vs", "eg", "ie", "prof", "sr", "jr", "st",
-    "etc", "no", "approx", "fig", "al", "inc", "ltd", "co",
-}
+SENTENCE_FINAL = set(lang_mod.SENTENCE_FINAL_CHARS)
+CLOSERS = "".join(lang_mod.CLOSING_QUOTES_BRACKETS)
+ABBREVIATIONS = set(lang_mod.ENGLISH_ABBREVIATIONS)
 
-CUT_PUNCTUATION = set(".,;:?!…")
+CUT_PUNCTUATION = set(".,;:?!…，、。！？؟۔।")
 
 
 def _strip_closers(token: str) -> str:
-    while token and token[-1] in CLOSERS:
-        token = token[:-1]
-    return token
+    return lang_mod.strip_closers(token)
 
 
-def ends_with_comma(text: str) -> bool:
-    """True when the final word token is a comma tail (with optional closers)."""
-    tokens = (text or "").strip().split()
-    if not tokens:
-        return False
-    token = _strip_closers(tokens[-1])
-    return bool(token) and token[-1] == ","
+def ends_with_comma(text: str, lang: str = "en") -> bool:
+    """True when the final character (before optional closers) is a comma."""
+    return lang_mod.ends_comma(text, lang=lang)
 
 
-def ends_with_sentence(text: str) -> bool:
-    """True when the final word ends with sentence-final punctuation and is
-    not an abbreviation or a single initial."""
-    tokens = (text or "").strip().split()
-    if not tokens:
-        return False
-    token = _strip_closers(tokens[-1])
-    if not token or token[-1] not in SENTENCE_FINAL:
-        return False
-    core = token.rstrip(".…").rstrip()
-    if not core:
-        return False  # a bare "..." — treat as a sentence end, not abbreviation
-    if core.lower() in ABBREVIATIONS:
-        return False
-    if len(core) == 1 and core.isalpha():
-        return False  # an initial like "John D." or "Mr. X."
-    return True
+def ends_with_sentence(text: str, lang: str = "en") -> bool:
+    """True when text ends with sentence-final punctuation for `lang` and
+    (for English only) is not an abbreviation or a single initial."""
+    return lang_mod.ends_sentence(text, lang=lang)
 
 
 def build_units(
@@ -66,12 +46,14 @@ def build_units(
     max_duration_s: float = 14.0,
     max_gap_s: float = 1.0,
     pause_split_s: float = 0.5,
+    lang: str = "en",
 ) -> list[dict]:
     """Group segments in order into translation units (pure)."""
     units: list[dict] = []
     current_seg_ids: list[int] = []
     current_start = None
     current_end = None
+    joiner = "" if lang_mod.is_spaceless(lang) else " "
 
     def close(end_seg) -> None:
         nonlocal current_seg_ids, current_start, current_end
@@ -82,7 +64,7 @@ def build_units(
             {
                 "unit_id": len(units),
                 "seg_ids": list(current_seg_ids),
-                "text": " ".join(t.strip() for t in texts if t and t.strip()),
+                "text": joiner.join(t.strip() for t in texts if t and t.strip()),
                 "start": current_start,
                 "end": current_end,
             }
@@ -108,11 +90,11 @@ def build_units(
         else:
             gap = float(segments[index + 1]["start"]) - float(seg["end"])
             duration = current_end - current_start
-            if ends_with_sentence(text):
+            if ends_with_sentence(text, lang=lang):
                 close_now = True
-            elif pause_split_s > 0 and gap >= pause_split_s and not ends_with_comma(text):
-                # AGU8 4.4: a real pause closes the unit unless the previous
-                # segment ends with a comma (continuation).
+            elif pause_split_s > 0 and gap >= pause_split_s and not ends_with_comma(text, lang=lang):
+                # AGU8 4.4 / Update 16: a real pause closes the unit (also primary
+                # splitter for unpunctuated scripts like Thai/Lao/Khmer).
                 close_now = True
             elif gap > max_gap_s:
                 close_now = True

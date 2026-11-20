@@ -23,15 +23,14 @@ import logging
 import re
 from typing import Any, Callable
 
+from dubtool import languages as lang_mod
+
 log = logging.getLogger("dubtool")
 
 MAX_SEGMENT_S = 12.0
 MIN_SEGMENT_S = 0.8
 ABBREV_TAIL = re.compile(r"(\w\w+)\.+$")  # last word carries the punctuation
-ABBREV = {
-    "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "etc", "eg",
-    "ie", "no", "approx", "fig", "al", "inc", "ltd", "co",
-}
+ABBREV = set(lang_mod.ENGLISH_ABBREVIATIONS)
 
 _WORD_RE = re.compile(r"[\w'’]+", re.UNICODE)
 
@@ -41,27 +40,22 @@ def word_tokens(text: str) -> list[str]:
     return [t.lower() for t in _WORD_RE.findall(text or "")]
 
 
-def fingerprint(text: str) -> list[str]:
+def fingerprint(text: str, lang: str = "en") -> list[str] | str:
+    """Token sequence for punctuation-only validation. For scripts without
+    spaces (zh, ja, th, ...), compare the sequence of non-punctuation chars."""
+    if lang_mod.is_spaceless(lang):
+        return lang_mod.non_punct_chars(text)
     return word_tokens(text)
 
 
-def ends_sentence(text: str) -> bool:
-    stripped = (text or "").rstrip()
-    if not stripped or stripped[-1] not in ".!?…":
-        return False
-    m = ABBREV_TAIL.search(stripped)
-    if m and m.group(1).lower() in ABBREV:
-        return False
-    core = m.group(1).lower() if m else ""
-    if core and len(core) == 1 and core.isalpha():
-        return False  # an initial: "John D."
-    return True
+def ends_sentence(text: str, lang: str = "en") -> bool:
+    return lang_mod.ends_sentence(text, lang=lang)
 
 
-def unpunct_stats(segments: list[dict[str, Any]]) -> dict:
+def unpunct_stats(segments: list[dict[str, Any]], lang: str = "en") -> dict:
     """Share of segments without sentence-final punctuation and the longest
     run of consecutive unpunctuated segments."""
-    flags = [not ends_sentence((s.get("text") or "").strip()) for s in segments]
+    flags = [not ends_sentence((s.get("text") or "").strip(), lang=lang) for s in segments]
     longest = 0
     run = 0
     for flag in flags:
@@ -79,9 +73,13 @@ def needs_punctuation(
     segments: list[dict[str, Any]],
     max_missing_ratio: float = 0.30,
     max_unpunct_run: int = 25,
+    lang: str = "en",
 ) -> bool:
-    """`punctuate.enabled: auto` trigger (AGU8 4.3)."""
-    st = unpunct_stats(segments)
+    """`punctuate.enabled: auto` trigger (AGU8 4.3). Disabled for scripts
+    without sentence punctuation (Thai, Lao, Khmer)."""
+    if lang_mod.is_unpunctuated_script(lang):
+        return False
+    st = unpunct_stats(segments, lang=lang)
     return st["ratio"] > max_missing_ratio or (st["longest_run"] > max_unpunct_run)
 
 
@@ -94,17 +92,31 @@ PUNCTUATE_SYSTEM = (
 )
 
 
-def _window_user(texts: list[str]) -> str:
-    lines = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
+def punctuate_system_prompt(lang: str = "en") -> str:
+    if lang_mod.is_english(lang):
+        return PUNCTUATE_SYSTEM
+    name = lang_mod.english_name(lang)
     return (
-        "Restore punctuation in each numbered line. Keep every word "
-        "exactly as written, same order.\n\n" + lines
+        f"You restore punctuation in {name} transcripts. "
+        "Add punctuation and sentence breaks only (plus capitalization where "
+        "applicable to the script). Never add, remove, reorder, or change any "
+        'word or character. Reply with a JSON object {"lines": [...]} '
+        "containing exactly one corrected line per input line in the same order."
     )
 
 
-def _validate_window(texts: list[str]) -> Callable[[str], list[str]]:
+def _window_user(texts: list[str], lang: str = "en") -> str:
+    lines = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
+    name = lang_mod.english_name(lang)
+    return (
+        f"Restore punctuation in each numbered {name} line. Keep every word "
+        "and character exactly as written, same order.\n\n" + lines
+    )
+
+
+def _validate_window(texts: list[str], lang: str = "en") -> Callable[[str], list[str]]:
     """Validator factory: parse {"lines": [...]}, require one line per input
-    segment and the same word sequences; raise LLMError on any mismatch."""
+    segment and the same word/character sequences; raise LLMError on mismatch."""
 
     from dubtool.llm.base import LLMError
 
@@ -117,7 +129,7 @@ def _validate_window(texts: list[str]) -> Callable[[str], list[str]]:
         for original, fixed in zip(texts, lines):
             if not isinstance(fixed, str) or not fixed.strip():
                 raise LLMError("empty corrected line")
-            if fingerprint(fixed) != fingerprint(original):
+            if fingerprint(fixed, lang=lang) != fingerprint(original, lang=lang):
                 from dubtool.llm.base import LLMError as _E
 
                 raise _E(f"word sequence changed: {fixed!r}")
@@ -140,7 +152,8 @@ def _extract_json_object(reply: str) -> str:
 
 
 def restore_punctuation(
-    segments: list[dict[str, Any]], client, cfg: dict | None = None
+    segments: list[dict[str, Any]], client, cfg: dict | None = None,
+    lang: str = "en",
 ) -> tuple[int, int]:
     """AGU8 4.3: punctuate in windows of about `window_segments` segments.
 
@@ -152,13 +165,14 @@ def restore_punctuation(
     window = max(5, int(cfg.get("window_segments", 40)))
     total = len(segments)
     accepted = rejected = 0
+    sys_prompt = punctuate_system_prompt(lang)
     for start in range(0, total, window):
         chunk = segments[start : start + window]
         texts = [(s.get("text") or "").strip() for s in chunk]
-        validate = _validate_window(texts)
+        validate = _validate_window(texts, lang=lang)
         try:
             corrected = client._call_and_validate(
-                PUNCTUATE_SYSTEM, _window_user(texts), validate, _note
+                sys_prompt, _window_user(texts, lang=lang), validate, _note
             )
         except Exception as exc:
             log.warning(
@@ -246,36 +260,48 @@ def _split_long_sentence(
 def resegment_by_sentences(
     segments: list[dict[str, Any]], words: list[dict],
     max_s: float = MAX_SEGMENT_S, min_s: float = MIN_SEGMENT_S,
+    lang: str = "en",
 ) -> list[dict[str, Any]] | None:
-    """AGU8 4.2: cut segments into sentences at sentence-final marks using
-    the word timestamps. Returns the new segment list (ids renumbered
-    sequentially), or None when the word times cannot cover the text (then
-    the caller keeps the original segments)."""
+    """AGU8 4.2 / Update 16: cut segments into sentences at sentence-final marks
+    using word/token timestamps. Returns the new segment list (ids renumbered
+    sequentially), or None when the word times cannot cover the text."""
 
     if not words or not segments:
         return None
+    spaceless = lang_mod.is_spaceless(lang)
+    joiner = "" if spaceless else " "
     new: list[dict[str, Any]] = []
     covered = 0
     for seg in segments:
         seg_words = _segment_words(seg, words)
-        text_tokens = _WORD_RE.findall(seg.get("text") or "")
-        if len(seg_words) != len(text_tokens):
-            log.info(
-                "s2: resegment skipped (word/text alignment lost) near %.1fs",
-                float(seg["start"]),
-            )
-            return None
+        if spaceless:
+            joined_w = lang_mod.non_punct_chars("".join((w.get("w") or "") for w in seg_words))
+            expected_w = lang_mod.non_punct_chars(seg.get("text") or "")
+            if not seg_words or joined_w != expected_w:
+                log.info(
+                    "s2: resegment skipped (spaceless token alignment lost) near %.1fs",
+                    float(seg["start"]),
+                )
+                return None
+        else:
+            text_tokens = _WORD_RE.findall(seg.get("text") or "")
+            if len(seg_words) != len(text_tokens):
+                log.info(
+                    "s2: resegment skipped (word/text alignment lost) near %.1fs",
+                    float(seg["start"]),
+                )
+                return None
         covered += len(seg_words)
         if not seg_words:
             new.append({"start": seg["start"], "end": seg["end"], "text": seg["text"]})
             continue
-        # Sentence boundaries after a word that ends a sentence.
+        # Sentence boundaries after a token that ends a sentence.
         chunks: list[list[dict]] = []
         current: list[dict] = []
         for w in seg_words:
             current.append(w)
             token = (w.get("w") or "").strip()
-            if token and _ends_sentence_token(token):
+            if token and _ends_sentence_token(token, lang=lang):
                 chunks.append(current)
                 current = []
         if current:
@@ -289,11 +315,11 @@ def resegment_by_sentences(
             pieces.extend(_split_long_sentence(chunk, max_s=max_s))
         # Merge pieces shorter than min_s into a neighbor with the same tail.
         for piece in pieces:
-            text = " ".join((w.get("w") or "").strip() for w in piece).strip()
+            text = joiner.join((w.get("w") or "").strip() for w in piece).strip()
             start = float(piece[0]["start"])
             end = float(piece[-1]["end"])
             if new and end - start < min_s:
-                new[-1]["text"] = (new[-1]["text"] + " " + text).strip()
+                new[-1]["text"] = (new[-1]["text"] + joiner + text).strip()
                 new[-1]["end"] = end
             else:
                 new.append({"start": start, "end": end, "text": text})
@@ -306,13 +332,17 @@ def resegment_by_sentences(
     return out
 
 
-def _ends_sentence_token(token: str) -> bool:
-    if len(token) < 2 or token[-1] not in ".!?…":
+def _ends_sentence_token(token: str, lang: str = "en") -> bool:
+    s = lang_mod.strip_closers(token)
+    if not s or s[-1] not in lang_mod.SENTENCE_FINAL_CHARS:
         return False
-    m = ABBREV_TAIL.search(token)
-    if m and (m.group(1).lower() in ABBREV
-              or (len(m.group(1)) == 1 and m.group(1).isalpha())):
-        return False
+    if lang_mod.is_english(lang):
+        if len(s) < 2:
+            return False
+        m = ABBREV_TAIL.search(s)
+        if m and (m.group(1).lower() in ABBREV
+                  or (len(m.group(1)) == 1 and m.group(1).isalpha())):
+            return False
     return True
 
 

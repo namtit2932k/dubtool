@@ -157,7 +157,7 @@ def test_meta_headers_and_language(tmp_path, monkeypatch):
     monkeypatch.setattr(i18n, "_LANG", "en")
     meta_en = make_meta(Path("clip_vi.mp4"), lang="en")
     assert meta_en["title"] == "Video translation"
-    assert meta_en["labels"]["col_en"] == "English (original)"
+    assert meta_en["labels"]["col_en"] == "Original (English)"
 
 
 # ------------------------------------------------------------------- docx
@@ -190,7 +190,7 @@ def test_docx_valid_package_and_layout(docx_sample):
     table = doc.tables[0]
     header = [c.text for c in table.rows[0].cells]
     assert header[0] == "Thời gian"
-    assert header[1] == "Tiếng Anh (bản gốc)"
+    assert header[1] == "Bản gốc (Tiếng Anh)"
     assert header[2] == "Tiếng Việt (bản dịch)"
     # one row per sentence + the header row
     assert len(table.rows) == 3

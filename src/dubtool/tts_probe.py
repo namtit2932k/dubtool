@@ -164,24 +164,24 @@ def _sleep(seconds: float) -> None:
 
 
 def classify_exact(exc: Exception) -> str:
-    """Classify a TTS exception by exact kind name (never an 'other' bucket).
-    Incorporates root cause (__cause__) and context (__context__)."""
-    
-    # Traverse to find the root cause
-    root_exc = exc
-    while root_exc.__cause__:
-        root_exc = root_exc.__cause__
-    if root_exc.__context__:
-        root_exc = root_exc.__context__
+    """Classify a TTS exception by exact root-cause class name (never a generic
+    wrapper bucket). Walks both __cause__ and __context__ to the innermost exception."""
+    seen: set[int] = set()
+    root_exc: BaseException = exc
+    while id(root_exc) not in seen:
+        seen.add(id(root_exc))
+        nxt = root_exc.__cause__ if root_exc.__cause__ is not None else root_exc.__context__
+        if nxt is None:
+            break
+        root_exc = nxt
 
     text = f"{type(root_exc).__name__}: {root_exc}"
     low = text.lower()
-    
     if "noaudioreceived" in low:
         return "NoAudioReceived"
     if "503" in text and ("handshake" in low or "invalid response" in low or "wsserverhandshakeerror" in low):
         return "handshake_503"
-    if "timeout" in low or "timed out" in low:
+    if "timeout" in low or "timed out" in low or isinstance(root_exc, TimeoutError):
         return "timeout"
     if "429" in text:
         return "http_429"

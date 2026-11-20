@@ -50,7 +50,11 @@ def granularity_for_job(job, config) -> str:
     return str((getattr(config, "dub", {}) or {}).get("granularity", "sentence")).lower()
 
 
-def build_dub_units(units: list[dict], translations: dict[int, dict]) -> list[dict]:
+def build_dub_units(
+    units: list[dict],
+    translations: dict[int, dict],
+    source_language: str | None = None,
+) -> list[dict]:
     """One dub record per sentence unit.
 
     `translations` maps unit_id -> {"vi": ..., "model": ...}. `max_chars`
@@ -62,22 +66,23 @@ def build_dub_units(units: list[dict], translations: dict[int, dict]) -> list[di
     for unit in sorted(units, key=lambda u: int(u["unit_id"])):
         uid = int(unit["unit_id"])
         tr = translations.get(uid) or {}
-        records.append(
-            {
-                "unit_id": uid,
-                "seg_ids": list(unit.get("seg_ids") or []),
-                "start": float(unit["start"]),
-                "end": float(unit["end"]),
-                "text": unit.get("text") or "",
-                "vi": tr.get("vi") or None,
-                "max_chars": int(unit.get("max_chars") or 0),
-                "model": tr.get("model"),
-                "voice": None,
-                "tts_duration": None,
-                "fit_status": "pending",
-                "reviewed": bool(unit.get("reviewed")),
-            }
-        )
+        rec = {
+            "unit_id": uid,
+            "seg_ids": list(unit.get("seg_ids") or []),
+            "start": float(unit["start"]),
+            "end": float(unit["end"]),
+            "text": unit.get("text") or "",
+            "vi": tr.get("vi") or None,
+            "max_chars": int(unit.get("max_chars") or 0),
+            "model": tr.get("model"),
+            "voice": None,
+            "tts_duration": None,
+            "fit_status": "pending",
+            "reviewed": bool(unit.get("reviewed")),
+        }
+        if source_language:
+            rec["source_language"] = str(source_language).lower()
+        records.append(rec)
     return records
 
 

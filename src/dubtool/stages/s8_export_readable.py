@@ -139,23 +139,64 @@ def place_uncertain() -> str:
 
 
 # ----------------------------------------------------------------- meta
-def make_meta(video_out: Path, lang: str = "vi", duration_s: float | None = None) -> dict:
+def detect_job_source_language(job_dir: Path) -> str:
+    """Resolve the source language code recorded in state.json or dub_units.json."""
+    from dubtool.job import read_json
+
+    state_file = job_dir / "state.json"
+    if state_file.is_file():
+        try:
+            st = read_json(state_file)
+            sl = st.get("source_language") if isinstance(st, dict) else None
+            if isinstance(sl, dict) and sl.get("code"):
+                return str(sl["code"]).strip().lower()
+        except Exception:
+            pass
+    dub_file = job_dir / "dub_units.json"
+    if dub_file.is_file():
+        try:
+            recs = read_json(dub_file)
+            if isinstance(recs, list) and recs and recs[0].get("source_language"):
+                return str(recs[0]["source_language"]).strip().lower()
+        except Exception:
+            pass
+    return "en"
+
+
+def make_meta(
+    video_out: Path,
+    lang: str = "vi",
+    duration_s: float | None = None,
+    source_lang: str = "en",
+) -> dict:
     """Header values for the document (no secrets, no technical fields)."""
+    from dubtool import languages as lang_mod
     from dubtool.app import i18n
+
+    src_code = lang_mod.normalize_code(source_lang, default="en")
+    app_lang = "en" if str(lang or "vi").lower() == "en" else "vi"
+    src_label = lang_mod.display_name(src_code, ui_lang=app_lang)
+    if app_lang == "en":
+        lang_pair = f"{src_label} → Vietnamese"
+        col_src = f"Original ({src_label})"
+    else:
+        lang_pair = f"{src_label} → Tiếng Việt"
+        col_src = f"Bản gốc ({src_label})"
 
     return {
         "title": i18n.tr("readable.title"),
         "video": video_out.name,
         "date": datetime.now().strftime("%d/%m/%Y"),
         "duration": format_time(duration_s) if duration_s else "",
-        "lang_pair": i18n.tr("readable.lang_pair"),
+        "lang_pair": lang_pair,
+        "source_language": src_code,
         "labels": {
             "video": i18n.tr("readable.info_video"),
             "duration": i18n.tr("readable.info_duration"),
             "lang": i18n.tr("readable.info_lang"),
             "date": i18n.tr("readable.info_created"),
             "col_time": i18n.tr("readable.col_time"),
-            "col_en": i18n.tr("readable.col_en"),
+            "col_en": col_src,
             "col_vi": i18n.tr("readable.col_vi"),
         },
         "disclaimer": i18n.tr("readable.disclaimer"),
@@ -200,10 +241,16 @@ def render_docx(path: Path, meta: dict, rows: list[dict]) -> None:
     from docx.oxml.ns import qn
     from docx.shared import Cm, Pt, RGBColor
 
-    def font_run(run, *, size=10.5, bold=False, color=None) -> None:
+    from dubtool import languages as lang_mod
+
+    src_code = lang_mod.normalize_code(meta.get("source_language"), default="en")
+    src_font = lang_mod.docx_font_for_language(src_code)
+    src_rtl = lang_mod.is_rtl(src_code)
+
+    def font_run(run, *, size=10.5, bold=False, color=None, font_name: str = "Arial", rtl: bool = False) -> None:
         run.bold = bold
         run.font.size = Pt(size)
-        run.font.name = "Arial"
+        run.font.name = font_name
         if color:
             run.font.color.rgb = RGBColor.from_string(color)
         rPr = run._element.get_or_add_rPr()
@@ -211,9 +258,17 @@ def render_docx(path: Path, meta: dict, rows: list[dict]) -> None:
         if rFonts is None:
             rFonts = OxmlElement("w:rFonts")
             rPr.append(rFonts)
-        # Every script type, so Vietnamese diacritics render everywhere.
+        # Set script-appropriate font across all run font slots.
         for attr in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
-            rFonts.set(qn(attr), "Arial")
+            rFonts.set(qn(attr), font_name)
+        if rtl and rPr.find(qn("w:rtl")) is None:
+            rPr.append(OxmlElement("w:rtl"))
+
+    def set_paragraph_bidi(para) -> None:
+        pPr = para._p.get_or_add_pPr()
+        if pPr.find(qn("w:bidi")) is None:
+            pPr.append(OxmlElement("w:bidi"))
+        para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
     def shade(cell, fill: str) -> None:
         tcPr = cell._tc.get_or_add_tcPr()
@@ -298,10 +353,16 @@ def render_docx(path: Path, meta: dict, rows: list[dict]) -> None:
             cell.width = Cm(width)
         t_para = cells[0].paragraphs[0]
         font_run(t_para.add_run(format_time(item["time"])), color=_GREY)
-        for cell, text in ((cells[1], item["en"]), (cells[2], item["vi"])):
-            para = cell.paragraphs[0]
-            para.paragraph_format.line_spacing = 1.25
-            font_run(para.add_run(text), size=10.5)
+        # Original-language column: script-appropriate font + RTL when required.
+        src_para = cells[1].paragraphs[0]
+        src_para.paragraph_format.line_spacing = 1.25
+        if src_rtl:
+            set_paragraph_bidi(src_para)
+        font_run(src_para.add_run(item["en"]), size=10.5, font_name=src_font, rtl=src_rtl)
+        # Vietnamese column: always Arial, LTR.
+        vi_para = cells[2].paragraphs[0]
+        vi_para.paragraph_format.line_spacing = 1.25
+        font_run(vi_para.add_run(item["vi"]), size=10.5, font_name="Arial", rtl=False)
         if idx % 2 == 1:  # a very light shading on every second row
             for cell in cells:
                 shade(cell, _ALT_FILL)
@@ -362,9 +423,10 @@ def render_txt(path: Path, meta: dict, rows: list[dict]) -> None:
         if value:
             lines.append(f"{labels[key]}: {value}")
     lines.append("")
+    src_tag = str(meta.get("source_language") or "en").upper()
     for item in rows:
         lines.append(f"[{format_time(item['time'])}]")
-        lines.append(f"EN: {item['en']}")
+        lines.append(f"{src_tag}: {item['en']}")
         lines.append(f"VI: {item['vi']}")
         lines.append("")
     lines.append(meta["disclaimer"])
@@ -396,7 +458,8 @@ def deliver(
 
     i18n.set_language(lang)
     target = readable_target(video_target, fmt)
-    meta = make_meta(video_target, lang=lang, duration_s=duration_s)
+    source_lang = detect_job_source_language(job_dir)
+    meta = make_meta(video_target, lang=lang, duration_s=duration_s, source_lang=source_lang)
     rows = build_rows(job_dir, mark_uncertain=mark_uncertain)
     if not rows:
         raise RuntimeError("no sentence rows to export (empty translations?)")
@@ -406,3 +469,50 @@ def deliver(
         render_txt(target, meta, rows)
     log.info("s8: readable translation written to %s (%d rows)", target, len(rows))
     return target
+
+
+def export_subtitles_only(
+    job_dir: Path,
+    output_dir: Path,
+    base_name: str,
+) -> tuple[Path, Path]:
+    """Create a subtitle file (.srt) and UTF-8 BOM readable transcript (.txt)
+    directly from stage 2's transcript.json (used when source video is already
+    Vietnamese or when --subtitles-only is requested; never calls LLM or TTS)."""
+    from dubtool.job import read_json
+
+    transcript_file = job_dir / "transcript.json"
+    if not transcript_file.is_file():
+        raise RuntimeError(f"transcript.json not found in {job_dir}")
+    segments = read_json(transcript_file)
+    if not isinstance(segments, list) or not segments:
+        raise RuntimeError("transcript.json has no segments to export")
+
+    def _srt_ts(sec: float) -> str:
+        ms_total = max(0, int(round(float(sec) * 1000)))
+        h, rem = divmod(ms_total, 3_600_000)
+        m, rem = divmod(rem, 60_000)
+        s, ms = divmod(rem, 1000)
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    srt_path = output_dir / f"{base_name}.srt"
+    txt_path = output_dir / f"{base_name}_transcript.txt"
+
+    srt_blocks: list[str] = []
+    txt_lines: list[str] = [f"Bản chép lời — {base_name}", ""]
+    idx = 0
+    for seg in segments:
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        idx += 1
+        start = float(seg.get("start") or 0.0)
+        end = max(start + 0.1, float(seg.get("end") or start + 0.1))
+        srt_blocks.append(f"{idx}\n{_srt_ts(start)} --> {_srt_ts(end)}\n{text}\n")
+        txt_lines.append(f"[{format_time(start)}] {text}")
+
+    _atomic_write(srt_path, lambda p: p.write_text("\n".join(srt_blocks), encoding="utf-8", newline="\r\n"))
+    _atomic_write(txt_path, lambda p: p.write_text("\n".join(txt_lines) + "\n", encoding="utf-8-sig", newline="\r\n"))
+    log.info("s8: subtitles-only export written to %s and %s (%d cues)", srt_path, txt_path, idx)
+    return srt_path, txt_path

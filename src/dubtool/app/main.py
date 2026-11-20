@@ -376,15 +376,122 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
     paid_dlg.grab().save(str(out_dir / "dialog_paid_notice.png"))
     paid_dlg.close()
 
+    # Update 16 Task 2.3: language dropdown (closed & open), uncertain-language
+    # dialog, Vietnamese-source notice, and details panel with detected language.
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QPainter
+    from dubtool.app.ui.language_dialogs import (
+        LanguageUncertainDialog,
+        VietnameseSourceDialog,
+    )
+
+    window.resize(900, 700)
+    window.show()
+    apply_state(window, "video")
+    window.lang_video_combo.setCurrentIndex(0)
+    window.scroll.ensureWidgetVisible(window.lang_video_row)
+    app.processEvents()
+    assert window.lang_video_combo.isVisible()
+    assert window.lang_video_combo.currentData() == "auto"
+    closed_pm = window.grab()
+    closed_pm.save(str(out_dir / "lang_dropdown_closed.png"))
+
+    # Capture dropdown open by grabbing the live combo popup (or, if Windows
+    # auto-dismisses unfocused popups, rendering a QListView backed by the
+    # exact same combo model) and compositing it at the combo's anchor.
+    from PySide6.QtWidgets import QFrame, QListView
+
+    window.lang_video_combo.showPopup()
+    app.processEvents()
+    view = window.lang_video_combo.view()
+    popup = view.parentWidget() or view.window()
+    assert window.lang_video_combo.count() >= 15
+    if popup is not None and popup.isVisible():
+        popup_pm = popup.grab()
+        window.lang_video_combo.hidePopup()
+        app.processEvents()
+    else:
+        window.lang_video_combo.hidePopup()
+        lv = QListView()
+        lv.setModel(window.lang_video_combo.model())
+        lv.setCurrentIndex(window.lang_video_combo.model().index(0, 0))
+        lv.setFrameShape(QFrame.Shape.Box)
+        lv.setMinimumWidth(max(window.lang_video_combo.width(), 280))
+        lv.resize(max(window.lang_video_combo.width(), 280), 320)
+        assert lv.model().rowCount() == window.lang_video_combo.count()
+        popup_pm = lv.grab()
+        lv.deleteLater()
+    open_pm = window.grab()
+    painter = QPainter(open_pm)
+    dpr = open_pm.devicePixelRatio() or 1.0
+    anchor = window.lang_video_combo.mapTo(window, QPoint(0, window.lang_video_combo.height()))
+    win_h = int(open_pm.height() / dpr)
+    pop_h = int(popup_pm.height() / (popup_pm.devicePixelRatio() or 1.0))
+    if anchor.y() + pop_h > win_h:
+        anchor = window.lang_video_combo.mapTo(window, QPoint(0, -pop_h))
+    painter.drawPixmap(anchor, popup_pm)
+    painter.end()
+    open_pm.save(str(out_dir / "lang_dropdown_open.png"))
+    app.processEvents()
+
+    # Details panel with detected language + non-English medium tip (two-column 1100x800)
+    window.resize(1100, 800)
+    apply_state(window, "running")
+    window.progress_group.log.set_open(True)
+    window.progress_group.on_progress(
+        "s2", "progress", -1, -1,
+        "Ngôn ngữ: Tiếng Nhật (94%), đã nhận diện tự động", 0.0,
+    )
+    window.progress_group.on_progress(
+        "s2", "progress", -1, -1,
+        "Gợi ý: Ngôn ngữ này nhận dạng chính xác hơn với mô hình medium (chậm hơn)", 0.0,
+    )
+    app.processEvents()
+    window.scroll.verticalScrollBar().setValue(window.scroll.verticalScrollBar().maximum())
+    app.processEvents()
+    assert window.progress_group.lang_status_lbl.isVisible()
+    assert "Tiếng Nhật" in window.progress_group.lang_status_lbl.text()
+    assert window.progress_group.log.is_open()
+    window.grab().save(str(out_dir / "details_detected_language.png"))
+    window.hide()
+
+    # Uncertain-language dialog (3 candidates)
+    uncertain_dlg = LanguageUncertainDialog(
+        [
+            {"code": "ja", "name": "Japanese", "probability": 0.48},
+            {"code": "zh", "name": "Chinese", "probability": 0.31},
+            {"code": "en", "name": "English", "probability": 0.19},
+        ],
+        mixed=True,
+    )
+    uncertain_dlg.setMinimumWidth(600)
+    uncertain_dlg.show()
+    app.processEvents()
+    uncertain_dlg.adjustSize()
+    assert uncertain_dlg.isVisible()
+    assert len(uncertain_dlg.radios) == 3
+    uncertain_dlg.grab().save(str(out_dir / "dialog_language_uncertain.png"))
+    uncertain_dlg.close()
+
+    # Vietnamese source notice dialog
+    vi_dlg = VietnameseSourceDialog(0.97)
+    vi_dlg.setMinimumWidth(600)
+    vi_dlg.show()
+    app.processEvents()
+    vi_dlg.adjustSize()
+    assert vi_dlg.isVisible()
+    assert vi_dlg.subtitles_btn.isVisible()
+    vi_dlg.grab().save(str(out_dir / "dialog_vietnamese_source.png"))
+    vi_dlg.close()
+
     # Update 12 task 5 item 4: the README references canonical images by
-    # name — write them alongside the size/state grid (the same real
-    # pixels from the real windows platform).
+    # name — write them alongside the size/state grid (matching update_readme_images.py).
     import shutil
 
     for alias, source in (
-        ("ready.png", "900x700_idle.png"),
-        ("running.png", "900x700_running.png"),
-        ("finished.png", "900x700_finished.png"),
+        ("ready.png", "1100x800_video.png"),
+        ("running.png", "1100x800_running.png"),
+        ("finished.png", "1100x800_finished.png"),
         ("settings_api_keys.png", keys_tab_shot or "dialog_settings.png"),
     ):
         shutil.copyfile(str(out_dir / source), str(out_dir / alias))
@@ -435,9 +542,9 @@ def _write_screenshots_index(out_dir: Path, scale: float) -> None:
         "masked paths: yes (input=test.mp4, output=C:\\Users\\User\\Videos\\DubTool)",
     ]
     explicit_copies = {
-        "ready.png": "900x700_idle.png",
-        "running.png": "900x700_running.png",
-        "finished.png": "900x700_finished.png",
+        "ready.png": "1100x800_video.png",
+        "running.png": "1100x800_running.png",
+        "finished.png": "1100x800_finished.png",
         "settings_api_keys.png": "dialog_settings_tab0_Khóa_API.png",
         "dialog_settings.png": "dialog_settings_tab0_Khóa_API.png",
         "dialog_settings_keys_gemini.png": "dialog_settings_tab0_Khóa_API.png",
@@ -455,6 +562,16 @@ def _write_screenshots_index(out_dir: Path, scale: float) -> None:
             assertion = "result buttons visible"
         elif name == "dialog_error.png":
             assertion = "error dialog visible"
+        elif name == "lang_dropdown_closed.png":
+            assertion = "lang_video_combo visible and set to auto"
+        elif name == "lang_dropdown_open.png":
+            assertion = "lang_video_combo popup open and composited"
+        elif name == "dialog_language_uncertain.png":
+            assertion = "LanguageUncertainDialog visible with 3 candidates"
+        elif name == "dialog_vietnamese_source.png":
+            assertion = "VietnameseSourceDialog visible with subtitles button"
+        elif name == "details_detected_language.png":
+            assertion = "lang_status_lbl visible with detected language; details open"
         copy_of = explicit_copies.get(name)
         suffix = f"; copy of {copy_of}" if copy_of else ""
         lines.append(f"  {name:<40} ({assertion}{suffix})")
@@ -868,7 +985,15 @@ def _run_gui_smoke_body(workspace) -> int:
     return 0 if ok_all else 1
 
 
-def run_headless(video: Path, outdir: Path, mode_or_model: str = "gemini-3.5-flash-lite", profile: bool = False, model: str | None = None) -> int:
+def run_headless(
+    video: Path,
+    outdir: Path,
+    mode_or_model: str = "gemini-3.5-flash-lite",
+    profile: bool = False,
+    model: str | None = None,
+    source_language: str = "auto",
+    subtitles_only: bool = False,
+) -> int:
     """Automated end-to-end verification without a window (AGU4 11.1).
     With `profile` (AGU6 4.1), a 1 Hz sampler writes profile.csv in the job
     directory: elapsed, stage, app/children/system CPU%%, live children."""
@@ -889,6 +1014,8 @@ def run_headless(video: Path, outdir: Path, mode_or_model: str = "gemini-3.5-fla
         chosen_model = "gemini-3.8-flash"
     options = DubOptions(
         model=chosen_model,
+        video_language=str(source_language or "auto"),
+        subtitles_only=bool(subtitles_only),
         keep_level=str(saved.get("keep_level") or "light"),
     )
     current_stage = {"name": ""}
@@ -898,6 +1025,8 @@ def run_headless(video: Path, outdir: Path, mode_or_model: str = "gemini-3.5-fla
         line = f"{event.stage} {event.state}"
         if event.done is not None and event.total:
             line += f" {event.done}/{event.total}"
+        if event.message:
+            line += f" — {event.message}"
         if event.elapsed_s is not None:
             line += f" ({event.elapsed_s:.1f}s)"
         print(line, flush=True)
@@ -923,6 +1052,7 @@ def run_headless(video: Path, outdir: Path, mode_or_model: str = "gemini-3.5-fla
             secrets=secrets,
             progress=show,
             cancel=threading.Event(),
+            interactive=False,
         )
     finally:
         if sampler is not None:
@@ -931,9 +1061,12 @@ def run_headless(video: Path, outdir: Path, mode_or_model: str = "gemini-3.5-fla
         print(f"profile: {len(rows)} samples -> {csv_path}")
     print(
         f"result: code={result.code} ok={result.ok} out={result.out_video}"
+        + (f" srt={result.out_srt}" if result.out_srt else "")
+        + (f" readable={result.out_readable}" if result.out_readable else "")
+        + (f" job={result.job_id}" if result.job_id else "")
         + (f" error={result.error}" if result.error else "")
     )
-    return 0 if result.ok else 1
+    return 0 if (result.ok or result.code == "source_is_vietnamese") else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -954,6 +1087,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gui-smoke", action="store_true")
     parser.add_argument("--scale", type=float, default=1.0, metavar="S")
     parser.add_argument("--headless-run", nargs=2, metavar=("VIDEO", "OUTDIR"))
+    parser.add_argument("--source-language", default="auto",
+                        help="with --headless-run: source language code or 'auto'")
+    parser.add_argument("--subtitles-only", action="store_true",
+                        help="with --headless-run: stop after ASR and export .srt + transcript only")
     parser.add_argument("--profile", action="store_true",
                         help="with --headless-run: sample CPU once per second into profile.csv")
     parser.add_argument("--model", default=None, help="catalog model id")
@@ -1037,8 +1174,14 @@ def main(argv: list[str] | None = None) -> int:
         if not chosen_model and args.mode:
             chosen_model = "gemini-3.8-flash" if args.mode == "accurate" else "gemini-3.5-flash-lite"
         chosen_model = chosen_model or "gemini-3.5-flash-lite"
-        return run_headless(Path(args.headless_run[0]), Path(args.headless_run[1]), chosen_model,
-                            profile=args.profile)
+        return run_headless(
+            Path(args.headless_run[0]),
+            Path(args.headless_run[1]),
+            chosen_model,
+            profile=args.profile,
+            source_language=args.source_language,
+            subtitles_only=args.subtitles_only,
+        )
     return run_gui()
 
 

@@ -119,7 +119,7 @@ SHORTEN_SYSTEM = (
     "object: {{\"vi\": \"<shortened text>\"}}."
 )
 
-SHORTEN_USER_TEMPLATE = """Original English segment:
+SHORTEN_USER_TEMPLATE = """Original {source_lang} segment:
 {english}
 
 Current Vietnamese translation (too long): {current}
@@ -180,5 +180,9 @@ def render_shorten_batch_user(items, policy: str | None = None) -> str:
     )
 
 
-def render_shorten_user(english: str, current_vi: str, max_chars: int) -> str:
-    return SHORTEN_USER_TEMPLATE.format(english=english, current=current_vi, max_chars=max_chars)
+def render_shorten_user(
+    english: str, current_vi: str, max_chars: int, source_lang: str = "English"
+) -> str:
+    return SHORTEN_USER_TEMPLATE.format(
+        source_lang=source_lang, english=english, current=current_vi, max_chars=max_chars
+    )

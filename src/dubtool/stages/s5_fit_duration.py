@@ -173,9 +173,16 @@ def run(job, config, force: bool = False, cancel=None, api_keys: list[str] | Non
         built (missing config/keys) — the caller then runs without LLM."""
         import copy as _copy
 
+        from dubtool import languages as lang_mod
+
+        sl = (job.state.get("source_language") if isinstance(getattr(job, "state", None), dict) else None) or {}
+        src_code = sl.get("code") or (getattr(config, "asr", None) or {}).get("language") or "en"
+        src_lang = lang_mod.english_name(src_code)
         if mode is None:
             try:
-                return LLMClient(get_provider(config, api_keys=api_keys, cancel=cancel))
+                client = LLMClient(get_provider(config, api_keys=api_keys, cancel=cancel))
+                client.source_lang = src_lang
+                return client
             except Exception as exc:
                 log.warning("s5: no LLM provider available for shortening: %s", exc)
                 return None
@@ -205,7 +212,9 @@ def run(job, config, force: bool = False, cancel=None, api_keys: list[str] | Non
         cfg2.llm = llm_overrides
         try:
             provider = get_provider(cfg2, provider_id=pid, api_keys=api_keys, cancel=cancel)
-            return LLMClient(provider, cancel=cancel)
+            client = LLMClient(provider, cancel=cancel)
+            client.source_lang = src_lang
+            return client
         except Exception as exc:
             log.info("s5: fallback model %r failed: %s", fallback_model, exc)
             return None

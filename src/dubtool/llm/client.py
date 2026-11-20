@@ -927,7 +927,7 @@ class LLMClient:
 
         return self._call_and_validate(
             _system_of("shorten"),
-            render_shorten_user(english, current_vi, max_chars),
+            render_shorten_user(english, current_vi, max_chars, source_lang=self.source_lang),
             parsing.parse_shortened,
             note,
             schema=self._stage_schema("shorten"),

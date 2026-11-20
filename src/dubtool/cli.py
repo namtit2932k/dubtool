@@ -261,19 +261,23 @@ def cmd_run(args) -> int:
 
     jobs_root = jobs_root_default()
     jobs_root.mkdir(exist_ok=True)
+    asr_ov = {"language": str(getattr(args, "source_language", "auto") or "auto")}
     conf = config_mod.load(
         Path.cwd(),
         overrides={
             "llm_provider": args.llm,
             "tts_voice": args.voice,
             "whisper_model": args.whisper_model,
+            "asr": asr_ov,
             "mix": _mix_overrides(args),
             "subtitles": _subtitle_overrides(args),
             **_model_overrides(args),
         },
     )
-    # Only the selected provider's key is required at startup.
-    _require_provider(conf)
+    subtitles_only = bool(getattr(args, "subtitles_only", False))
+    # Only the selected provider's key is required at startup (not needed for --subtitles-only).
+    if not subtitles_only:
+        _require_provider(conf)
 
     job = Job.create(
         video=video, jobs_root=jobs_root, source_name="input" + video.suffix,
@@ -286,9 +290,29 @@ def cmd_run(args) -> int:
     _resolve_and_save_brief(args, job, input_video=video)
     job.save()
 
+    from dubtool.stages.s2_transcribe import VietnameseSourceDetected
+    from dubtool.stages import s8_export_readable as s8
+
     for stage in STAGE_ORDER:
         print(f"==> {stage} ({STAGE_NAMES[stage]})")
-        _run_stage(job, conf, stage, force=args.force, api_keys=_env_keys())
+        try:
+            _run_stage(job, conf, stage, force=args.force, api_keys=_env_keys())
+        except VietnameseSourceDetected as exc:
+            print(str(exc))
+            if subtitles_only:
+                target_dir = out.parent if out is not None else video.parent
+                base_name = out.stem if out is not None else video.stem
+                srt_p, txt_p = s8.export_subtitles_only(job.dir, target_dir, base_name)
+                print(f"Subtitles-only output: {srt_p} and {txt_p}")
+            else:
+                print("Tip: pass --subtitles-only to export .srt subtitles and transcript without translation.")
+            return 0
+        if stage == "s2" and subtitles_only:
+            target_dir = out.parent if out is not None else video.parent
+            base_name = out.stem if out is not None else video.stem
+            srt_p, txt_p = s8.export_subtitles_only(job.dir, target_dir, base_name)
+            print(f"Subtitles-only output: {srt_p} and {txt_p}")
+            return 0
 
     _copy_to_out(job, out)
     # AGENT_UPDATE_7.md task 4: the CLI produces the readable file too.
@@ -351,15 +375,15 @@ def cmd_stage(args) -> int:
     job = load_job(args.job_id, Path("jobs"))
     _attach_job_log(job)
     _resolve_and_save_brief(args, job, input_video=None)
-    conf = config_mod.load(
-        Path.cwd(),
-        overrides={
-            "llm_provider": args.llm,
-            "mix": _mix_overrides(args),
-            "subtitles": _subtitle_overrides(args),
-            **_model_overrides(args),
-        },
-    )
+    stage_overrides: dict = {
+        "llm_provider": args.llm,
+        "mix": _mix_overrides(args),
+        "subtitles": _subtitle_overrides(args),
+        **_model_overrides(args),
+    }
+    if getattr(args, "source_language", None):
+        stage_overrides["asr"] = {"language": str(args.source_language)}
+    conf = config_mod.load(Path.cwd(), overrides=stage_overrides)
     if args.stage in ("s3", "s5"):
         _require_provider(conf)
     if args.stage == "s2" and getattr(args, "postprocess_only", False):
@@ -544,7 +568,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--brief", default=None, help="video brief text (context for the translator; max 1000 chars)")
     run_p.add_argument("--brief-file", default=None, help="path to a video brief text file")
     run_p.add_argument("--model", default=None, help="override the provider's configured model id")
-    run_p.add_argument("--source-language", default="auto", help="Source language (e.g. auto, en, vi, ja)")
+    run_p.add_argument("--source-language", default="auto", help="Source language (e.g. auto, en, ja, zh, ar)")
+    run_p.add_argument("--subtitles-only", action="store_true", help="Stop after speech recognition and export .srt + transcript only (no translation or TTS)")
     run_p.add_argument("--translate-concurrency", type=int, default=None, help="parallel translation chunk calls (1-5)")
     run_p.add_argument(
         "--no-readable",
