@@ -64,8 +64,12 @@
 - [x] **Task 1.5, Task 2.3 & Task 3.1 (Tests & Screenshots — Bước 3):**
   - Đã thêm 15 test toàn diện trong `tests/test_update16_multilingual.py` (kèm Task 3.1 root-cause test); toàn bộ bộ test đạt **599 passed, 2 skipped (SKIPS.md), 0 failed**; `--layout-check` **0 violations**.
   - Đã thêm 5 screenshot mới (`lang_dropdown_closed.png`, `lang_dropdown_open.png`, `dialog_language_uncertain.png`, `dialog_vietnamese_source.png`, `details_detected_language.png`), đồng bộ `README.md`, cập nhật `packaging/dubtool.spec` (MIT copyright, `LICENSE` + `fillers.yaml` + hiddenimports).
-- [ ] **Task 1.6 (Verify thật trên `.exe` 1.0.16 — Bước 4):** Build `.exe` 1.0.16 sạch, chạy bộ clip đa ngôn ngữ + trộn + tiếng Việt + regression `test9.mp4` (`auto`).
-- [ ] **Task 4 (Report & Release — Bước 5):** Hoàn thiện `REPORT_UPDATE_16.md` (<= 400 dòng, đủ bằng chứng thật), cập nhật commit hash thật vào `docs/RELEASES.md`, chạy `scripts/release.py 16`.
+- [x] **Task 1.6 (Verify thật trên `.exe` 1.0.16 — Bước 4):**
+  - Chạy thật trên `DubTool.exe` 1.0.16 với 9 clip đa ngôn ngữ (`ja, zh, ko, es, fr, de, ar, mixed_en_es, vi`) + `test9.mp4` (`auto`).
+  - Bắt & sửa 3 bug thật trên `.exe` (`ff7d68a`: `KeyError: 'count'` ở `s3_translate.py`, resume `source_is_vietnamese`/`subtitles_only` ở `api.py`, và 3 cửa sổ VAD cho speech liền mạch ở `s2_transcribe.py`).
+  - `ja`, `es`, `ar` hoàn tất trọn vẹn s1→s8 (exit 0, Arabic `.docx` xác nhận `w:bidi=7, w:rtl=7, right_align=7`, Japanese `.docx` xác nhận `Yu Gothic UI`); `vi` dừng trước s3 (0 LLM/TTS) và `--subtitles-only` xuất `.srt` + `_transcript.txt` thành công; `zh/ko/fr/de/mixed_en_es` pass s1–s3 (nhận diện 98.7%–99.7%) và dừng ở s4 do `edge-tts` drop (ghi nhận trung thực trong báo cáo).
+  - `test9.mp4` (`auto`): nhận diện `en` (99.52%), 80 segments / 20 non-terminal / 62 units — **khớp 100% baseline Update 15 (0 regression)**.
+- [ ] **Task 4 (Report & Release — Bước 5):** Đã viết `REPORT_UPDATE_16.md` (<200 dòng, đầy đủ bằng chứng thật), chuẩn bị chạy `scripts/release.py 16` chính thức.
 
 ---
 
