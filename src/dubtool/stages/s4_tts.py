@@ -23,7 +23,7 @@ from pathlib import Path
 from dubtool import audio_utils, heartbeat
 from dubtool.audio_utils import MediaCache
 from dubtool.job import StageCancelled, read_json, write_json
-from dubtool.tts.base import TTSFailure, TTSUnavailableError
+from dubtool.tts.base import TTSEngineInitError, TTSFailure, TTSUnavailableError
 from dubtool.tts.vieneu import (
     DEFAULT_TTS_MODE,
     DEFAULT_VOICE,
@@ -523,6 +523,18 @@ def _synthesize_entry(
                 return tts.synthesize(entry, cancel)
             except StageCancelled:
                 raise
+            except TTSEngineInitError as exc:
+                failures.record(
+                    seg_id,
+                    attempt_no,
+                    text,
+                    exc,
+                    timer.elapsed(),
+                    voice=voice,
+                    mode=tts_mode,
+                    details={"step": step, "fatal": True},
+                )
+                raise
             except TTSFailure as exc:
                 failures.record(
                     seg_id,
@@ -620,18 +632,25 @@ def run(job, config, force: bool = False, cancel=None) -> None:
                 raise StageCancelled(f"s4: cancelled by user at segment {entry['id']}")
             voice = resolve_voice(entry.get("tts_voice") or video_voice, tts_mode)
             entry["tts_voice"] = voice
-            result = _synthesize_entry(
-                tts,
-                entry,
-                voice=voice,
-                tts_mode=tts_mode,
-                max_chars=max_chars,
-                silence_s=silence_s,
-                direct_retries=direct_retries,
-                failures=failures,
-                refuse_ids=refuse_ids,
-                cancel=cancel,
-            )
+            try:
+                result = _synthesize_entry(
+                    tts,
+                    entry,
+                    voice=voice,
+                    tts_mode=tts_mode,
+                    max_chars=max_chars,
+                    silence_s=silence_s,
+                    direct_retries=direct_retries,
+                    failures=failures,
+                    refuse_ids=refuse_ids,
+                    cancel=cancel,
+                )
+            except TTSEngineInitError as exc:
+                log.error("s4: TTS engine initialization failed — aborting stage: %s", exc)
+                persist()
+                raise TTSUnavailableError(
+                    [int(entry["id"])], already_done + generated
+                ) from exc
             if result is not None:
                 duration, cache_path = result
                 dest = out_clip(entry)

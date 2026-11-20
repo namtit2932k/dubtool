@@ -14,17 +14,19 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import gc
+import io
 import json
 import logging
 import os
 from pathlib import Path
+import sys
 import threading
 import uuid
 from typing import Any
 
 import numpy as np
 
-from dubtool.tts.base import TTSFailure, TTSProvider
+from dubtool.tts.base import TTSEngineInitError, TTSFailure, TTSProvider
 
 log = logging.getLogger("dubtool")
 
@@ -261,10 +263,31 @@ def is_model_cached(mode: str | None = None, cache_dir: Path | None = None) -> b
 
 @contextmanager
 def _hf_cache_context(cache_dir: Path):
-    """Temporarily route ``huggingface_hub`` downloads to ``cache_dir``."""
+    """Temporarily route ``huggingface_hub`` downloads to ``cache_dir``.
+
+    Also guards against ``sys.stdout`` / ``sys.stderr`` being ``None`` (as in
+    windowed PyInstaller builds) and disables tqdm progress bars when no real
+    TTY is attached so ``vieneu`` / ``huggingface_hub`` never raise
+    ``AttributeError: 'NoneType' object has no attribute 'write'``.
+    """
     cache_str = str(cache_dir.resolve())
     prev_env = os.environ.get("HF_HUB_CACHE")
+    prev_pb = os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS")
     os.environ["HF_HUB_CACHE"] = cache_str
+    had_null_stdio = sys.stdout is None or sys.stderr is None
+    prev_stdout = sys.stdout
+    prev_stderr = sys.stderr
+    if sys.stdout is None:
+        sys.stdout = io.StringIO()
+    if sys.stderr is None:
+        sys.stderr = io.StringIO()
+    is_tty = False
+    try:
+        is_tty = bool(getattr(prev_stderr, "isatty", lambda: False)())
+    except Exception:
+        is_tty = False
+    if had_null_stdio or not is_tty:
+        os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
     hf_constants = None
     prev_const = None
     try:
@@ -278,10 +301,18 @@ def _hf_cache_context(cache_dir: Path):
     try:
         yield cache_str
     finally:
+        if prev_stdout is None:
+            sys.stdout = None
+        if prev_stderr is None:
+            sys.stderr = None
         if prev_env is None:
             os.environ.pop("HF_HUB_CACHE", None)
         else:
             os.environ["HF_HUB_CACHE"] = prev_env
+        if prev_pb is None:
+            os.environ.pop("HF_HUB_DISABLE_PROGRESS_BARS", None)
+        else:
+            os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = prev_pb
         if hf_constants is not None and prev_const is not None:
             hf_constants.HF_HUB_CACHE = prev_const
 
@@ -407,11 +438,11 @@ class VieNeuTTSProvider(TTSProvider):
                     engine = factory(**kwargs)
             except Exception as exc:
                 if not cached and _looks_like_network_error(exc):
-                    raise TTSFailure(
+                    raise TTSEngineInitError(
                         f"Không thể tải model giọng đọc VieNeu ({self.mode}) từ Hugging Face. "
                         f"Cần kết nối Internet cho lần chạy đầu tiên để tải ~{self._spec['download_mb']} MB: {exc}"
                     ) from exc
-                raise TTSFailure(
+                raise TTSEngineInitError(
                     f"Không thể khởi tạo engine giọng đọc VieNeu ({self.mode}): {exc}"
                 ) from exc
 

@@ -497,18 +497,16 @@ def _completeness_pass(job, entries, config, client, cancel) -> list[dict]:
 
 
 def fast_model_id(config) -> str | None:
-    """The cheap mechanical-step model: the user's configured fallback
-    model when one is set, else the shipped default
-    (gemini-3.5-flash-lite) — mechanical steps (punctuation, fillers,
-    completeness, shorten) always use it."""
-    try:
-        from dubtool.app import settings as settings_mod
+    """Model used for S3 mechanical steps (punctuation, completeness, shorten).
 
-        fallback = str((settings_mod.load() or {}).get("fallback_model") or "").strip()
-        if fallback:
-            return fallback
-    except Exception as exc:
-        log.debug("s3: fallback model lookup failed (%s)", exc)
+    Uses the run's primary selected model (``config.llm_model``) when set,
+    falling back to ``DEFAULT_MODEL_ID`` otherwise. Never reads the user's
+    ``fallback_model`` setting here — ``fallback_model`` is reserved strictly
+    for overload/quota failover when the primary model fails.
+    """
+    selected = _selected_model(config)
+    if selected:
+        return selected
     from dubtool.llm.catalog import DEFAULT_MODEL_ID
 
     return DEFAULT_MODEL_ID
@@ -992,7 +990,7 @@ def run(
             heartbeat_emit = None
             from dubtool import heartbeat as hb_mod
 
-            hb_mod.emit(i18n.tr("llm.fallback_to_fast", model=fast_provider.model))
+            hb_mod.emit(i18n.tr("llm.fallback_to_fast", model=fallback_provider.model))
             _ = heartbeat_emit
         except Exception:
             pass

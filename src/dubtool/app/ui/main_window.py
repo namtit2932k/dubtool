@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSlider,
     QTextEdit,
     QVBoxLayout,
@@ -117,6 +118,22 @@ def _redact(text: str) -> str:
     return re.sub(r"[A-Za-z0-9_\-]{20,}", "•••", text)
 
 
+def _make_shrinkable_combo(combo: QComboBox, min_chars: int = 10) -> None:
+    """Allow a combo box with long item labels to shrink with the window.
+
+    Without AdjustToMinimumContentsLengthWithIcon, QComboBox reports the
+    widest item (e.g. a 70-char Vietnamese voice description) as its
+    minimumSizeHint, pushing the QScrollArea page wider than the viewport
+    and clipping the right edge of the entire UI on narrower windows.
+    """
+    combo.setSizeAdjustPolicy(
+        QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+    )
+    combo.setMinimumContentsLength(min_chars)
+    combo.setMinimumWidth(0)
+    combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+
 # ------------------------------------------------------------------- widgets
 class BriefEdit(QTextEdit):
     """Video description, max 1000 chars with a counter (AGU4 7.3)."""
@@ -162,6 +179,7 @@ class OptionsWidget(QGroupBox):
         # AGU10 5.2: the old 'Giữ các tệp trung gian' checkbox became a
         # three-choice dropdown.
         self.keep_combo = QComboBox()
+        _make_shrinkable_combo(self.keep_combo)
         self.keep_combo.addItem(i18n.tr("options.keep_none"), "none")
         self.keep_combo.addItem(i18n.tr("options.keep_light"), "light")
         self.keep_combo.addItem(i18n.tr("options.keep_full"), "full")
@@ -177,6 +195,7 @@ class OptionsWidget(QGroupBox):
         self.readable_check = QCheckBox(i18n.tr("options.readable"))
         self.readable_check.setChecked(bool(s.get("export_readable", True)))
         self.readable_format_combo = QComboBox()
+        _make_shrinkable_combo(self.readable_format_combo, min_chars=8)
         self.readable_format_combo.addItem(i18n.tr("readable.format_docx"), "docx")
         self.readable_format_combo.addItem(i18n.tr("readable.format_txt"), "txt")
         self.readable_format_combo.setCurrentIndex(
@@ -188,8 +207,11 @@ class OptionsWidget(QGroupBox):
         self.gain_value = QLabel(f"{s['original_gain_db']} dB")
         self.gain_slider.valueChanged.connect(lambda v: self.gain_value.setText(f"{v} dB"))
         self.voice_combo = QComboBox()
+        _make_shrinkable_combo(self.voice_combo)
         self._tts_mode = str(s.get("tts_model") or "v3turbo_int8")
         self.reload_voices(s)
+        grid.setColumnStretch(1, 1)
+        self.setMinimumWidth(0)
         grid.addWidget(self.burn_check, 0, 0, 1, 3)
         grid.addWidget(self.srt_check, 1, 0, 1, 3)
         grid.addWidget(QLabel(i18n.tr("options.keep_label")), 2, 0)
@@ -281,6 +303,7 @@ class ProgressWidget(QGroupBox):
             self.cancel_btn, self.resume_btn, self.over_btn,
             self.open_btn, self.play_btn, self.readable_btn,
         ):
+            b.hide()
             self.action_row.addWidget(b)
         layout.addLayout(self.action_row)
 
@@ -296,7 +319,9 @@ class ProgressWidget(QGroupBox):
         self.details_header.setWordWrap(True)
         self.details_header.setObjectName("details_header")
         self.details_liveness = QLabel("")
+        self.details_liveness.setWordWrap(True)
         self.details_liveness.setObjectName("details_liveness")
+        self.setMinimumWidth(0)
         self.details_copy_btn = QPushButton(i18n.tr("details.copy"))
         self.details_copy_btn.setObjectName("details_copy")
         self.details_copy_btn.clicked.connect(self._copy_details)
@@ -689,6 +714,7 @@ class MainWindow(QMainWindow):
         lang_video_layout.setContentsMargins(0, 0, 0, 0)
         lang_video_layout.addWidget(QLabel(i18n.tr("language.video_label")))
         self.lang_video_combo = QComboBox()
+        _make_shrinkable_combo(self.lang_video_combo)
         self.lang_video_combo.setObjectName("lang_video_combo")
         ui_lang = "en" if i18n.language() == "en" else "vi"
         self.lang_video_combo.addItem(i18n.tr("language.auto"), "auto")
@@ -706,8 +732,10 @@ class MainWindow(QMainWindow):
         buttons_row = QHBoxLayout(self.buttons_row)
         buttons_row.setContentsMargins(0, 0, 0, 0)
         self.model_combo = QComboBox()
+        _make_shrinkable_combo(self.model_combo)
         self.model_combo.setEditable(False)
         self.model_combo.setToolTip("")
+        self.model_combo.currentIndexChanged.connect(self._on_model_combo_changed)
         self.generate_btn = QPushButton(i18n.tr("run.generate"))
         self.generate_btn.clicked.connect(self.start_run)
         self._update_mode_tips()
@@ -720,7 +748,9 @@ class MainWindow(QMainWindow):
 
         self.page = QWidget()
         self.page.setObjectName("page")
+        self.page.setMinimumWidth(0)
         self.left_box.setObjectName("left_box")
+        self.left_box.setMinimumWidth(0)
         # One box layout flips direction between split (horizontal) and
         # stacked (vertical) modes — never rebuilt, so it is stable.
         self.page_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, self.page)
@@ -730,6 +760,17 @@ class MainWindow(QMainWindow):
         self._refresh_section_layout()
         self.scroll.setWidget(self.page)
 
+        min_w = min(
+            740,
+            max(
+                480,
+                max(
+                    self.left_box.minimumSizeHint().width(),
+                    self.progress_group.minimumSizeHint().width(),
+                ) + 44,
+            ),
+        )
+        self.setMinimumSize(min_w, 420)
         self._set_initial_size(saved)
         self._refresh_buttons()
         # Update 9 task 3.1: restore the last details open/closed state.
@@ -800,7 +841,20 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         self._refresh_section_layout()
 
-    def _update_mode_tips(self) -> None:
+    def _on_model_combo_changed(self, _index: int = -1) -> None:
+        self._update_generate_tip()
+        item = self.model_combo.model().item(self.model_combo.currentIndex())
+        model_id = str(item.data(Qt.ItemDataRole.UserRole) or "") if item is not None else ""
+        if model_id:
+            try:
+                s = settings.load()
+                if s.get("model_id") != model_id:
+                    s["model_id"] = model_id
+                    settings.save(s)
+            except OSError:
+                pass
+
+    def _update_mode_tips(self, *, preserve_current: bool = False) -> None:
         """The dropdown lists the catalog's models, grouped by provider with
         non-selectable headers: "Gemini", "OpenAI (ChatGPT)", "Anthropic
         (Claude)". A provider's items are disabled ("(cần khóa API)") when
@@ -810,7 +864,12 @@ class MainWindow(QMainWindow):
         "trả phí" when the provider is paid."""
         from dubtool.llm import catalog as catalog_mod
 
-        saved = str(settings.load().get("model_id") or catalog_mod.DEFAULT_MODEL_ID)
+        current_id = ""
+        if preserve_current and self.model_combo.count() > 0:
+            cur_item = self.model_combo.model().item(self.model_combo.currentIndex())
+            if cur_item is not None and cur_item.data(Qt.ItemDataRole.UserRole):
+                current_id = str(cur_item.data(Qt.ItemDataRole.UserRole))
+        saved = current_id or str(settings.load().get("model_id") or catalog_mod.DEFAULT_MODEL_ID)
         self._paid_provider_seen: set[str] = getattr(
             self, "_paid_provider_seen", set()
         )
@@ -1312,7 +1371,7 @@ class MainWindow(QMainWindow):
         dialog.exec()
         if hasattr(self, "options") and hasattr(self.options, "reload_voices"):
             self.options.reload_voices()
-        self._update_mode_tips()
+        self._update_mode_tips(preserve_current=True)
 
     def _provider_label(self, provider: str) -> str:
         return {

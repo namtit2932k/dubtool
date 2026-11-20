@@ -290,6 +290,10 @@ def violations(root) -> list[str]:
         if policy != Qt.ScrollBarPolicy.ScrollBarAlwaysOff:
             problems.append(f"scroll-horizontal-enabled:{name(w)}")
         content = w.widget()
+        if content is not None and content.width() > w.viewport().width() + OVERLAP_EPS:
+            problems.append(
+                f"scroll-content-overflow-x:{name(w)}: content {content.width()}px > viewport {w.viewport().width()}px"
+            )
         if content is not None and content.minimumSizeHint().height() > w.viewport().height():
             if not w.verticalScrollBar().isVisible():
                 problems.append(f"scroll-vertical-missing:{name(w)}")

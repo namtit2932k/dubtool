@@ -32,6 +32,8 @@ class DropZone(QLabel):
     def __init__(self):
         super().__init__(i18n.tr("video.drop"))
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setWordWrap(True)
+        self.setMinimumWidth(0)
         self.setMinimumHeight(90)
         self.setAcceptDrops(True)
         self.setStyleSheet("QLabel { border: 2px dashed #888; border-radius: 8px; padding: 16px; }")

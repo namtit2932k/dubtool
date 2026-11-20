@@ -59,7 +59,28 @@ def _print_version() -> None:
     print(_ffmpeg_version())
 
 
+def _ensure_stdio() -> None:
+    """Guarantee non-None sys.stdout/sys.stderr in windowed PyInstaller builds.
+
+    PyInstaller builds with ``console=False`` start with ``sys.stdout`` and
+    ``sys.stderr`` set to ``None`` when launched from Explorer without a
+    console. Third-party libraries (e.g. ``huggingface_hub``, ``tqdm``,
+    ``vieneu``, ``faster-whisper``) that call ``print()`` or ``.write()``
+    would otherwise crash with ``AttributeError: 'NoneType' object has no
+    attribute 'write'``.
+    """
+    for attr in ("stdout", "stderr"):
+        if getattr(sys, attr, None) is None:
+            try:
+                setattr(sys, attr, open(os.devnull, "w", encoding="utf-8"))
+            except OSError:
+                import io
+
+                setattr(sys, attr, io.StringIO())
+
+
 def run_gui() -> int:
+    _ensure_stdio()
     from PySide6.QtWidgets import QApplication
 
     from dubtool.app import i18n, secrets, settings
@@ -1066,6 +1087,7 @@ def run_headless(
 
 
 def main(argv: list[str] | None = None) -> int:
+    _ensure_stdio()
     for stream in (sys.stdout, sys.stderr):
         if stream is not None and hasattr(stream, "reconfigure"):
             try:
