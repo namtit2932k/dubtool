@@ -376,6 +376,9 @@ def _set_state_voice(job, voice: str, *, mode: str = DEFAULT_TTS_MODE) -> None:
     state["voice"] = voice
     state["tts_mode"] = mode
     write_json(_state_path(job), state)
+    if isinstance(getattr(job, "state", None), dict):
+        job.state["voice"] = voice
+        job.state["tts_mode"] = mode
 
 
 def _fault_spec():

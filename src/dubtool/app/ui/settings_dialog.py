@@ -819,7 +819,7 @@ class SettingsDialog(QDialog):
                 continue
             for model_id in fetched:
                 model_id = str(model_id).strip()
-                if not model_id or not self._valid_id(model_id):
+                if not model_id or not MODEL_ID_RE.fullmatch(model_id):
                     continue
                 if model_id not in known:
                     known.append(model_id)

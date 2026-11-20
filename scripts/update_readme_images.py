@@ -49,34 +49,9 @@ def newest_folder() -> Path:
 
 
 def _copy_png_if_changed(src: Path, dest: Path) -> bool:
-    """Copy src -> dest unless dest already exists with identical geometry and >=99% identical pixels
-    (suppressing sub-second Windows QProgressBar shimmer phase noise across identical builds)."""
-    if not dest.is_file():
-        shutil.copyfile(src, dest)
-        return True
-    if src.read_bytes() == dest.read_bytes():
+    """Copy src -> dest whenever bytes differ so UI text updates are never skipped."""
+    if dest.is_file() and src.read_bytes() == dest.read_bytes():
         return False
-    try:
-        from PySide6.QtGui import QImage
-
-        img_a = QImage(str(src))
-        img_b = QImage(str(dest))
-        if not img_a.isNull() and not img_b.isNull():
-            if img_a.width() == img_b.width() and img_a.height() == img_b.height():
-                w, h = img_a.width(), img_a.height()
-                step_x = max(1, w // 100)
-                step_y = max(1, h // 100)
-                total = 0
-                same = 0
-                for y in range(0, h, step_y):
-                    for x in range(0, w, step_x):
-                        total += 1
-                        if img_a.pixel(x, y) == img_b.pixel(x, y):
-                            same += 1
-                if total > 0 and (same / total) >= 0.98:
-                    return False
-    except Exception:
-        pass
     shutil.copyfile(src, dest)
     return True
 

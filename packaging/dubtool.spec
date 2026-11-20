@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs, copy_metadata
 
 ROOT = Path(SPECPATH).resolve().parent  # repo root
 sys.path.insert(0, str(ROOT / "src"))
@@ -96,6 +96,7 @@ datas += collect_data_files("sea_g2p")
 datas += collect_dynamic_libs("sea_g2p")
 datas += collect_data_files("_soundfile_data")
 datas += collect_dynamic_libs("_soundfile_data")
+datas += copy_metadata("vieneu")
 datas += collect_data_files("certifi")
 # AGENT_UPDATE_7.md 5.6: python-docx ships its default template as data
 # files — a frozen app without them fails at runtime when saving a docx.

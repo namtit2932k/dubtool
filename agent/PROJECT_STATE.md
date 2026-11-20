@@ -41,8 +41,11 @@
   - Thêm dropdown chế độ giọng đọc + danh sách giọng động theo chế độ trong `SettingsDialog` và đồng bộ với `MainWindow.options`; cập nhật `first_run.privacy` (cả ASR + TTS chạy 100% cục bộ).
   - Verify `--layout-check` (0 violations), `--gui-smoke` (10/10 PASS), Rule 7 AST scan (0 spec IDs).
 - [x] **Phase 5 (Packaging & Licenses):** Cập nhật `packaging/build_exe.ps1` (cài `vieneu` `--no-deps` để tránh kéo `gradio`/`librosa`/`numba`), `packaging/dubtool.spec` (collect `vieneu`, `vieneu_utils`, `sea_g2p`, `_soundfile_data`), `packaging/THIRD_PARTY.md`, `packaging/RELEASE_NOTES_TEMPLATE.md`, `packaging/licenses/THIRD_PARTY_NOTICES.txt`, `README.md`, `README_BUILD.md`.
-- [ ] **Phase 6 (Testing, Build `.exe`, Real E2E, Report & Official Release):**
-  - [x] Thêm `tests/test_vieneu_tts.py` (13 tests) và cập nhật test cũ.
-  - [ ] Xác nhận full `pytest` 0 failed, commit code sạch, build `DubTool.exe` 1.0.17 bằng `packaging/build_exe.ps1`.
-  - [ ] Verify `DubTool.exe` 1.0.17: `--version`, `--selftest`, `--layout-check`, `--gui-smoke`, screenshots, E2E thật `s1–s8` trên `test9.mp4` + clip đa ngôn ngữ (`zh`).
-  - [ ] Viết `REPORT_UPDATE_17.md`, chạy `scripts/release.py 17` để phát hành & verify chính thức `v1.0.17`.
+- [x] **Phase 6 (Testing, Build `.exe`, Real E2E, Report & Official Release):**
+  - [x] Thêm `tests/test_vieneu_tts.py` (13 tests) và cập nhật test cũ; toàn bộ bộ test **579 passed, 2 skipped (`SKIPS.md`), 0 failed**.
+  - [x] Build `DubTool.exe` `1.0.17` (`DubTool-1.0.17-win64.zip` 210.51 MB, +11.5 MB so với `1.0.16`), pass `--version`, `--selftest`, `--layout-check` (0 violations), `--gui-smoke` (10/10 PASS).
+  - [x] Verify E2E thật `s1–s8` trên `DubTool.exe` `1.0.17`:
+    - `test9.mp4` (`v3turbo_int8`, `Trúc Ly`): 200.9s, s4=81.2s (0/62 lỗi), fit `59 ok / 1 shortened / 2 stretched / 0 overflow`, peak RAM 1,903 MB.
+    - `clip_zh.mp4` (`v3nano`, `Mai Anh`): 32.8s, s4=8.8s (0/8 lỗi), fit `2 ok / 2 shortened / 4 stretched / 0 overflow`, peak RAM 635 MB.
+  - [x] Đã sửa thêm 4 lỗi nhỏ bắt được khi verify (`update_readme_images.py` copy threshold, `dubtool.spec` `copy_metadata("vieneu")`, `settings_dialog.py` `_valid_id`, `s4_tts.py` sync `job.state`).
+  - [ ] Viết xong `REPORT_UPDATE_17.md` — chuẩn bị commit sạch và chạy `scripts/release.py 17` phát hành chính thức `v1.0.17`.
