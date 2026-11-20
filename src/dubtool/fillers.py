@@ -42,35 +42,9 @@ _TOKEN = re.compile(r"[\w'’]+", re.UNICODE)
 
 
 def _parse_simple_yaml(path: Path) -> dict:
-    text = path.read_text(encoding="utf-8")
-    data = {}
-    current_key = None
-    current_sub = None
-    lines = text.splitlines()
-    for line in lines:
-        line = line.split('#')[0].rstrip()
-        if not line:
-            continue
-        if line.startswith('  '):
-            if current_key and current_sub is not None:
-                parts = line.split(':', 1)
-                if len(parts) == 2:
-                    current_sub[parts[0].strip()] = parts[1].strip()
-        elif line.startswith('- '):
-             if current_key == 'protected':
-                 data.setdefault('protected', []).append(line[2:].strip().strip('"').strip("'"))
-        elif ':' in line:
-            key = line.split(':')[0].strip()
-            if key in ('vocative', 'discourse', 'idioms'):
-                current_key = key
-                current_sub = data.setdefault(key, {})
-            elif key == 'protected':
-                current_key = key
-                current_sub = None
-            else:
-                current_key = None
-                current_sub = None
-    return data
+    from yaml import safe_load  # pyyaml ships with the app
+
+    return safe_load(path.read_text(encoding="utf-8")) or {}
 
 
 def shipped_path() -> Path:

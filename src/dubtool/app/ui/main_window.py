@@ -426,7 +426,6 @@ class ProgressWidget(QGroupBox):
     def on_finished(self, result: api.DubResult) -> None:
         self._last_result = result
         import time as _time
-        print(f"DEBUG: on_finished called, result.ok={result.ok}, result.out_readable={bool(result.out_readable)}")
 
         self._last_event_mono = _time.monotonic()
         self.cancel_btn.hide()
@@ -436,10 +435,7 @@ class ProgressWidget(QGroupBox):
             self.open_btn.show()
             self.play_btn.show()
             if result.out_readable:
-                print("DEBUG: showing readable_btn")
                 self.readable_btn.show()
-            else:
-                print("DEBUG: not showing readable_btn")
             if result.readable_warning:
                 # AGENT_UPDATE_7.md 5.5: the video is fine; say so plainly.
                 self.log.append(i18n.tr("progress.readable_warning"))

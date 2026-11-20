@@ -77,36 +77,188 @@ def _extract_build_info_from_zip(zip_path: Path) -> str:
     return ""
 
 
-def audit_releases() -> int:
-    gh = find_gh_bin()
-    env = gh_env()
-    # List all tags
-    tags = _git("tag", "-l").splitlines()
-    
-    # Get all releases
-    view = proc.run([gh, "release", "list", "--json", "tagName"], cwd=str(ROOT), env=env)
-    releases = json.loads(view.stdout)
-    rel_tags = {r["tagName"] for r in releases}
-    
-    print(f"| Tag | Release Exists | Status | Note |")
-    print(f"| --- | --- | --- | --- |")
-    
-    for tag in sorted(tags, reverse=True):
-        status = "no evidence"
-        note = ""
-        if tag in rel_tags:
-            release_exists = "Yes"
-            if tag == "v1.0.14":
-                status = "pre-release, superseded"
-                note = "Superseded by v1.0.15"
-            elif tag in ["v1.0.15", "v1.0.16"]:
-                status = "PASS"
-                note = "Verified"
+def _git_in(repo: Path, *args: str) -> str:
+    done = proc.run(["git", *args], cwd=str(repo))
+    if done.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args)} failed: {done.stderr}")
+    return done.stdout.strip()
+
+
+def _parse_release_evidence(path: Path) -> dict[str, dict[str, str]]:
+    """Parse RELEASE_EVIDENCE.txt into a mapping of tag -> verified metadata."""
+    out: dict[str, dict[str, str]] = {}
+    if not path.is_file():
+        return out
+    text = path.read_text(encoding="utf-8", errors="replace")
+    blocks = re.split(r"(?=^=== Release Verification:\s*\S+\s*===)", text, flags=re.MULTILINE)
+    for blk in blocks:
+        m_tag = re.search(r"^=== Release Verification:\s*(\S+)\s*===", blk, flags=re.MULTILINE)
+        if not m_tag:
+            continue
+        tag = m_tag.group(1).strip()
+        meta: dict[str, str] = {"tag": tag}
+        for key, pat in (
+            ("tag_commit", r"^Tag commit:\s*(\S+)"),
+            ("build_info_commit", r"^BUILD_INFO\.txt commit:\s*(\S+)"),
+            ("dl_sha", r"^Downloaded asset SHA256:\s*(\S+)"),
+            ("local_sha", r"^Local zip SHA256:\s*(\S+)"),
+            ("result", r"^VERIFICATION RESULT:\s*(\S+)"),
+            ("prerelease", r"^Is Pre-release:\s*(\S+)"),
+        ):
+            m = re.search(pat, blk, flags=re.MULTILINE)
+            if m:
+                meta[key] = m.group(1).strip()
+        out[tag] = meta
+    return out
+
+
+def _parse_releases_md(path: Path) -> dict[str, dict[str, str]]:
+    """Parse docs/RELEASES.md Markdown table rows keyed by tag name."""
+    out: dict[str, dict[str, str]] = {}
+    if not path.is_file():
+        return out
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.strip().startswith("|"):
+            continue
+        cols = [c.strip() for c in line.strip().strip("|").split("|")]
+        tag_col = cols[0].strip("`") if cols else ""
+        if len(cols) >= 4 and tag_col.startswith("v1.0."):
+            out[tag_col] = {
+                "commit": cols[1].strip("`"),
+                "status": cols[2],
+                "reason": cols[3],
+                "date": cols[4] if len(cols) >= 5 else "",
+            }
+    return out
+
+
+def _tag_sort_key(tag: str) -> tuple[int, int, str]:
+    m = re.fullmatch(r"v1\.0\.(\d+)", tag)
+    if m:
+        return (2, int(m.group(1)), tag)
+    m2 = re.fullmatch(r"update-(\d+)", tag)
+    if m2:
+        return (1, int(m2.group(1)), tag)
+    return (0, 0, tag)
+
+
+def _update_num_of_tag(tag: str) -> int | None:
+    m = re.fullmatch(r"v1\.0\.(\d+)", tag)
+    return int(m.group(1)) if m else None
+
+
+def run_audit(
+    repo: Path = ROOT,
+    releases_override: list[dict] | None = None,
+) -> tuple[int, str, list[str]]:
+    """Audit all Git tags and GitHub releases against local evidence.
+
+    Returns (exit_code, markdown_table, violations). Fails (rc=1) if any GitHub
+    release created after Update 15 (v1.0.16+) lacks matching local evidence or
+    has a tag/BUILD_INFO/hash mismatch.
+    """
+    tags_raw = _git_in(repo, "tag", "-l")
+    local_tags = [t.strip() for t in tags_raw.splitlines() if t.strip()]
+    tag_commits: dict[str, str] = {}
+    for t in local_tags:
+        try:
+            tag_commits[t] = _git_in(repo, "rev-list", "-n", "1", t)
+        except Exception:
+            tag_commits[t] = ""
+
+    if releases_override is not None:
+        releases = releases_override
+    else:
+        gh = find_gh_bin()
+        env = gh_env()
+        view = proc.run(
+            [gh, "release", "list", "--limit", "100", "--json", "tagName,isPrerelease,publishedAt"],
+            cwd=str(repo),
+            env=env,
+        )
+        if view.returncode != 0:
+            raise RuntimeError(f"gh release list failed: {view.stderr.strip()}")
+        releases = json.loads(view.stdout or "[]")
+
+    rel_by_tag = {str(r.get("tagName", "")).strip(): r for r in releases if r.get("tagName")}
+    ev_map = _parse_release_evidence(repo / "RELEASE_EVIDENCE.txt")
+    doc_map = _parse_releases_md(repo / "docs" / "RELEASES.md")
+
+    all_tags = sorted(set(local_tags) | set(rel_by_tag.keys()), key=_tag_sort_key, reverse=True)
+    lines = [
+        "| Tag | Tag Commit | GitHub Release | Evidence / BUILD_INFO | Status |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    violations: list[str] = []
+
+    for tag in all_tags:
+        commit = tag_commits.get(tag, "")
+        short_commit = commit[:8] if commit else "missing"
+        rel = rel_by_tag.get(tag)
+        ev = ev_map.get(tag)
+        doc = doc_map.get(tag)
+        upd_n = _update_num_of_tag(tag)
+
+        if rel is None:
+            gh_col = "No"
+            ev_col = doc["status"] if doc else "tag only"
+            status = "no evidence" if (upd_n is not None and upd_n >= 15) else "tag only"
         else:
-            release_exists = "No"
-            
-        print(f"| {tag} | {release_exists} | {status} | {note} |")
-    return 0
+            is_pre = bool(rel.get("isPrerelease"))
+            gh_col = "Pre-release" if is_pre else "Yes"
+
+            if is_pre or (doc and "superseded" in doc.get("status", "").lower()):
+                status = "pre-release, superseded"
+                ev_col = doc.get("reason", "pre-release") if doc else "pre-release"
+            elif ev is not None:
+                ev_commit = ev.get("tag_commit", "")
+                bi_commit = ev.get("build_info_commit", "")
+                dl_sha = ev.get("dl_sha", "")
+                local_sha = ev.get("local_sha", "")
+                passed = (
+                    ev.get("result", "").upper() == "PASS"
+                    and bool(commit)
+                    and ev_commit == commit
+                    and bi_commit == commit
+                    and bool(dl_sha)
+                    and dl_sha == local_sha
+                )
+                if passed:
+                    status = "ok"
+                    ev_col = f"BUILD_INFO={bi_commit[:8]}, sha256={dl_sha[:12]}…"
+                else:
+                    status = "no evidence"
+                    ev_col = f"mismatch (ev={ev_commit[:8]}, bi={bi_commit[:8]})"
+                    if upd_n is not None and upd_n > 15:
+                        violations.append(f"{tag}: RELEASE_EVIDENCE mismatch ({ev_col})")
+            elif (
+                upd_n is not None
+                and upd_n <= 15
+                and doc is not None
+                and doc.get("status", "").lower() == "official"
+                and commit
+                and commit.startswith(doc.get("commit", ""))
+            ):
+                status = "ok"
+                ev_col = f"docs/RELEASES.md ({doc['commit']})"
+            else:
+                status = "no evidence"
+                ev_col = "missing RELEASE_EVIDENCE" if commit else "remote-only tag without local commit"
+                if upd_n is not None and upd_n > 15:
+                    violations.append(f"{tag}: post-Update-15 release has no verified local evidence ({ev_col})")
+
+        lines.append(f"| `{tag}` | `{short_commit}` | {gh_col} | {ev_col} | {status} |")
+
+    table = "\n".join(lines) + "\n"
+    return (1 if violations else 0), table, violations
+
+
+def audit_releases(repo: Path = ROOT) -> int:
+    rc, table, violations = run_audit(repo=repo)
+    print(table, end="")
+    for v in violations:
+        print(f"AUDIT FAIL: {v}", file=sys.stderr)
+    return rc
 
 
 def verify_tag(tag: str, strict_head: bool = False, write_path: Path | None = None) -> int:

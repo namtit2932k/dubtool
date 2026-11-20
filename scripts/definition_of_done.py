@@ -481,6 +481,21 @@ def check_rule_8_report_paths(repo: Path, build_root: Path, update_n: int) -> tu
     return True, cmd, f"Verified {len(checked)} file path(s) referenced in REPORT_UPDATE_{update_n}.md exist"
 
 
+def check_rule_9_release_audit(repo: Path, update_n: int) -> tuple[bool, str, str]:
+    cmd = "verify_release.py --audit"
+    origin_check = proc.run(["git", "remote", "get-url", "origin"], cwd=str(repo))
+    if origin_check.returncode != 0 or not origin_check.stdout.strip():
+        return True, cmd, "Offline repo (no origin remote); remote release audit skipped"
+
+    import verify_release as vr
+
+    rc, table, violations = vr.run_audit(repo=repo)
+    row_count = max(0, len([ln for ln in table.splitlines() if ln.startswith("| `")]))
+    if rc != 0:
+        return False, cmd, "; ".join(violations)
+    return True, cmd, f"Audited {row_count} tag(s)/release(s); 0 unverified post-Update-15 releases"
+
+
 def run_dod(repo: Path = ROOT, build_root: Path | None = None, update_n: int | None = None) -> tuple[int, Path]:
     repo = repo.resolve()
     if build_root is None:
@@ -502,6 +517,7 @@ def run_dod(repo: Path = ROOT, build_root: Path | None = None, update_n: int | N
         ("6. Review package", lambda: check_rule_6_review_zip(repo, build_root, update_n)),
         ("7. Messages (no spec IDs)", lambda: check_rule_7_messages(repo)),
         ("8. Reports versus code", lambda: check_rule_8_report_paths(repo, build_root, update_n)),
+        ("9. Release audit", lambda: check_rule_9_release_audit(repo, update_n)),
     ]
 
     rows: list[tuple[str, bool, str, str]] = []
@@ -546,34 +562,5 @@ def main(argv: list[str] | None = None) -> int:
     return rc
 
 
-def test_dod_image_checks():
-    import tempfile
-    
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir_path = Path(tmpdir)
-        
-        # Test 1: Byte-identical
-        (tmpdir_path / "a.png").write_bytes(b"content")
-        (tmpdir_path / "b.png").write_bytes(b"content")
-        ok, _ = _check_image_contents(tmpdir_path)
-        assert not ok, "Should fail for identical content"
-        (tmpdir_path / "a.png").unlink()
-        (tmpdir_path / "b.png").unlink()
-        
-        # Test 2: Different states different content
-        (tmpdir_path / "900x700_idle.png").write_bytes(b"idle")
-        (tmpdir_path / "900x700_running.png").write_bytes(b"running")
-        ok, msg = _check_image_contents(tmpdir_path)
-        print(f"DEBUG: ok={ok}, msg={msg}")
-        assert ok, f"Should pass for different states: {msg}"
-        
-        (tmpdir_path / "900x700_running.png").write_bytes(b"idle")
-        ok, _ = _check_image_contents(tmpdir_path)
-        assert not ok, "Should fail for identical content on different states"
-
-    print("Image content checks tests passed")
-
 if __name__ == "__main__":
-    # Run tests
-    test_dod_image_checks()
     raise SystemExit(main())

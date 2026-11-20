@@ -7,10 +7,10 @@
 - **Tệp phát hành:** `{zip_name}`
 - **SHA-256 (`{zip_name}`):** `{zip_sha256}`
 - **Chữ ký số:** Chưa có chữ ký số (Windows SmartScreen có thể cảnh báo khi chạy lần đầu — bấm *More info* → *Run anyway*).
-- **Trạng thái giấy phép ứng dụng:** Chưa chọn giấy phép — bảo lưu mọi quyền (*All rights reserved* cho đến khi chủ sở hữu dự án chọn giấy phép).
+- **Trạng thái giấy phép ứng dụng:** **MIT License** (`Copyright (c) 2026 sickyturtlez`) cho mã nguồn của ứng dụng DubTool; các thành phần bên thứ ba giữ nguyên giấy phép riêng (xem `THIRD_PARTY.md` và thư mục `licenses/`).
 - **Lưu ý dịch vụ & quyền riêng tư:**
   - `edge-tts` là giao diện không chính thức tới dịch vụ đọc văn bản trực tuyến của Microsoft; dịch vụ có thể giới hạn tần suất (HTTP 503 / `NoAudioReceived`) hoặc thay đổi bất kỳ lúc nào.
-  - Âm thanh và video gốc được xử lý cục bộ trên máy của bạn (Whisper chạy trên máy). Khi bạn chọn mô hình dịch (bao gồm các nhà cung cấp trả phí như OpenAI hoặc Anthropic, hoặc Gemini), **phần văn bản tiếng Anh của video sẽ được gửi tới nhà cung cấp đó** để dịch sang tiếng Việt.
+  - Âm thanh và video gốc được xử lý cục bộ trên máy của bạn (Whisper chạy trên máy). Khi bạn chọn mô hình dịch (bao gồm các nhà cung cấp trả phí như OpenAI hoặc Anthropic, hoặc Gemini), **văn bản gốc (ngôn ngữ nhận diện được) của video sẽ được gửi tới nhà cung cấp đó** để dịch sang tiếng Việt.
 
 ### Phần mềm bên thứ ba & Giấy phép (Third-Party Notices)
 
@@ -50,10 +50,10 @@ Bản đóng gói kèm theo các thành phần bên thứ ba sau đây (toàn v�
 - **Release Asset:** `{zip_name}`
 - **SHA-256 (`{zip_name}`):** `{zip_sha256}`
 - **Code Signing:** Unsigned binary (Windows SmartScreen may show a warning on first launch — click *More info* → *Run anyway*).
-- **Application License Status:** No license selected yet — all rights reserved (*chưa chọn giấy phép — bảo lưu mọi quyền* until the project owner selects a license).
+- **Application License Status:** **MIT License** (`Copyright (c) 2026 sickyturtlez`) for DubTool's own application source code; bundled third-party components keep their own licenses (see `THIRD_PARTY.md` and `licenses/`).
 - **Service & Privacy Notes:**
   - `edge-tts` is an unofficial interface to Microsoft's online read-aloud service and may be rate-limited or changed without notice.
-  - Audio extraction and speech recognition (Whisper) run locally on your machine. When translating (including with paid providers such as OpenAI or Anthropic, or with Gemini), **the English transcript text of the video is sent to the selected provider**.
+  - Audio extraction and speech recognition (Whisper) run locally on your machine. When translating (including with paid providers such as OpenAI or Anthropic, or with Gemini), **the recognized source-language transcript text of the video is sent to the selected provider**.
 
 ### Third-Party Components & Licenses
 

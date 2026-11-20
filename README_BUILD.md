@@ -95,3 +95,18 @@ DubTool.exe --headless-run sample\input\test1.mp4 out --mode accurate
 
 `--layout-check` and `--selftest` need no key; `--headless-run` uses the
 keyring or the `GEMINI_API_KEY` environment variable.
+
+## Release guard limits (`pre-push` vs GitHub API)
+
+The repository installs a `pre-push` hook (`scripts/git_push_guard.py`) via `scripts/install_git_hooks.py`. Its exact scope is:
+
+- **What it blocks:**
+  - Pushing a `v*` tag unless `.git/dubtool-release-ok-<N>` exists and matches `HEAD` (no bypass environment variable).
+  - Pushing a version bump on `main` before the release gate stamp is written.
+  - Pushing commits or tracked files that fail the secret scanner (`scripts/preflight_gates.py`).
+- **What it cannot block:**
+  - Server-side tag creation via `gh release create` or the GitHub web UI, because those talk directly to the GitHub API and never invoke client-side Git hooks.
+  - Local edits or unpushed commits until a `git push` occurs.
+- **Compensating controls:**
+  - Always publish through `scripts/release.py <N>` (builds from clean `git archive HEAD`, runs full tests, preflight/secret gates, clean-env exe verification, DoD checks, then pushes, tags, creates the release, and writes `RELEASE_EVIDENCE.txt`).
+  - Run `scripts/verify_release.py --audit` (invoked by `scripts/definition_of_done.py`), which queries GitHub releases (`gh release list`) and flags any post-Update-15 release lacking verified local evidence.

@@ -345,11 +345,6 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
             
             settings_dialog.grab().save(str(out_dir / f"dialog_settings_keys_{pid}.png"))
     settings_dialog.close()
-    
-    # release the fake store patch immediately after the dialog shots
-    for name, original in _orig.items():
-        if original is not None:
-            setattr(secrets_for_shots, name, original)
     # release the fake store patch immediately after the dialog shots
     for name, original in _orig.items():
         if original is not None:

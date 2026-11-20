@@ -242,3 +242,96 @@ def test_dod_each_rule_fails_when_broken(tmp_path):
     ok8, _, ev8 = dod.check_rule_8_report_paths(repo, build_root, 15)
     assert not ok8 and "does_not_exist.py" in ev8
     rep.write_text(orig_rep, encoding="utf-8")
+
+
+def test_dod_image_content_checks_on_fake_folder(tmp_path):
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+
+    # Byte-identical non-canonical images must fail
+    _make_png(img_dir / "dialog_settings_keys_openai.png", color=(10, 20, 30))
+    _make_png(img_dir / "dialog_settings_keys_anthropic.png", color=(10, 20, 30))
+    ok, msg = dod._check_image_contents(img_dir)
+    assert not ok and "Byte-identical" in msg
+
+    # Distinct content passes
+    _make_png(img_dir / "dialog_settings_keys_anthropic.png", color=(40, 50, 60))
+    ok, _ = dod._check_image_contents(img_dir)
+    assert ok
+
+    # Explicit copy annotated in INDEX.txt is allowed
+    (img_dir / "dialog_settings.png").write_bytes((img_dir / "dialog_settings_keys_openai.png").read_bytes())
+    (img_dir / "INDEX.txt").write_text(
+        "files:\n  dialog_settings.png (none; copy of dialog_settings_keys_openai.png)\n",
+        encoding="utf-8",
+    )
+    ok, msg = dod._check_image_contents(img_dir)
+    assert ok, msg
+
+    # Two different states with identical bytes must fail even if one were named differently
+    _make_png(img_dir / "900x700_finished.png", color=(70, 80, 90))
+    _make_png(img_dir / "900x700_error.png", color=(70, 80, 90))
+    ok, msg = dod._check_image_contents(img_dir)
+    assert not ok
+
+
+def test_verify_release_audit_catches_unverified_post_u15_release(tmp_path):
+    import verify_release as vr
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for cmd in (
+        ["git", "init", "-q", "-b", "main"],
+        ["git", "config", "user.email", "t@example.com"],
+        ["git", "config", "user.name", "t"],
+    ):
+        assert proc.run(cmd, cwd=str(repo)).returncode == 0
+
+    (repo / "README.md").write_text("# hi\n", encoding="utf-8")
+    (repo / "docs").mkdir()
+    assert proc.run(["git", "add", "."], cwd=str(repo)).returncode == 0
+    assert proc.run(["git", "commit", "-q", "-m", "c1"], cwd=str(repo)).returncode == 0
+    c1 = proc.run(["git", "rev-parse", "HEAD"], cwd=str(repo)).stdout.strip()
+    assert proc.run(["git", "tag", "v1.0.14", c1], cwd=str(repo)).returncode == 0
+    assert proc.run(["git", "tag", "v1.0.15", c1], cwd=str(repo)).returncode == 0
+
+    (repo / "docs" / "RELEASES.md").write_text(
+        "| Version | Commit | Status | Reason | Date |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        f"| `v1.0.14` | `{c1[:8]}` | Pre-release, superseded | Mismatch | 2026-11-12 |\n"
+        f"| `v1.0.15` | `{c1[:8]}` | Official | Verified | 2026-11-14 |\n",
+        encoding="utf-8",
+    )
+    (repo / "RELEASE_EVIDENCE.txt").write_text(
+        f"=== Release Verification: v1.0.15 ===\n"
+        f"Tag commit:            {c1}\n"
+        f"Downloaded asset SHA256: {'a' * 64}\n"
+        f"BUILD_INFO.txt commit: {c1}\n"
+        f"Local zip SHA256:      {'a' * 64}\n"
+        "VERIFICATION RESULT: PASS\n",
+        encoding="utf-8",
+    )
+
+    # Case 1: v1.0.14 (pre-release) + v1.0.15 (verified) -> PASS
+    rc, table, violations = vr.run_audit(
+        repo=repo,
+        releases_override=[
+            {"tagName": "v1.0.14", "isPrerelease": True},
+            {"tagName": "v1.0.15", "isPrerelease": False},
+        ],
+    )
+    assert rc == 0 and not violations, table
+    assert "pre-release, superseded" in table
+    assert "| `v1.0.15` |" in table and "| ok |" in table
+
+    # Case 2: rogue server-side v1.0.16 release (e.g. via gh release create) without evidence -> FAIL
+    rc2, table2, violations2 = vr.run_audit(
+        repo=repo,
+        releases_override=[
+            {"tagName": "v1.0.14", "isPrerelease": True},
+            {"tagName": "v1.0.15", "isPrerelease": False},
+            {"tagName": "v1.0.16", "isPrerelease": False},
+        ],
+    )
+    assert rc2 == 1 and any("v1.0.16" in v for v in violations2), table2
+    assert "no evidence" in table2
