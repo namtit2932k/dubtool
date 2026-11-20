@@ -99,6 +99,12 @@ def run_gui() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("DubTool")
     app.setApplicationVersion(app_version())
+    from PySide6.QtGui import QIcon
+    from dubtool.app.paths import bundle_root
+
+    icon_path = bundle_root() / "packaging" / "icon.ico"
+    if icon_path.is_file():
+        app.setWindowIcon(QIcon(str(icon_path)))
     # Update 12 task 5 item 2: the bundled Vietnamese-capable font joins
     # the interface's fallback chain (Vietnamese letters can never turn
     # into boxes — same code the README screenshots use).
@@ -241,6 +247,8 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
         app.processEvents()
         for state in ("idle", "video", "running", "finished", "error"):
             apply_state(window, state)
+            window.page_layout.activate()
+            window.page.adjustSize()
             app.processEvents()
             if state in ("running", "finished", "error"):
                 window.scroll.verticalScrollBar().setValue(window.scroll.verticalScrollBar().maximum())

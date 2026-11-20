@@ -301,6 +301,180 @@ def _split_long_sentence(
     return out
 
 
+def _slice_text_by_word_groups(
+    text: str, groups: list[list[dict]], *, spaceless: bool
+) -> list[str]:
+    """Slice ``text`` into one substring per word group, preserving punctuation."""
+    joiner = "" if spaceless else " "
+    fallback = [
+        joiner.join((w.get("w") or "").strip() for w in g).strip()
+        for g in groups
+    ]
+    raw = (text or "").strip()
+    if not raw or len(groups) <= 1:
+        return [raw] if raw else fallback
+
+    if spaceless:
+        targets = [
+            len(lang_mod.non_punct_chars("".join((w.get("w") or "") for w in g)))
+            for g in groups
+        ]
+        total_need = sum(targets)
+        if total_need == 0 or total_need != len(lang_mod.non_punct_chars(raw)):
+            return fallback
+        parts: list[str] = []
+        pos = 0
+        for g_idx, need in enumerate(targets):
+            if g_idx == len(targets) - 1:
+                parts.append(raw[pos:].strip())
+                break
+            start_pos = pos
+            seen = 0
+            while pos < len(raw) and seen < need:
+                if lang_mod.non_punct_chars(raw[pos]):
+                    seen += 1
+                pos += 1
+            # Attach trailing punctuation belonging to this clause.
+            while pos < len(raw) and not lang_mod.non_punct_chars(raw[pos]):
+                pos += 1
+            parts.append(raw[start_pos:pos].strip())
+        if all(parts):
+            return parts
+        return fallback
+
+    # Space-delimited languages: match by word token counts.
+    token_matches = list(_WORD_RE.finditer(raw))
+    counts = [
+        sum(len(_WORD_RE.findall(w.get("w") or "")) for w in g)
+        for g in groups
+    ]
+    if sum(counts) != len(token_matches) or any(c <= 0 for c in counts):
+        return fallback
+    parts = []
+    tok_idx = 0
+    char_pos = 0
+    for g_idx, cnt in enumerate(counts):
+        if g_idx == len(counts) - 1:
+            parts.append(raw[char_pos:].strip())
+            break
+        end_tok = token_matches[tok_idx + cnt - 1]
+        cut = end_tok.end()
+        while cut < len(raw) and not raw[cut].isspace():
+            cut += 1
+        parts.append(raw[char_pos:cut].strip())
+        char_pos = cut
+        tok_idx += cnt
+    return parts if all(parts) else fallback
+
+
+def repair_word_timings(
+    segments: list[dict[str, Any]],
+    words: list[dict] | None,
+    *,
+    orphan_gap_s: float = 1.2,
+    split_gap_s: float = 1.5,
+    lang: str = "en",
+) -> tuple[list[dict[str, Any]], list[dict], bool]:
+    """Repair Whisper word-timestamp glitches that cause multi-second dub drift.
+
+    Fixes two common faster-whisper artifacts:
+      1. Leading orphan word: the first 1-2 short tokens of a new utterance get
+         pinned to the end of the previous utterance before a long silence
+         (e.g. a 6-19 s gap), shifting the entire dubbed sentence early. Those
+         leading tokens are snapped right before the main utterance body.
+      2. Internal long pauses: two utterances separated by >= ``split_gap_s``
+         of silence inside a single segment are split into separate segments
+         at the pause boundary so each utterance starts when the speaker talks.
+    """
+    if not segments or not words:
+        return [dict(s) for s in segments], list(words or []), False
+
+    spaceless = lang_mod.is_spaceless(lang)
+    repaired_words = [dict(w) for w in words]
+    out: list[dict[str, Any]] = []
+    changed = False
+    prev_end = 0.0
+
+    for seg in segments:
+        s_copy = dict(seg)
+        sw = _segment_words(s_copy, repaired_words)
+        if len(sw) < 2:
+            out.append(s_copy)
+            prev_end = max(prev_end, float(s_copy["end"]))
+            continue
+
+        # 1. Leading orphan word snap (1-2 very short tokens before a long gap).
+        max_head_idx = 1 if (spaceless and len(sw) >= 4) else 0
+        for k in range(max_head_idx, -1, -1):
+            if len(sw) - (k + 1) < 2:
+                continue
+            gap = float(sw[k + 1]["start"]) - float(sw[k]["end"])
+            if gap < orphan_gap_s:
+                continue
+            head_txt = "".join((w.get("w") or "").strip() for w in sw[: k + 1])
+            short_enough = (len(head_txt) <= 3) if spaceless else (k == 0)
+            if not short_enough:
+                continue
+            anchor = float(sw[k + 1]["start"])
+            cursor = anchor
+            for idx in range(k, -1, -1):
+                orig_dur = max(0.08, min(0.30, float(sw[idx]["end"]) - float(sw[idx]["start"])))
+                new_end = cursor
+                new_start = max(prev_end, new_end - orig_dur)
+                sw[idx]["start"] = round(new_start, 3)
+                sw[idx]["end"] = round(new_end, 3)
+                cursor = new_start
+            s_copy["start"] = float(sw[0]["start"])
+            changed = True
+            log.info(
+                "timing: snapped leading orphan token %r forward by %.2fs to %.2fs",
+                head_txt, gap, s_copy["start"],
+            )
+            break
+
+        # 2. Split on remaining internal pauses >= split_gap_s.
+        groups: list[list[dict]] = []
+        cur: list[dict] = [sw[0]]
+        for w in sw[1:]:
+            if float(w["start"]) - float(cur[-1]["end"]) >= split_gap_s:
+                groups.append(cur)
+                cur = [w]
+            else:
+                cur.append(w)
+        if cur:
+            groups.append(cur)
+
+        if len(groups) > 1:
+            texts = _slice_text_by_word_groups(
+                str(s_copy.get("text") or ""), groups, spaceless=spaceless
+            )
+            for grp, txt in zip(groups, texts):
+                if not txt:
+                    continue
+                piece = dict(s_copy)
+                piece["start"] = float(grp[0]["start"])
+                piece["end"] = float(grp[-1]["end"])
+                piece["text"] = txt
+                out.append(piece)
+                prev_end = max(prev_end, piece["end"])
+            changed = True
+        else:
+            w_start = float(sw[0]["start"])
+            w_end = float(sw[-1]["end"])
+            if w_start - float(s_copy["start"]) >= 1.0:
+                s_copy["start"] = w_start
+                changed = True
+            if float(s_copy["end"]) - w_end >= 1.0:
+                s_copy["end"] = w_end
+                changed = True
+            out.append(s_copy)
+            prev_end = max(prev_end, float(s_copy["end"]))
+
+    for i, seg in enumerate(out):
+        seg["id"] = i
+    return out, repaired_words, changed
+
+
 def resegment_by_sentences(
     segments: list[dict[str, Any]], words: list[dict],
     max_s: float = MAX_SEGMENT_S, min_s: float = MIN_SEGMENT_S,
@@ -362,7 +536,7 @@ def resegment_by_sentences(
             text = joiner.join((w.get("w") or "").strip() for w in piece).strip()
             start = float(piece[0]["start"])
             end = float(piece[-1]["end"])
-            if new and end - start < min_s:
+            if new and end - start < min_s and (start - float(new[-1]["end"])) <= 0.5:
                 new[-1]["text"] = (new[-1]["text"] + joiner + text).strip()
                 new[-1]["end"] = end
             else:

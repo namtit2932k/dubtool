@@ -571,12 +571,28 @@ def _prepare_sentences(job, config, transcript, pid, api_keys, cancel):
     from dubtool.punctuate import (
         needs_punctuation,
         read_words,
+        repair_word_timings,
         resegment_by_sentences,
         restore_punctuation,
+        write_words,
     )
 
     src_code = _resolved_source_lang_code(job, config)
     changed = False
+    words = read_words(job)
+    if words:
+        repaired_tr, repaired_w, did_repair = repair_word_timings(
+            transcript, words, lang=src_code
+        )
+        if did_repair:
+            transcript = repaired_tr
+            words = repaired_w
+            write_words(job, words)
+            changed = True
+            log.info(
+                "s3: repaired Whisper timing glitches -> %d segments",
+                len(transcript),
+            )
     punct = getattr(config, "punctuate", {}) or {}
     enabled = str(punct.get("enabled", "auto")).lower()
     if enabled != "off" and (
@@ -599,9 +615,8 @@ def _prepare_sentences(job, config, transcript, pid, api_keys, cancel):
             "s3: punctuation restore: %d window(s) accepted, %d rejected",
             accepted, rejected,
         )
-        changed = accepted > 0
+        changed = changed or (accepted > 0)
     if bool(getattr(config, "asr", {}).get("sentence_resegment", True)):
-        words = read_words(job)
         if words:
             reseg = resegment_by_sentences(transcript, words, lang=src_code)
             if reseg is not None:

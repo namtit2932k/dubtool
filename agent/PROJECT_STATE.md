@@ -9,7 +9,15 @@
 
 - **Repository:** `namtit2932k/dubtool` (public), workspace `d:\Projects\Vibe\Project_K`, build root `D:\Projects\Vibe\Project_K_build`.
 - **Phiên bản đã phát hành gần nhất:** **`v1.0.17`** (commit `6bc8192adc00321c6cc6d9d720b5b7ec7c0f381f`, 2026-11-20) — Official, đã verify đầy đủ qua `scripts/release.py 17` (`DOD_REPORT.md` 9/9 PASS, `RELEASE_EVIDENCE.txt` PASS, `verify_release.py --audit` PASS, `DubTool-1.0.17-win64.zip` 220,758,408 B, SHA-256 `ed404ad5074685f4b163d0ced7b5a437a6dd9a12bfcb6ea06d50fba408d32d93`).
-- **Nhánh hiện tại (`main`):** Đã hoàn tất Update 17 (`v1.0.17`) và thêm 4 hotfix từ chạy thực tế: (1) nút Hủy dừng ngay khi S3 gặp 503 liên tục + short-circuit `punctuate` + UI `"Đang hủy…"`, (2) không còn mất/cắt UI bên phải khi thu nhỏ cửa sổ (`_make_shrinkable_combo`, ẩn action buttons mặc định, `minimumSize` động, kiểm tra `scroll-content-overflow-x` trong `layout_check`), (3) chỉnh `fallback_model` không còn làm đổi mô hình chính ở S3 hay reset `model_combo`, (4) sửa lỗi S4 `'NoneType' object has no attribute 'write'` trong `.exe` windowed (`_ensure_stdio` + `_hf_cache_context`) và fail-fast khi lỗi khởi tạo engine TTS (`TTSEngineInitError`). Đã pass **590/590 tests**, `--layout-check` 0 violations, `--gui-smoke` 10/10, đang rebuild `DubTool.exe` cục bộ cho người dùng kiểm thử.
+- **Nhánh hiện tại (`main`):** Đã hoàn tất Update 17 (`v1.0.17`) và chuỗi cải tiến/hotfix sau chạy thực tế:
+  1. Nút Hủy dừng ngay khi S3 gặp 503 liên tục + short-circuit `punctuate` + UI `"Đang hủy…"`.
+  2. Fix mất/cắt UI bên phải khi thu nhỏ cửa sổ (`_make_shrinkable_combo`, `minimumSize` động, kiểm tra `scroll-content-overflow-x`).
+  3. Tách riêng `fallback_model` khỏi mô hình chính ở S3 (`fast_model_id` ưu tiên `config.llm_model`) và giữ nguyên lựa chọn `model_combo` sau khi đóng Cài đặt.
+  4. Fix S4 `'NoneType' object has no attribute 'write'` trên `.exe` windowed (`_ensure_stdio` + `_hf_cache_context`) + fail-fast `TTSEngineInitError`.
+  5. Fix lệch mốc thời gian giọng lồng tiếng (`repair_word_timings` chữa chữ mồ côi đầu đoạn & tách khoảng lặng nội bộ `>= 1.5s`, guard `max_gap_s=0.5` cho `merge_short`, `vad_parameters={"min_silence_duration_ms": 500}`).
+  6. Fix header `Chi tiết tiến trình` không còn giữ dòng cũ từ S5 khi sang S7/hoàn tất (`Hoàn tất`).
+  7. Nâng cấp `README.md` + `docs/README.vi.md` theo phong cách hiện đại với logo trắng không viền (`docs/images/logo.png`), đổi icon `.exe` và icon cửa sổ (`packaging/icon.ico`).
+  8. Dọn gọn thư mục gốc (`REPORT_UPDATE_*.md` → `docs/reports/`, xóa rác untracked) và giảm tổng dung lượng `Project_K` + `Project_K_build` hơn **5.5 GB**.
 
 ---
 

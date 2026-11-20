@@ -199,3 +199,112 @@ def test_s4_fails_fast_on_engine_init_error(monkeypatch, tmp_path):
     # Must fail fast on segment 0 after a single init attempt (not 10 * 3 = 30!).
     assert init_attempts == 1
     assert exc_info.value.ids == [0]
+
+
+def test_repair_word_timings_snaps_leading_orphan_and_splits_internal_pause():
+    """Whisper's leading orphan word before a long silence must snap forward
+    to the utterance body, and internal silences >= 1.5 s must split into
+    separate segments while preserving punctuation."""
+    from dubtool.punctuate import repair_word_timings
+
+    segments = [
+        {"id": 0, "start": 14.02, "end": 18.60, "text": "竟然是个年人精，薇薇，"},
+        {"id": 1, "start": 67.80, "end": 75.45, "text": "下辈子记得长点记性。"},
+        {"id": 2, "start": 727.27, "end": 750.06, "text": "令王府副将秋山拜见王妃。"},
+    ]
+    words = [
+        # seg 0: 2.04 s internal pause between 精 (15.86) and 薇 (17.90)
+        {"w": "竟", "start": 14.02, "end": 14.66},
+        {"w": "然", "start": 14.66, "end": 14.92},
+        {"w": "是", "start": 14.92, "end": 15.14},
+        {"w": "个", "start": 15.14, "end": 15.24},
+        {"w": "年", "start": 15.24, "end": 15.42},
+        {"w": "人", "start": 15.42, "end": 15.66},
+        {"w": "精", "start": 15.66, "end": 15.86},
+        {"w": "薇", "start": 17.90, "end": 18.34},
+        {"w": "薇", "start": 18.34, "end": 18.60},
+        # seg 1: leading orphan 下 at 67.80, body starts at 74.03 (5.67 s gap)
+        {"w": "下", "start": 67.80, "end": 68.36},
+        {"w": "辈", "start": 74.03, "end": 74.21},
+        {"w": "子", "start": 74.21, "end": 74.37},
+        {"w": "记", "start": 74.37, "end": 74.53},
+        {"w": "得", "start": 74.53, "end": 74.61},
+        {"w": "长", "start": 74.61, "end": 74.81},
+        {"w": "点", "start": 74.81, "end": 74.95},
+        {"w": "记", "start": 74.95, "end": 75.17},
+        {"w": "性", "start": 75.17, "end": 75.45},
+        # seg 2: leading orphan 令 at 727.27, body starts at 746.80 (18.9 s gap)
+        {"w": "令", "start": 727.27, "end": 727.89},
+        {"w": "王", "start": 746.80, "end": 747.00},
+        {"w": "府", "start": 747.00, "end": 747.20},
+        {"w": "副", "start": 747.20, "end": 747.40},
+        {"w": "将", "start": 747.40, "end": 747.58},
+        {"w": "秋", "start": 747.58, "end": 747.76},
+        {"w": "山", "start": 747.76, "end": 748.04},
+        {"w": "拜", "start": 748.04, "end": 748.56},
+        {"w": "见", "start": 748.56, "end": 748.80},
+        {"w": "王", "start": 748.80, "end": 748.98},
+        {"w": "妃", "start": 748.98, "end": 750.06},
+    ]
+
+    repaired, _rw, changed = repair_word_timings(segments, words, lang="zh")
+    assert changed is True
+    # seg 0 split into two segments at the 2.04 s pause
+    assert len(repaired) == 4
+    assert repaired[0]["text"] == "竟然是个年人精，"
+    assert repaired[0]["start"] == pytest.approx(14.02, abs=0.05)
+    assert repaired[0]["end"] == pytest.approx(15.86, abs=0.05)
+    assert repaired[1]["text"] == "薇薇，"
+    assert repaired[1]["start"] == pytest.approx(17.90, abs=0.05)
+    # seg 1 orphan snapped from 67.80 -> ~73.73
+    assert repaired[2]["start"] >= 73.5
+    assert repaired[2]["end"] == pytest.approx(75.45, abs=0.05)
+    # seg 2 orphan snapped from 727.27 -> ~746.50
+    assert repaired[3]["start"] >= 746.0
+    assert repaired[3]["end"] == pytest.approx(750.06, abs=0.05)
+
+
+def test_merge_short_never_merges_across_long_silence_gap():
+    """A short segment (< 0.8 s) after a silence gap > 0.5 s must stay separate."""
+    from dubtool.stages.s2_transcribe import merge_short
+
+    segs = [
+        {"start": 77.37, "end": 81.06, "text": "是一定不会冲动，"},
+        {"start": 87.50, "end": 88.14, "text": "薇薇，"},
+    ]
+    out = merge_short(segs)
+    assert len(out) == 2
+    assert out[0]["end"] == pytest.approx(81.06)
+    assert out[1]["start"] == pytest.approx(87.50)
+
+
+def test_progress_details_header_clears_stale_desc_on_stage_change_and_finish(qtbot, monkeypatch, tmp_path):
+    """ProgressWidget must clear the previous stage's heartbeat text when a new
+    stage starts and show 'Hoàn tất' (not 'Đang làm: ...') after completion."""
+    from dubtool.api import DubResult
+    from dubtool.app import i18n, paths, secrets, settings
+    from dubtool.app.ui.main_window import MainWindow
+
+    monkeypatch.setattr(settings, "path", lambda: tmp_path / "settings.json")
+    monkeypatch.setattr(paths, "jobs_dir", lambda: tmp_path / "jobs")
+    monkeypatch.setattr(secrets, "has_key", lambda *a, **k: True)
+    i18n.set_language("vi")
+
+    w = MainWindow()
+    qtbot.addWidget(w)
+    pg = w.progress_group
+    pg.show_running()
+    pg.log.set_open(True)
+
+    pg.on_progress("s5", "progress", -1, -1, "Đang nạp mô hình giọng đọc cục bộ…", 0.0)
+    assert "Đang nạp mô hình giọng đọc cục bộ" in pg.details_header.text()
+
+    pg.on_progress("s7", "start", -1, -1, "", 0.0)
+    assert "Đang nạp mô hình" not in pg.details_header.text()
+    assert "Phụ đề & xuất" in pg.details_header.text()
+
+    pg.on_finished(DubResult(ok=True, code="ok", out_video=tmp_path / "out.mp4"))
+    assert pg.details_header.text() == i18n.tr("details.done")
+    assert "Đang làm" not in pg.details_header.text()
+    assert pg.details_liveness.text() == ""
+

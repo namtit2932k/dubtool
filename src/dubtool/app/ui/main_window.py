@@ -400,12 +400,16 @@ class ProgressWidget(QGroupBox):
     def _header_text(self) -> str:
         stage = self._last_stage
         if not stage:
+            if self._last_result is not None and self._last_result.ok:
+                return i18n.tr("details.done")
             return ""
         label = i18n.tr(stage) if stage in STAGES else stage
         desc = self._last_desc
         if desc and self._deadline_note:
             desc = desc.rstrip(".")
-        return i18n.tr("details.doing", stage=label, what=desc or "")
+        if not desc:
+            return i18n.tr("details.doing_stage", stage=label)
+        return i18n.tr("details.doing", stage=label, what=desc)
 
     def reset_for_check(self):
         """Pristine state between layout-check/screenshot states (AGENT_UPDATE_5.md task 4)."""
@@ -442,6 +446,9 @@ class ProgressWidget(QGroupBox):
 
     def show_running(self) -> None:
         self.show()
+        self._last_result = None
+        self._last_stage = None
+        self._last_desc = ""
         self.lang_status_lbl.setText("")
         self.lang_status_lbl.setVisible(False)
         self.cancel_btn.setText(i18n.tr("progress.cancel"))
@@ -465,12 +472,20 @@ class ProgressWidget(QGroupBox):
             self.bar.setRange(0, 0)
         # Update 9 task 3.2 header content: the stage being worked on and
         # exactly what it is doing (item count or the event message).
-        if state in ("start", "progress"):
+        if state == "start":
             self._last_stage = stage
-            if state == "progress" and total > 0 and 0 <= done:
+            self._last_desc = message.splitlines()[0][:120] if message else ""
+        elif state == "progress":
+            self._last_stage = stage
+            if total > 0 and 0 <= done:
                 self._last_desc = f"{done}/{total}"
             elif message:
                 self._last_desc = message.splitlines()[0][:120]
+        elif state in ("done", "skipped"):
+            if self._last_stage == stage:
+                self._last_desc = ""
+        if self.log.is_open():
+            self.details_header.setText(self._header_text())
         # Timestamped activity log lines (HH:MM:SS), coalescing handled by
         # the ProgressGate upstream as before.
         stamp = _time.strftime("%H:%M:%S")
@@ -487,9 +502,15 @@ class ProgressWidget(QGroupBox):
         import time as _time
 
         self._last_event_mono = _time.monotonic()
+        self._last_stage = None
+        self._last_desc = ""
+        self._deadline_note = False
         self.cancel_btn.setText(i18n.tr("progress.cancel"))
         self.cancel_btn.setEnabled(True)
         self.cancel_btn.hide()
+        if self.log.is_open():
+            self.details_header.setText(self._header_text())
+            self.details_liveness.setText("")
         if result.ok:
             self.bar.setRange(0, 1)
             self.bar.setValue(1)

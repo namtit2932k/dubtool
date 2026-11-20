@@ -340,10 +340,20 @@ def check_rule_4_tests(repo: Path, build_root: Path, update_n: int) -> tuple[boo
     return True, cmd, f"pytest ({summary}); all {len(skip_lines)} skip(s) documented in tests/SKIPS.md"
 
 
+def _find_report_path(repo: Path, update_n: int) -> Path | None:
+    for cand in (
+        repo / "docs" / "reports" / f"REPORT_UPDATE_{update_n}.md",
+        repo / f"REPORT_UPDATE_{update_n}.md",
+    ):
+        if cand.is_file():
+            return cand
+    return None
+
+
 def check_rule_5_report(repo: Path, build_root: Path, update_n: int) -> tuple[bool, str, str]:
     cmd = f"Check REPORT_UPDATE_{update_n}.md required sections, GitHub evidence block, and tag list"
-    report_path = repo / f"REPORT_UPDATE_{update_n}.md"
-    if not report_path.is_file():
+    report_path = _find_report_path(repo, update_n)
+    if report_path is None:
         return False, cmd, f"REPORT_UPDATE_{update_n}.md missing"
     text = report_path.read_text(encoding="utf-8", errors="replace")
 
@@ -378,17 +388,22 @@ def check_rule_6_review_zip(repo: Path, build_root: Path, update_n: int) -> tupl
     rzip = zips[0]
 
     required_entries = {
-        f"REPORT_UPDATE_{update_n}.md",
         "REVIEW_NOTES.md",
         "DOD_REPORT.md",
         "RELEASE_EVIDENCE.txt",
         "tests/SKIPS.md",
+    }
+    report_variants = {
+        f"REPORT_UPDATE_{update_n}.md",
+        f"docs/reports/REPORT_UPDATE_{update_n}.md",
     }
     with zipfile.ZipFile(rzip, "r") as zf:
         names = {n.replace("\\", "/") for n in zf.namelist()}
         if not any(n.startswith("docs/") for n in names):
             return False, cmd, f"{rzip.name} missing docs/ folder"
         missing = sorted(required_entries - names)
+        if not (report_variants & names):
+            missing.append(f"REPORT_UPDATE_{update_n}.md")
         if missing:
             return False, cmd, f"{rzip.name} missing required entries: {', '.join(missing)}"
         for info in zf.infolist():
@@ -445,8 +460,8 @@ def check_rule_7_messages(repo: Path) -> tuple[bool, str, str]:
 
 def check_rule_8_report_paths(repo: Path, build_root: Path, update_n: int) -> tuple[bool, str, str]:
     cmd = f"Verify every repo/zip file path named in REPORT_UPDATE_{update_n}.md exists"
-    report_path = repo / f"REPORT_UPDATE_{update_n}.md"
-    if not report_path.is_file():
+    report_path = _find_report_path(repo, update_n)
+    if report_path is None:
         return False, cmd, f"REPORT_UPDATE_{update_n}.md missing"
     text = report_path.read_text(encoding="utf-8", errors="replace")
 

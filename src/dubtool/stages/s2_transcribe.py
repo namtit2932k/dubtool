@@ -159,17 +159,31 @@ def dedupe_repeats(
     return segs, removals
 
 
-def merge_short(segments: list[dict[str, Any]], min_s: float = MIN_SEGMENT_S) -> list[dict[str, Any]]:
-    """Merge segments shorter than min_s into neighbors."""
+def merge_short(
+    segments: list[dict[str, Any]],
+    min_s: float = MIN_SEGMENT_S,
+    max_gap_s: float = 0.5,
+) -> list[dict[str, Any]]:
+    """Merge segments shorter than min_s into adjacent neighbors (only when
+    they are not separated by a silence gap larger than ``max_gap_s``)."""
     out: list[dict[str, Any]] = []
     for seg in segments:
-        if out and (seg["end"] - seg["start"]) < min_s:
+        if (
+            out
+            and (seg["end"] - seg["start"]) < min_s
+            and (float(seg["start"]) - float(out[-1]["end"])) <= max_gap_s
+        ):
             out[-1]["text"] = (out[-1]["text"] + " " + seg["text"]).strip()
             out[-1]["end"] = seg["end"]
         else:
             out.append(dict(seg))
-    # A short first segment with no previous neighbor merges into the next.
-    if len(out) >= 2 and (out[0]["end"] - out[0]["start"]) < min_s:
+    # A short first segment with no previous neighbor merges into the next
+    # only if directly adjacent.
+    if (
+        len(out) >= 2
+        and (out[0]["end"] - out[0]["start"]) < min_s
+        and (float(out[1]["start"]) - float(out[0]["end"])) <= max_gap_s
+    ):
         out[1]["text"] = (out[0]["text"] + " " + out[1]["text"]).strip()
         out[1]["start"] = out[0]["start"]
         out.pop(0)
@@ -606,6 +620,7 @@ def _transcribe(model, job, config, *, multilingual: bool = False) -> None:
     kwargs: dict[str, Any] = {
         "language": None if multilingual else effective_lang,
         "vad_filter": True,
+        "vad_parameters": {"min_silence_duration_ms": 500},
         "condition_on_previous_text": bool(
             config.asr.get("condition_on_previous_text", False)
         ),
@@ -624,6 +639,9 @@ def _transcribe(model, job, config, *, multilingual: bool = False) -> None:
         segments, words = _collect(raw_segments, _asr_progress_cb(info.duration))
     except TypeError as exc:
         retried = False
+        if "vad_parameters" in kwargs and "vad_parameters" in str(exc):
+            kwargs.pop("vad_parameters", None)
+            retried = True
         if "multilingual" in kwargs and "multilingual" in str(exc):
             log.warning("s2: faster-whisper does not accept multilingual (%s) — continuing single-language", exc)
             kwargs.pop("multilingual", None)
@@ -644,6 +662,12 @@ def _transcribe(model, job, config, *, multilingual: bool = False) -> None:
         raise RuntimeError("transcription produced no segments — is the audio silent?")
 
     resolved_code = (effective_lang or getattr(info, "language", None) or "en").lower()
+    if words:
+        from dubtool.punctuate import repair_word_timings
+
+        segments, words, _repaired = repair_word_timings(
+            segments, words, lang=resolved_code
+        )
     if resolved_code in _SPACELESS_LANGS:
         cleaned = merge_short(split_long(segments))
         removals: list[tuple[int, str]] = []

@@ -62,6 +62,7 @@ _txt_version.write_text(str(_vinfo), encoding="utf-8")
 datas = [
     (str(ROOT / "config.yaml"), "."),
     (str(ROOT / "LICENSE"), "."),
+    (str(ROOT / "packaging" / "icon.ico"), "packaging"),
     (str(ROOT / "packaging" / "models.yaml"), "packaging"),
     (str(ROOT / "packaging" / "fillers.yaml"), "packaging"),
     (str(ROOT / "packaging" / "licenses"), "licenses"),
