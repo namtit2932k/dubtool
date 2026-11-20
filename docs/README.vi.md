@@ -10,8 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/namtit2932k/dubtool/releases/latest"><img src="https://img.shields.io/github/v/release/namtit2932k/dubtool?label=Release&color=e05d44" alt="Phiên bản mới nhất" /></a>
-  <a href="https://github.com/namtit2932k/dubtool/releases"><img src="https://img.shields.io/github/downloads/namtit2932k/dubtool/total?label=Downloads&color=2ea043" alt="Lượt tải" /></a>
-  <a href="../LICENSE"><img src="https://img.shields.io/badge/License-MIT-0969da" alt="Giấy phép MIT" /></a>
+  <a href="../LICENSE"><img src="https://img.shields.io/badge/License-MIT-2ea043" alt="Giấy phép MIT" /></a>
   <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64-0969da" alt="Windows 10/11 x64" />
 </p>
 
