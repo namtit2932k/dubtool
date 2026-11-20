@@ -184,6 +184,9 @@ def run_audit(
     ev_map = _parse_release_evidence(repo / "RELEASE_EVIDENCE.txt")
     doc_map = _parse_releases_md(repo / "docs" / "RELEASES.md")
 
+    ev_upd_nums = [n for t in ev_map if (n := _update_num_of_tag(t)) is not None]
+    latest_ev_upd = max(ev_upd_nums) if ev_upd_nums else 15
+
     all_tags = sorted(set(local_tags) | set(rel_by_tag.keys()), key=_tag_sort_key, reverse=True)
     lines = [
         "| Tag | Tag Commit | GitHub Release | Evidence / BUILD_INFO | Status |",
@@ -233,7 +236,7 @@ def run_audit(
                         violations.append(f"{tag}: RELEASE_EVIDENCE mismatch ({ev_col})")
             elif (
                 upd_n is not None
-                and upd_n <= 15
+                and upd_n < max(latest_ev_upd, 16)
                 and doc is not None
                 and doc.get("status", "").lower() == "official"
                 and commit

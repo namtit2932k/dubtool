@@ -8,8 +8,8 @@
 ## 1. Trạng thái Git & Phiên bản hiện tại
 
 - **Repository:** `namtit2932k/dubtool` (public), workspace `d:\Projects\Vibe\Project_K`, build root `D:\Projects\Vibe\Project_K_build`.
-- **Phiên bản đã phát hành gần nhất:** **`v1.0.16`** (commit `76ba8313bd299f101adb6066ef79d6f2f3d002e0`, 2026-11-20) — Official, đã verify đầy đủ qua `scripts/release.py 16` (`DOD_REPORT.md` 9/9 PASS, `RELEASE_EVIDENCE.txt` PASS, `verify_release.py --audit` PASS).
-- **Nhánh hiện tại (`main`):** Đang triển khai **Update 17 (`1.0.17`)** — thay thế hoàn toàn `edge-tts` bằng **VieNeu-TTS v3 ONNX offline** (CPU) theo `docs/PROPOSAL_VIENEU_TTS.md`.
+- **Phiên bản đã phát hành gần nhất:** **`v1.0.17`** (commit `6bc8192adc00321c6cc6d9d720b5b7ec7c0f381f`, 2026-11-20) — Official, đã verify đầy đủ qua `scripts/release.py 17` (`DOD_REPORT.md` 9/9 PASS, `RELEASE_EVIDENCE.txt` PASS, `verify_release.py --audit` PASS, `DubTool-1.0.17-win64.zip` 220,758,408 B, SHA-256 `ed404ad5074685f4b163d0ced7b5a437a6dd9a12bfcb6ea06d50fba408d32d93`).
+- **Nhánh hiện tại (`main`):** Sạch, đồng bộ với `origin/main`. **Update 17 (`1.0.17`) đã hoàn tất 100% và phát hành chính thức.**
 
 ---
 
@@ -48,4 +48,13 @@
     - `test9.mp4` (`v3turbo_int8`, `Trúc Ly`): 200.9s, s4=81.2s (0/62 lỗi), fit `59 ok / 1 shortened / 2 stretched / 0 overflow`, peak RAM 1,903 MB.
     - `clip_zh.mp4` (`v3nano`, `Mai Anh`): 32.8s, s4=8.8s (0/8 lỗi), fit `2 ok / 2 shortened / 4 stretched / 0 overflow`, peak RAM 635 MB.
   - [x] Đã sửa thêm 4 lỗi nhỏ bắt được khi verify (`update_readme_images.py` copy threshold, `dubtool.spec` `copy_metadata("vieneu")`, `settings_dialog.py` `_valid_id`, `s4_tts.py` sync `job.state`).
-  - [ ] Viết xong `REPORT_UPDATE_17.md` — chuẩn bị commit sạch và chạy `scripts/release.py 17` phát hành chính thức `v1.0.17`.
+  - [x] Viết xong `REPORT_UPDATE_17.md`, phát hành chính thức `v1.0.17` (`https://github.com/namtit2932k/dubtool/releases/tag/v1.0.17`) qua `scripts/release.py 17` (`RELEASE_EVIDENCE.txt` PASS, `DOD_REPORT.md` 9/9 PASS).
+  - [x] Hậu-phát hành: sửa `scripts/verify_release.py` để `--audit` nhận diện mọi bản `Official` cũ hơn bản mới nhất trong `docs/RELEASES.md` (tránh báo thiếu `RELEASE_EVIDENCE` khi phát hành bản mới ghi đè `RELEASE_EVIDENCE.txt`), cập nhật `docs/RELEASES.md` cho `v1.0.17`.
+
+---
+
+## 4. Lộ trình kế tiếp (Tùy chọn cho Update 18+)
+
+- **Voice Cloning (VieNeu-TTS v3):** Cho phép người dùng nạp clip giọng mẫu 3–10 giây (cần đóng gói thêm `soxr`, `kaldi-native-fbank` và tải encoder/denoiser ONNX theo yêu cầu).
+- **Tăng tốc GPU (CUDA) cho Whisper & VieNeu-TTS v3:** Tuỳ chọn cho máy có GPU NVIDIA.
+- **Mở rộng UX/chất lượng theo phản hồi thực tế sau khi dùng bản `v1.0.17`.**

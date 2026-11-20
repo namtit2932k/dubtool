@@ -13,7 +13,7 @@
 | `v1.0.14` | `045660d0` | Pre-release, superseded | Published from mismatched working tree (`BUILD_INFO` commit `63c85a18` != tag `045660d0`); history preserved, superseded by `v1.0.15` | 2026-11-12 |
 | `v1.0.15` | `102528cd` | Official | Mechanical release via `scripts/release.py 15`; `BUILD_INFO`, tag, `origin/main`, and asset SHA-256 verified | 2026-11-14 |
 | `v1.0.16` | `76ba8313` | Official | Automatic source-language detection → Vietnamese, MIT license, screenshot/audit fixes; mechanical release via `scripts/release.py 16` | 2026-11-20 |
-| `v1.0.17` | *(pending release)* | In progress | Replace `edge-tts` with offline CPU ONNX VieNeu-TTS v3 (`v3turbo_int8` default + `v3nano` low-RAM) | 2026-11-20 |
+| `v1.0.17` | `6bc8192a` | Official | Replace `edge-tts` with offline CPU ONNX VieNeu-TTS v3 (`v3turbo_int8` default + `v3nano` low-RAM); mechanical release via `scripts/release.py 17` | 2026-11-20 |
 
 ## Release Audit & Hook Limits
 
