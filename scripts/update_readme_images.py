@@ -34,6 +34,7 @@ CHOSEN = {
 }
 
 MAX_BYTES = 300 * 1024
+STATIC_ASSETS = {"logo.png"}
 
 
 def newest_folder() -> Path:
@@ -125,8 +126,9 @@ def main() -> int:
         print(f"  INDEX.txt -> docs/images/INDEX.txt ({index_src.stat().st_size} bytes)")
 
     # Delete any stale file in docs/images/ not part of the current set
+    keep = current_set | STATIC_ASSETS
     for existing in sorted(IMAGES.iterdir()):
-        if existing.is_file() and existing.name not in current_set:
+        if existing.is_file() and existing.name not in keep:
             existing.unlink()
             print(f"  removed stale docs/images/{existing.name}")
 
