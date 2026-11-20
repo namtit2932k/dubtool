@@ -17,8 +17,9 @@ log = logging.getLogger("dubtool")
 
 MIN_SEGMENT_S = 0.8
 MAX_SEGMENT_S = 12.0
-# Updated for multi-language support (AGU16 3.3)
-_SENTENCE_ENDS = ".!?…¿¡。！？؟۔।"
+# Sentence-ending punctuation across Latin, CJK, Arabic, and Devanagari scripts
+# (Spanish opening marks ¿ ¡ do not end sentences).
+_SENTENCE_ENDS = ".!?…。！？؟۔।"
 
 # Common abbreviations: a sentence-final "period" after these does not close
 # a sentence (used both by the splitter and dedupe-boundary checks).
@@ -44,35 +45,58 @@ def _ends_sentence(text: str) -> bool:
 
 def _split_text_at_punctuation(text: str) -> tuple[str, str] | None:
     """Split text at the sentence-boundary character closest to the middle."""
-    candidates = [i + 1 for i, ch in enumerate(text[:-1]) if ch in _SENTENCE_ENDS]
+    stripped = (text or "").strip()
+    if len(stripped) < 2:
+        return None
+    candidates: list[int] = []
+    for i, ch in enumerate(stripped[:-1]):
+        if ch in _SENTENCE_ENDS:
+            if stripped[i + 1] in _SENTENCE_ENDS:
+                continue
+            pos = i + 1
+            if stripped[:pos].strip() and stripped[pos:].strip():
+                candidates.append(pos)
     if not candidates:
         return None
-    mid = len(text) / 2
+    mid = len(stripped) / 2
     pos = min(candidates, key=lambda p: abs(p - mid))
-    return text[:pos].strip(), text[pos:].strip()
+    return stripped[:pos].strip(), stripped[pos:].strip()
 
 
 def split_long(segments: list[dict[str, Any]], max_s: float = MAX_SEGMENT_S) -> list[dict[str, Any]]:
+    """Iteratively split segments longer than max_s without unbounded recursion."""
     out: list[dict[str, Any]] = []
-    for seg in segments:
-        duration = seg["end"] - seg["start"]
-        if duration <= max_s:
+    queue = [dict(s) for s in segments]
+    idx = 0
+    while idx < len(queue):
+        seg = queue[idx]
+        idx += 1
+        duration = float(seg["end"]) - float(seg["start"])
+        text = (seg.get("text") or "").strip()
+        if duration <= max_s or len(text) < 2:
             out.append(seg)
             continue
-        parts = _split_text_at_punctuation(seg["text"])
+        parts = _split_text_at_punctuation(text)
         if parts is None:
-            # No punctuation: midpoint split as a pragmatic fallback.
-            parts = (seg["text"][: len(seg["text"]) // 2], seg["text"][len(seg["text"]) // 2 :])
+            mid = len(text) // 2
+            left = text[:mid].strip()
+            right = text[mid:].strip()
+            if not left or not right:
+                out.append(seg)
+                continue
+            parts = (left, right)
         left, right = parts
+        if not left or not right or len(left) >= len(text) or len(right) >= len(text):
+            out.append(seg)
+            continue
         ratio = len(left) / max(len(left) + len(right), 1)
-        mid_time = seg["start"] + ratio * duration
-        out.append({"start": seg["start"], "end": mid_time, "text": left})
-        out.append({"start": mid_time, "end": seg["end"], "text": right})
-        # Recurse in case one half is still too long.
-        if out[-2]["end"] - out[-2]["start"] > max_s or out[-1]["end"] - out[-1]["start"] > max_s:
-            tail = out[-2:]
-            del out[-2:]
-            out.extend(split_long(tail, max_s))
+        mid_time = float(seg["start"]) + ratio * duration
+        if mid_time <= float(seg["start"]) or mid_time >= float(seg["end"]):
+            out.append(seg)
+            continue
+        left_seg = dict(seg, start=float(seg["start"]), end=mid_time, text=left)
+        right_seg = dict(seg, start=mid_time, end=float(seg["end"]), text=right)
+        queue[idx:idx] = [left_seg, right_seg]
     return out
 
 

@@ -232,6 +232,26 @@ def test_merge_split_then_dedupe_full_cleanup():
         assert a["end"] <= b["start"]
 
 
+def test_split_long_never_recurses_infinitely_on_short_or_punct_segments():
+    edge_cases = [
+        {"start": 0.0, "end": 30.0, "text": "啊"},
+        {"start": 30.0, "end": 90.0, "text": "你好"},
+        {"start": 90.0, "end": 120.0, "text": "你好。   "},
+        {"start": 120.0, "end": 160.0, "text": "..."},
+        {"start": 160.0, "end": 200.0, "text": "你好。。。"},
+        {"start": 200.0, "end": 230.0, "text": "Wait...   "},
+        {"start": 230.0, "end": 260.0, "text": "¿Cómo estás? Muy bien."},
+        {"start": 260.0, "end": 290.0, "text": ""},
+    ]
+    out = split_long(edge_cases, max_s=12.0)
+    assert out
+    # Spanish opening mark must never be isolated into its own segment.
+    assert all(s["text"].strip() != "¿" for s in out)
+    # Chronological order preserved.
+    for a, b in zip(out, out[1:]):
+        assert a["end"] <= b["start"] + 1e-6
+
+
 def test_postprocess_only_rewrites_transcript(tmp_path, monkeypatch):
     job = Job(tmp_path / "job")
     write_json(
