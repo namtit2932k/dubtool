@@ -147,7 +147,11 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
         }
     }
     if (-not (Test-Path $venvDir)) {
-        py -m venv $venvDir
+        # Prefer Python 3.13 (64-bit) which has prebuilt wheels for onnxruntime, sea-g2p, PySide6, av.
+        $pyLauncherArgs = @("-3.13")
+        & py -3.13 -c "import sys" 2>$null
+        if ($LASTEXITCODE -ne 0) { $pyLauncherArgs = @() }
+        & py @pyLauncherArgs -m venv $venvDir
         if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
         $py = Join-Path $venvDir "Scripts\python.exe"
         & $py -m pip install --upgrade pip -q --cache-dir $pyCache
