@@ -37,6 +37,7 @@ DEFAULTS: dict = {
     "jobs_max_total_mb": 3000,   # AGU10 5.3: trim the jobs folder below this
     "translate_priority": "balanced",  # balanced | faithful | timing (AGU8 6.3)
     "asr_punctuation_prompt": False,   # AGU9 10.4: optional punctuation initial_prompt
+    "settings_schema": 2,
 }
 
 
@@ -75,6 +76,23 @@ def load(raw_path: Path | None = None) -> dict:
         legacy_keep = bool(data.get("keep_intermediate"))
         merged["keep_level"] = "light" if legacy_keep else "none"
     merged.pop("keep_intermediate", None)  # the old key is never written back
+    # One-time migration from pre-v1.0.19 settings: move legacy congested
+    # default fallback models (gemini-3.6-flash / gemini-3.8-flash) to the
+    # fast, reliable gemini-3.1-flash-lite. Explicit user picks saved under
+    # settings_schema >= 2 are preserved.
+    if data and int(data.get("settings_schema") or 0) < 2:
+        if str(merged.get("fallback_model") or "").strip() in (
+            "gemini-3.6-flash",
+            "gemini-3.8-flash",
+        ):
+            import logging
+
+            logging.getLogger("dubtool").info(
+                "migrating legacy fallback_model %r -> 'gemini-3.1-flash-lite'",
+                merged.get("fallback_model"),
+            )
+            merged["fallback_model"] = "gemini-3.1-flash-lite"
+    merged["settings_schema"] = 2
     # Migrate legacy edge-tts voice & backup voice keys to VieNeu-TTS v3.
     from dubtool.tts.vieneu import normalize_mode, resolve_voice
 

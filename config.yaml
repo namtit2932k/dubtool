@@ -24,28 +24,27 @@ llm:
   max_requests_per_run: 120    # base calls/run (scales up to 4x when multiple API keys are saved)
   request_timeout_s: 180       # per-request cap (Accurate mode); Fast mode: request_timeout_s_fast
   request_timeout_s_fast: 90   # AGU8 3.5: Fast mode gets a tighter cap
-  # Update 12 task 2: the bounded capacity retry schedule (503/500/502 —
-  # at most 4 attempts, never a split on these; jitter added).
+  # Bounded capacity retry schedule (503/500/502 — jitter added, never split).
   backoff_s:
-    - 5
-    - 15
+    - 3
+    - 8
+    - 20
     - 45
-    - 90
   server_error_backoff_s:      # legacy name, kept for old configs
-    - 10
-    - 30
-    - 90
+    - 3
+    - 8
+    - 20
   split_on_timeout: true       # 504/timeout/400-size split ONCE (503 never splits)
   split_min_units: 4           # a chunk must be larger than this to split
   split_min_chars: 600         # ...and larger than this many source chars
-  # AGENT_UPDATE_11 2.1: request size caps (chars first, then unit count).
-  chunk_max_chars: 1200        # a 16-unit/3827-char video becomes 3-4 requests
-  chunk_max_units: 8
+  # Request size caps (chars first, then unit count; CJK scripts cap chars at 900).
+  chunk_max_chars: 1800        # ~25-30 utterances/request -> 3-4x fewer API calls & 503s
+  chunk_max_units: 30
   breaker_failures: 3          # consecutive failed REQUESTS before the breaker opens
   breaker_cooldown_s: 60       # the open window; a half-open probe decides
   fallback_after_opens: 2      # breaker opens this many times -> Fast model
   max_rpm: null                # optional token bucket per model (requests/minute)
-  overload_after: 2            # dialog cadence for the 'ask' policy
+  overload_after: 3            # consecutive failures before fallback/ask consult
   overload_policy: fallback_fast  # ask | fallback_fast | wait (Settings -> General)
   stage_budget_s: 300          # stage wait budget on failing requests before the fallback
   shorten_fallback_mode: fast  # stage-5 shortening retries with the Fast model on daily quota
@@ -121,9 +120,10 @@ tts:
   join_silence_s: 0.08         # pause inserted between split pieces
   concurrency: 1               # ONNX Runtime parallelizes internally via threads
 
-# AGENT_UPDATE_8 task 3.3: LLM punctuation restoration for the transcript.
+# LLM punctuation restoration for the transcript (off by default to avoid
+# burning ~25-30 sequential pre-translation API calls; local resegmentation still runs).
 punctuate:
-  enabled: auto               # auto | on | off
+  enabled: off                # auto | on | off
   window_segments: 40
   max_missing_ratio: 0.30     # trigger when more than this share lacks final punctuation
   max_unpunct_run: 25         # trigger when a word run this long has no sentence-final mark

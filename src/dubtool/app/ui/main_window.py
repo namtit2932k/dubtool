@@ -111,11 +111,23 @@ def _ffmpeg_version() -> str:
         return "?"
 
 
+_SAFE_MODEL_TOKEN_RE = re.compile(
+    r"^(?:gemini|gpt|claude|llama|qwen|deepseek|gemma|whisper|vieneu)-[a-z0-9.\-]+$"
+)
+
+
 def _redact(text: str) -> str:
     """Redact key-shaped tokens before the details log lands on the
     clipboard (Update 9 task 3.2): any run of 20+ key characters becomes
-    bullets; a key value can never be embedded in copied details."""
-    return re.sub(r"[A-Za-z0-9_\-]{20,}", "•••", text)
+    bullets, while preserving known lowercase model identifiers such as
+    ``gemini-3-flash-preview`` or ``gemini-flash-lite-latest``."""
+    def _sub(match: re.Match[str]) -> str:
+        tok = match.group(0)
+        if _SAFE_MODEL_TOKEN_RE.fullmatch(tok):
+            return tok
+        return "•••"
+
+    return re.sub(r"[A-Za-z0-9_\-]{20,}", _sub, text)
 
 
 def _make_shrinkable_combo(combo: QComboBox, min_chars: int = 10) -> None:

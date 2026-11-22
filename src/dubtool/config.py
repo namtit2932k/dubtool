@@ -56,9 +56,10 @@ TTS_DEFAULTS: dict = {
     "concurrency": 1,
 }
 
-# AGENT_UPDATE_8 task 3.3: LLM punctuation restoration.
+# AGENT_UPDATE_8 task 3.3: LLM punctuation restoration (off by default to avoid
+# burning sequential pre-translation API calls; local sentence resegmentation still runs).
 PUNCTUATE_DEFAULTS: dict = {
-    "enabled": "auto",  # auto | on | off
+    "enabled": "off",  # auto | on | off
     "window_segments": 40,
     "max_missing_ratio": 0.30,
     "max_unpunct_run": 25,

@@ -198,7 +198,7 @@ def test_new_config_keys_present():
     assert cfg.asr["word_timestamps"] is True
     assert cfg.asr["sentence_resegment"] is True
     assert cfg.units["pause_split_s"] == 0.5
-    assert cfg.punctuate["enabled"] == "auto"
+    assert cfg.punctuate["enabled"] == "off"
 
 
 ROW1 = (

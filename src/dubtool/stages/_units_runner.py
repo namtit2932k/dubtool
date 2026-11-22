@@ -39,18 +39,33 @@ MIN_CAP_CHARS = 400
 QUICK_STREAK = 3
 
 
-def adaptive_state(config) -> dict:
-    """Fresh adaptive-state dict from config llm (AGU11 2.1/2.2 knobs)."""
+CJK_MAX_CAP_CHARS = 900
+
+
+def adaptive_state(config, lang: str = "en") -> dict:
+    """Fresh adaptive-state dict from config llm (right-sized chunking).
+
+    Spaceless/CJK scripts (zh, ja, th, ...) carry ~2-3x more translated
+    Vietnamese output per source character than Latin scripts, so their
+    character cap is bounded at ``CJK_MAX_CAP_CHARS`` while still allowing
+    up to ``chunk_max_units`` (default 30) short sentences per request.
+    """
+    from dubtool import languages as lang_mod
+
     llm_cfg = getattr(config, "llm", {}) or {}
     mode = getattr(config, "llm_mode", None)
     if mode == "fast":
         timeout = float(llm_cfg.get("request_timeout_s_fast", 90.0) or 90.0)
     else:
         timeout = float(llm_cfg.get("request_timeout_s", 180.0) or 180.0)
+    max_chars = int(llm_cfg.get("chunk_max_chars", 1800) or 1800)
+    if lang_mod.is_spaceless(lang):
+        max_chars = min(max_chars, CJK_MAX_CAP_CHARS)
+    max_units = int(llm_cfg.get("chunk_max_units", 30) or 30)
     return {
-        "max_chars": int(llm_cfg.get("chunk_max_chars", 1200) or 1200),
-        "cur_chars": int(llm_cfg.get("chunk_max_chars", 1200) or 1200),
-        "max_units": int(llm_cfg.get("chunk_max_units", 8) or 8),
+        "max_chars": max_chars,
+        "cur_chars": max_chars,
+        "max_units": max_units,
         "timeout_s": timeout,
         "quick_streak": 0,
         "latencies": [],
@@ -97,6 +112,7 @@ def run_units_parallel(
     cancel: threading.Event | None = None,
     adaptive: dict | None = None,
     label_prefix: str = "translate chunk",
+    throttle_state: dict | None = None,
 ) -> None:
     """Translate sentence units in parallel chunks cut from a shared queue.
 
@@ -105,13 +121,15 @@ def run_units_parallel(
     so the adaptive cap from earlier requests governs the remaining ones.
     Results are applied as they complete; merging goes per unit id, so
     completion order does not matter. `cancel` is checked between chunks
-    and while waiting on a rate-limit hint.
+    and while waiting on a rate-limit hint. `throttle_state` lets the LLM
+    client signal a 503 overload or fallback concurrency cap so parallel
+    workers drop to 1 immediately instead of piling onto an overloaded model.
     """
     import time as _time
 
     if adaptive is None:
         adaptive = {
-            "max_chars": 1200, "cur_chars": 1200, "max_units": 8,
+            "max_chars": 1800, "cur_chars": 1800, "max_units": 30,
             "timeout_s": 0.0, "quick_streak": 0, "latencies": [],
         }
 
@@ -126,6 +144,26 @@ def run_units_parallel(
     max_workers = workers
     success_streak = 0
     first_error: Exception | None = None
+
+    def _apply_throttle() -> None:
+        nonlocal workers, max_workers, success_streak
+        if not isinstance(throttle_state, dict):
+            return
+        cap = throttle_state.get("max_workers")
+        if cap is not None:
+            new_cap = max(1, int(cap))
+            if new_cap < max_workers:
+                max_workers = new_cap
+            if workers > max_workers:
+                workers = max_workers
+        if throttle_state.get("drop_requested"):
+            throttle_state["drop_requested"] = False
+            success_streak = 0
+            if workers > 1:
+                workers = 1
+                log.warning(
+                    "s3: server overload (503) — reducing translation concurrency to 1"
+                )
 
     def cut_chunk() -> list | None:
         # Caller holds the lock.
@@ -150,6 +188,7 @@ def run_units_parallel(
         while True:
             _check_cancel()
             with lock:
+                _apply_throttle()
                 while first_error is None and len(active) < workers:
                     chunk = cut_chunk()
                     if chunk is None:

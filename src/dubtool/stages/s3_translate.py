@@ -913,10 +913,15 @@ def run(
     # stage-wait budget ride in the client options, so the Fast-model
     # rebuild shares the same stage budget.
     stage_wait_state: dict = {"waited_s": 0.0, "consulted_at": 0.0, "consults": 0}
+    throttle_state: dict = {"max_workers": concurrency, "drop_requested": False}
+
+    def _on_server_error(_status: int | None = None) -> None:
+        throttle_state["drop_requested"] = True
+
     client_options = {
         "backoff_s": llm_cfg.get("backoff_s"),
         "server_error_backoff_s": llm_cfg.get("server_error_backoff_s"),
-        "overload_after": llm_cfg.get("overload_after", 2),
+        "overload_after": llm_cfg.get("overload_after", 3),
         "overload_policy": overload_policy,
         "split_on_timeout": split_on_timeout,
         "split_min_units": split_min_units,
@@ -927,6 +932,7 @@ def run(
         "breaker_cooldown_s": llm_cfg.get("breaker_cooldown_s", 60),
         "fallback_after_opens": llm_cfg.get("fallback_after_opens", 2),
         "max_rpm": llm_cfg.get("max_rpm"),
+        "on_server_error": _on_server_error,
     }
     # Update 12 task 2.3: per-chunk translation checkpoints. A finished
     # chunk is never re-requested; 'Start over' (force) clears the store.
@@ -961,54 +967,102 @@ def run(
             "fallback_fast", "fallback-fast"
         ) else "wait"
 
+    _GEMINI_FALLBACK_CHAIN = (
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-3-flash-preview",
+        "gemini-flash-lite-latest",
+    )
+    tried_models: set[str] = {str(getattr(provider, "model", "") or "")}
+    switch_lock = threading.Lock()
+
     def _fallback_choice() -> tuple[str, str] | None:
-        """(provider, model) of the configured fallback model — None when
-        the user chose no fallback (the overload path then waits/gives up
-        instead of switching to the same or an unusable model)."""
+        """Next untried (provider, model) candidate for overload failover.
+
+        Returns None when the user explicitly disabled fallback (empty
+        ``llm_fallback_model``) or when every candidate has already been tried
+        in this run — preventing infinite self-fallback loops when a fallback
+        model itself returns 503.
+        """
         fallback_model = str(getattr(config, "llm_fallback_model", "") or "").strip()
         if not fallback_model:
             return None
-        if fallback_model == provider.model:
-            return None  # no point switching to the already-failing model
         from dubtool.llm import catalog as catalog_mod
 
-        return catalog_mod.require(fallback_model).provider, fallback_model
+        candidates: list[str] = [fallback_model]
+        # When fallback is enabled on a Gemini run, allow stepping through
+        # healthy free Gemini siblings if the first fallback also overloads.
+        if pid == "gemini" or catalog_mod.require(fallback_model).provider == "gemini":
+            for m in _GEMINI_FALLBACK_CHAIN:
+                if m not in candidates:
+                    candidates.append(m)
 
-    def switch_to_fast_model(_from_model: str) -> None:
-        choice = _fallback_choice()
-        if choice is None:
-            from dubtool.llm.base import LLMError
+        for cand in candidates:
+            if not cand or cand in tried_models:
+                continue
+            info = catalog_mod.require(cand)
+            return info.provider, cand
+        return None
 
-            raise LLMError(
-                "overload policy wants to switch models but no fallback model "
-                "is configured (Settings → General → Mô hình dịch)"
+    def switch_to_fast_model(from_model: str) -> None:
+        with switch_lock:
+            cur_provider = getattr(holder["client"], "provider", None)
+            cur_model = str(getattr(cur_provider, "model", "") or "")
+            # A sibling worker thread already switched away from `from_model`:
+            # reuse the newly active client without burning another fallback step.
+            if from_model and cur_model and cur_model != from_model:
+                return
+            if cur_model:
+                tried_models.add(cur_model)
+            if from_model:
+                tried_models.add(from_model)
+            choice = _fallback_choice()
+            if choice is None:
+                from dubtool.llm.base import LLMError
+
+                tried_list = ", ".join(sorted(m for m in tried_models if m)) or "?"
+                raise LLMError(
+                    "overload policy wants to switch models but no untried fallback "
+                    f"model remains (tried: {tried_list})"
+                )
+            fallback_pid, fallback_model = choice
+            tried_models.add(fallback_model)
+            fallback_provider = get_provider(
+                config, fallback_pid, api_keys=api_keys, cancel=cancel,
+                model_override=fallback_model,
             )
-        fallback_pid, fallback_model = choice
-        fallback_provider = get_provider(
-            config, fallback_pid, api_keys=api_keys, cancel=cancel,
-            model_override=fallback_model,
-        )
-        holder["client"] = LLMClient(
-            fallback_provider, cancel=cancel, options=client_options,
-            on_overload=_overload_callback,
-            source_lang=_resolved_source_lang_name(job, config),
-        )
-        stats["fallback"] = True
-        stats["fast_model"] = fallback_provider.model
-        log.info(
-            "s3: overload policy switched the rest of stage 3 to the fallback "
-            "model %s", fallback_provider.model,
-        )
-        try:
-            from dubtool.app import i18n
+            # Honor the fallback model's concurrency ceiling and immediately
+            # drop to 1 worker so we never pile parallel retries onto it.
+            try:
+                from dubtool.llm import catalog as catalog_mod
 
-            heartbeat_emit = None
-            from dubtool import heartbeat as hb_mod
+                fb_conc = max(1, int(catalog_mod.require(fallback_model).translate_concurrency))
+                throttle_state["max_workers"] = min(
+                    int(throttle_state.get("max_workers") or concurrency), fb_conc
+                )
+            except Exception:
+                pass
+            throttle_state["drop_requested"] = True
+            holder["client"] = LLMClient(
+                fallback_provider, cancel=cancel, options=client_options,
+                on_overload=_overload_callback,
+                source_lang=_resolved_source_lang_name(job, config),
+            )
+            stats["fallback"] = True
+            stats["fast_model"] = fallback_provider.model
+            log.info(
+                "s3: overload policy switched the rest of stage 3 to the fallback "
+                "model %s (tried: %s)",
+                fallback_provider.model,
+                ", ".join(sorted(m for m in tried_models if m)),
+            )
+            try:
+                from dubtool.app import i18n
+                from dubtool import heartbeat as hb_mod
 
-            hb_mod.emit(i18n.tr("llm.fallback_to_fast", model=fallback_provider.model))
-            _ = heartbeat_emit
-        except Exception:
-            pass
+                hb_mod.emit(i18n.tr("llm.fallback_to_fast", model=fallback_provider.model))
+            except Exception:
+                pass
 
     holder: dict = {"client": LLMClient(
         provider, cancel=cancel, options=client_options, on_overload=_overload_callback,
@@ -1082,7 +1136,7 @@ def run(
         translated_units = 0
         from dubtool.stages._units_runner import adaptive_state
 
-        adaptive = adaptive_state(config)
+        adaptive = adaptive_state(config, lang=_resolved_source_lang_code(job, config))
         unit_by_id = {u["unit_id"]: u for u in todo_units}
 
         def unit_chunk_fn(chunk, label):
@@ -1172,6 +1226,7 @@ def run(
             run_units_parallel(
                 todo_units, unit_chunk_fn, apply=apply_units,
                 concurrency=concurrency, cancel=cancel, adaptive=adaptive,
+                throttle_state=throttle_state,
             )
         except BudgetExhausted as exc:  # save progress, resume fills the rest
             budget_err = exc

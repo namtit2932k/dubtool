@@ -265,11 +265,12 @@ class LLMClient:
         return units > min_units or chars > min_chars
 
     def _server_backoff_s(self, attempt: int) -> float:
-        """AGU8 3.2: exponential-with-jitter delay (s) after the `attempt`-th
-        consecutive server error (1-based), from llm.server_error_backoff_s."""
+        """Exponential-with-jitter delay (s) after the `attempt`-th
+        consecutive server error (1-based), honoring `self.backoff_s`
+        (from llm.backoff_s / llm.server_error_backoff_s)."""
         import random
 
-        delays = [float(v) for v in self.options.get("server_error_backoff_s") or DEFAULT_SERVER_BACKOFF_S]
+        delays = self.backoff_s or list(DEFAULT_SERVER_BACKOFF_S)
         base = delays[min(max(attempt - 1, 0), len(delays) - 1)]
         return max(0.1, base * (0.8 + 0.4 * random.random()))
 
@@ -381,6 +382,12 @@ class LLMClient:
         self.consecutive_server_errors += 1
         self.consecutive_since_consult += 1
         status = getattr(exc, "status", None)
+        on_server_error = self.options.get("on_server_error")
+        if callable(on_server_error):
+            try:
+                on_server_error(status)
+            except Exception:
+                pass
         if isinstance(exc, RequestTooLargeError):
             _panel("llm.request_too_large", model=self.provider.model)
         elif status == 503:
