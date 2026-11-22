@@ -22,6 +22,7 @@ from dubtool.llm.base import (
     NetworkLLMError,
     RateLimitError,
     RateLimitExhausted,
+    SchemaRejectedError,
     ServerErrorLLMError,
     TimeoutLLMError,
     _is_internal,
@@ -61,7 +62,7 @@ def build_gemini_client(api_key: str, timeout_ms: int | None = None):
 
 class GeminiProvider:
     name = "gemini"
-    structured = "json_object"   # JSON-only prompting keeps the behavior
+    structured = "json_schema"   # constrains output keys via response_json_schema
 
     def __init__(
         self,
@@ -267,6 +268,8 @@ class GeminiProvider:
             config.thinking_config = types.ThinkingConfig(thinking_level=thinking_level)
         if json_mode:
             config.response_mime_type = "application/json"
+            if schema is not None:
+                config.response_json_schema = schema
         try:
             response = self.client_for(used_key).models.generate_content(
                 model=self.model,
@@ -330,6 +333,8 @@ class GeminiProvider:
         code = getattr(exc, "code", None)
         if code == 429:
             return self._rate_limit_error(exc, used_key)
+        if code == 400 and ("schema" in str(exc).lower() or "response_json_schema" in str(exc).lower()):
+            return SchemaRejectedError(f"gemini rejected structured schema (400): {exc}")
         if code in (401, 403):
             return InvalidKeyError(
                 f"gemini rejected the API key (401/403): check this key at "

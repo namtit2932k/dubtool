@@ -26,7 +26,8 @@
       - Sửa triệt để bug vòng lặp tự-fallback sang cùng model đang lỗi (`tried_models`, `switch_lock`, chuỗi fallback Gemini tự động khi bật fallback, hạ concurrency động về 1 ngay khi gặp 503 qua `throttle_state` + `on_server_error`, giảm backoff `[3, 8, 20, 45]` và `overload_after: 3`).
       - Tự động migrate 1 lần `fallback_model` cũ (`gemini-3.6-flash`/`gemini-3.8-flash` → `gemini-3.1-flash-lite`) cho `settings.json` tiền-schema-2 (`settings_schema: 2`).
       - Sửa `_redact()` ở `main_window.py` không che tên model dài ≥ 20 ký tự (`gemini-3-flash-preview`, `gemini-flash-lite-latest`), vẫn che tuyệt đối API key.
-      - Test mới tại `tests/test_s3_optimizations.py` (7 tests) — tổng bộ test **602 passed, 2 skipped, 0 failed**.
+      - Bật `response_json_schema` thực sự cho `GeminiProvider` (`structured = "json_schema"`, map HTTP 400 schema → `SchemaRejectedError` để tự hạ về JSON-only nếu cần) và cho `parsing.py` chấp nhận alias `"text"`/`"translation"` khi model bỏ quên key `"vi"`.
+      - Test mới tại `tests/test_s3_optimizations.py` (9 tests) — tổng bộ test code **604 passed, 2 skipped, 0 failed**.
 
 ---
 

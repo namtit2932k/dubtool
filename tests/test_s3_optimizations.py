@@ -278,3 +278,65 @@ def test_redact_preserves_model_names_and_masks_keys():
     assert "AIzaDOCFAKEVALUE" not in out
     assert "sk-ant-api03-FAKEVALUE" not in out
     assert "•••" in out
+
+
+def test_parse_json_accepts_text_alias_when_vi_key_omitted():
+    """Models occasionally mirror the input's 'text' key instead of 'vi'."""
+    from dubtool.llm.parsing import parse_json_array, parse_json_items, parse_shortened
+
+    raw = json.dumps([
+        {"id": 0, "text": "Hôm nay là lễ bắt thăm."},
+        {"id": 1, "translation": "Vi Vi rất lanh lợi."},
+    ])
+    out = parse_json_array(raw, [0, 1])
+    assert out == [
+        {"id": 0, "vi": "Hôm nay là lễ bắt thăm."},
+        {"id": 1, "vi": "Vi Vi rất lanh lợi."},
+    ]
+    wrapped = json.dumps({"items": [{"id": 0, "text": "Xin chào."}]})
+    assert parse_json_items(wrapped, [0]) == [{"id": 0, "vi": "Xin chào."}]
+    assert parse_shortened(json.dumps({"text": "Ngắn gọn."})) == "Ngắn gọn."
+
+    # Explicit empty 'vi' must still fail validation.
+    with pytest.raises(LLMError):
+        parse_json_array('[{"id": 0, "vi": "   ", "text": "fallback"}]', [0])
+
+
+def test_gemini_provider_attaches_response_json_schema(monkeypatch):
+    """GeminiProvider enforces translate_schema via response_json_schema and
+    maps 400 schema rejections to SchemaRejectedError for graceful degrade."""
+    from dubtool.llm.base import SchemaRejectedError
+    from dubtool.llm.gemini import GeminiProvider
+    from dubtool.llm.schemas import translate_schema
+
+    captured: dict = {}
+
+    class _FakeResp:
+        text = '{"items": [{"id": 0, "vi": "Xin chào."}]}'
+        usage_metadata = None
+
+    class _FakeModels:
+        def generate_content(self, *, model, contents, config):
+            captured["model"] = model
+            captured["config"] = config
+            return _FakeResp()
+
+    class _FakeClient:
+        models = _FakeModels()
+
+    prov = GeminiProvider(model="gemini-3.5-flash-lite", api_keys=["AIzaFAKEKEY12345678901234567890"])
+    monkeypatch.setattr(prov, "client_for", lambda _k: _FakeClient())
+
+    schema = translate_schema()
+    res = prov.complete("sys", "usr", schema=schema, json_mode=True)
+    assert res.text == _FakeResp.text
+    assert prov.structured == "json_schema"
+    assert captured["config"].response_mime_type == "application/json"
+    assert captured["config"].response_json_schema == schema
+
+    class _Schema400(Exception):
+        code = 400
+
+    mapped = prov._map_error(_Schema400("Invalid response_json_schema field"), "k")
+    assert isinstance(mapped, SchemaRejectedError)
+

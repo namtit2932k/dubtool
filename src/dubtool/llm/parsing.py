@@ -53,6 +53,23 @@ def parse_json_items(text: str, expected_ids: list[int]) -> list[dict[str, Any]]
     return parse_json_array(_json.dumps(data, ensure_ascii=False), expected_ids)
 
 
+def _extract_vi_field(item: dict[str, Any]) -> Any:
+    """Read the translated Vietnamese string from a reply object.
+
+    Prefers ``vi``; when the model omits ``vi`` and mirrors the input's
+    ``text`` (or ``translation``) key instead, accept that string so a valid
+    translation batch is not discarded solely for key-name drift. An explicit
+    empty ``vi`` value still fails validation.
+    """
+    if "vi" in item:
+        return item.get("vi")
+    for alias in ("text", "translation"):
+        val = item.get(alias)
+        if isinstance(val, str) and val.strip():
+            return val
+    return None
+
+
 def parse_json_array(text: str, expected_ids: list[int]) -> list[dict[str, Any]]:
     """Parse and validate a JSON array of {"id","vi"} objects."""
     if not text or not text.strip():
@@ -72,7 +89,7 @@ def parse_json_array(text: str, expected_ids: list[int]) -> list[dict[str, Any]]
     for item in data:
         if not isinstance(item, dict):
             raise LLMError("each item must be an object with id and vi")
-        vi = item.get("vi")
+        vi = _extract_vi_field(item)
         if not isinstance(vi, str) or not vi.strip():
             raise LLMError(f"segment id={item.get('id')} has empty or missing 'vi'")
         out.append({"id": item["id"], "vi": vi.strip()})
@@ -83,7 +100,7 @@ def parse_shortened(text: str) -> str:
     if not text or not text.strip():
         raise LLMError("response was empty")
     data = _load_json(strip_code_fences(text), "shorten")
-    vi = data.get("vi") if isinstance(data, dict) else None
+    vi = _extract_vi_field(data) if isinstance(data, dict) else None
     if not isinstance(vi, str) or not vi.strip():
         raise LLMError("missing 'vi' in shortened response")
     return vi.strip()
@@ -106,7 +123,7 @@ def parse_batch_shortened(text: str, expected_ids: list[int]) -> list[dict[str, 
         raise LLMError(f"expected ids {sorted(expected_ids)} exactly once, got {seen}")
     out: list[dict[str, Any]] = []
     for item in data:
-        vi = item.get("vi") if isinstance(item, dict) else None
+        vi = _extract_vi_field(item) if isinstance(item, dict) else None
         if not isinstance(vi, str) or not vi.strip():
             raise LLMError(f"segment id={item.get('id')} has empty or missing 'vi'")
         out.append({"id": item["id"], "vi": vi.strip()})
