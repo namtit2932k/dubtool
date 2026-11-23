@@ -744,7 +744,7 @@ def _run_gui_smoke_body(workspace) -> int:
             )
 
     # ------------------------------------------------------------- fakes
-    fake_stores: dict[str, list[str]] = {"gemini": [], "openai": [], "anthropic": []}
+    fake_stores: dict[str, list[str]] = {"gemini": [], "groq": [], "openai": [], "anthropic": []}
     fake_store = fake_stores["gemini"]
     secrets_mod._migrate_legacy = lambda *a, **kw: None          # no real keyring I/O
     secrets_mod.env_keys = lambda *a, **kw: []
@@ -855,7 +855,12 @@ def _run_gui_smoke_body(workspace) -> int:
             from PySide6.QtCore import QTimer
             QTimer.singleShot(50, accept_add_dialog)
             return
-        pfx = "sk-ant-" if getattr(modal, "provider", "") == "anthropic" else ("sk-proj-" if getattr(modal, "provider", "") == "openai" else "AIza")
+        modal_pid = getattr(modal, "provider", "")
+        pfx = (
+            "sk-ant-" if modal_pid == "anthropic"
+            else ("gsk_" if modal_pid == "groq"
+                  else ("sk-proj-" if modal_pid == "openai" else "AIza"))
+        )
         modal.field.setPlainText(
             f"{pfx}key-one-{time.perf_counter_ns():x}\n{pfx}key-two-two\n"
         )

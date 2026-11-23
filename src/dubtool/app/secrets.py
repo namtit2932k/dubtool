@@ -24,6 +24,7 @@ SERVICE = "DubTool"
 
 ACCOUNTS = {
     "gemini": "gemini_api_keys",
+    "groq": "groq_api_keys",
     "openai": "openai_api_keys",
     "anthropic": "anthropic_api_keys",
 }
@@ -36,6 +37,7 @@ MAX_ENCODED_BYTES = 2000
 # _2, _3, … suffixes. GPT_API_KEY is the user-chosen name for OpenAI.
 ENV_PREFIXES = {
     "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    "groq": ("GROQ_API_KEY",),
     "openai": ("OPENAI_API_KEY", "GPT_API_KEY"),
     "anthropic": ("ANTHROPIC_API_KEY", "CLAUDE_API_KEY"),
 }
@@ -264,10 +266,13 @@ def mask(value: str) -> str:
 
 def detect_provider(key: str) -> str | None:
     """Provider guess by prefix: anthropic keys start `sk-ant-` (checked
-    before the openai `sk-` shapes), Gemini keys start `AIza` or `AQ.`."""
+    before the openai `sk-` shapes), Gemini keys start `AIza` or `AQ.`,
+    Groq keys start `gsk_`."""
     k = clean_key(key)
     if k.startswith("sk-ant-"):
         return "anthropic"
+    if k.startswith("gsk_"):
+        return "groq"
     if k.startswith(("AIza", "AQ.")):
         return "gemini"
     if k.startswith("sk-"):
@@ -299,7 +304,7 @@ def has_key(provider: str = "gemini") -> bool:
 
 
 def has_any_key() -> bool:
-    return any(has_key(pid) for pid in ("gemini", "openai", "anthropic"))
+    return any(has_key(pid) for pid in ("gemini", "groq", "openai", "anthropic"))
 
 
 def key_source(provider: str = "gemini") -> str:

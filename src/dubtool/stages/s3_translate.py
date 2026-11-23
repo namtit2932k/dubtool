@@ -989,9 +989,17 @@ def run(
         from dubtool.llm import catalog as catalog_mod
 
         candidates: list[str] = [fallback_model]
-        # When fallback is enabled on a Gemini run, allow stepping through
-        # healthy free Gemini siblings if the first fallback also overloads.
-        if pid == "gemini" or catalog_mod.require(fallback_model).provider == "gemini":
+        # When fallback is enabled on a Gemini run (or Gemini keys exist), allow
+        # stepping through healthy free Gemini siblings if the first fallback also
+        # overloads. Never inject Gemini siblings when running Groq-only without keys.
+        has_gemini_keys = (
+            bool(api_keys.get("gemini"))
+            if isinstance(api_keys, dict)
+            else (pid == "gemini")
+        )
+        if has_gemini_keys and (
+            pid == "gemini" or catalog_mod.require(fallback_model).provider == "gemini"
+        ):
             for m in _GEMINI_FALLBACK_CHAIN:
                 if m not in candidates:
                     candidates.append(m)

@@ -31,12 +31,13 @@ from dubtool.llm.parsing import (
     strip_code_fences,
 )
 
-PROVIDERS = ("gemini", "openai", "anthropic", "ollama")
+PROVIDERS = ("gemini", "groq", "openai", "anthropic", "ollama")
 
 # Default chunk sizes / models per provider (AGENT_UPDATE.md 3.3 / 4);
 # per-model detail now lives in the catalog (packaging/models.yaml).
 PROVIDER_DEFAULTS = {
     "gemini": {"model": "gemini-3.5-flash-lite", "chunk_size": 25},
+    "groq": {"model": "llama-3.3-70b-versatile", "chunk_size": 20},
     "openai": {"model": "gpt-5.4-nano", "chunk_size": 40},
     "ollama": {"model": "gemma3:12b", "chunk_size": 20, "host": "http://localhost:11434", "timeout_sec": 300},
     "anthropic": {"model": "claude-sonnet-5-5", "chunk_size": 40},
@@ -183,6 +184,16 @@ def get_provider(config, provider_id: str | None = None,
             cancel=cancel,
         )
         return _wrap_faults(provider)
+    if pid == "groq":
+        from dubtool.llm.groq import GroqProvider
+
+        provider = GroqProvider(
+            model=model,
+            api_keys=api_keys,
+            timeout_s=timeout_s or float(cfg.get("timeout_s") or 60.0),
+            max_output_tokens=(info.max_output_tokens if info is not None else None),
+        )
+        return _wrap_faults(provider)
     if pid == "openai":
         from dubtool.llm.openai import OpenAIProvider
 
@@ -243,6 +254,14 @@ def require_provider_ready(config, provider_id: str | None = None) -> str:
                 "at Google AI Studio and put it in .env."
             )
         return "GEMINI_API_KEY is set"
+    if pid == "groq":
+        key = _env("GROQ_API_KEY")
+        if not key or looks_like_placeholder(key):
+            raise LLMError(
+                "GROQ_API_KEY is not set — get a free key at console.groq.com "
+                "and add it in Settings → API keys → Groq or .env"
+            )
+        return "GROQ_API_KEY is set"
     if pid == "anthropic":
         key = _env("ANTHROPIC_API_KEY")
         if not key or looks_like_placeholder(key):

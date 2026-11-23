@@ -31,6 +31,7 @@ _KEY_SHAPED = (
     re.compile(r"AIza[0-9A-Za-z_\-]{20,}"),
     re.compile(r"sk-ant-[0-9A-Za-z_\-]{20,}"),
     re.compile(r"sk-[0-9A-Za-z_\-]{20,}"),
+    re.compile(r"gsk_[0-9A-Za-z_\-]{20,}"),
     re.compile(r"AQ\.[0-9A-Za-z_\-]{20,}"),
 )
 

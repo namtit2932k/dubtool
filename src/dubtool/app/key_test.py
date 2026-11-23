@@ -107,6 +107,8 @@ def run_key_test(key: str, model: str | None = None,
     if not key or not key.strip():
         return "invalid"
     pid = (provider or "gemini").lower()
+    if pid == "groq":
+        return _test_groq(key.strip())
     if pid == "openai":
         return _test_openai(key.strip())
     if pid == "anthropic":
@@ -119,6 +121,24 @@ def run_key_test(key: str, model: str | None = None,
 
 
 STATUS_KEYS = {401: "invalid", 403: "invalid", 404: "invalid_model", 429: "quota"}
+
+
+def _test_groq(key: str) -> str:
+    """`GET /openai/v1/models` on Groq (free) — ok/invalid/network/quota."""
+    try:
+        from openai import OpenAI
+        from dubtool.llm.groq import GROQ_BASE_URL
+
+        client = OpenAI(
+            api_key=key,
+            base_url=GROQ_BASE_URL,
+            timeout=REQUEST_TIMEOUT_MS / 1000.0,
+            max_retries=0,
+        )
+        client.models.list()
+        return "ok"
+    except Exception as exc:
+        return classify_provider_error(exc)
 
 
 def _test_openai(key: str) -> str:

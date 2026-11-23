@@ -992,6 +992,7 @@ class MainWindow(QMainWindow):
         _NO_KEY_SFX = i18n.tr("run.model_no_key")
         headers = {
             "gemini": i18n.tr("run.provider_gemini"),
+            "groq": i18n.tr("run.provider_groq"),
             "openai": i18n.tr("run.provider_openai"),
             "anthropic": i18n.tr("run.provider_anthropic"),
             "ollama": "Ollama",
@@ -1064,6 +1065,7 @@ class MainWindow(QMainWindow):
         entry = self._selected_model_entry()
         provider_name = {
             "gemini": i18n.tr("run.provider_gemini"),
+            "groq": i18n.tr("run.provider_groq"),
             "openai": i18n.tr("run.provider_openai"),
             "anthropic": i18n.tr("run.provider_anthropic"),
             "ollama": "Ollama",
@@ -1488,6 +1490,7 @@ class MainWindow(QMainWindow):
     def _provider_label(self, provider: str) -> str:
         return {
             "gemini": i18n.tr("run.provider_gemini"),
+            "groq": i18n.tr("run.provider_groq"),
             "openai": i18n.tr("run.provider_openai"),
             "anthropic": i18n.tr("run.provider_anthropic"),
             "ollama": "Ollama",

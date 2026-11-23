@@ -1,6 +1,6 @@
 # DubTool — Project State (Single Source of Truth)
 
-> **Cập nhật lần cuối:** 2026-11-23  
+> **Cập nhật lần cuối:** 2026-11-24  
 > **Mục đích:** Lưu trạng thái thực tế của dự án để giữ liên tục 100% qua các lần compact context và giữa các session. Luôn đối chiếu với `git status` / `git log` khi bắt đầu phiên mới.
 
 ---
@@ -30,7 +30,11 @@
       - **Tối ưu S6 & sửa nút `Mở thư mục xuất`:**
         - Thay `make_silence` + `pydub.AudioSegment.overlay` (O(N×L) copy toàn bộ mảng WAV 1.8 GB × 1,550 lần = ~2.85 TB RAM copy, mất 35.6 phút trên video 2.6 tiếng) bằng bộ trộn streaming `soundfile` + `numpy` theo khối 30 giây (`audio_utils.render_dub_track` & `mix_overlays`), bỏ hẳn file `_silence.wav`, RAM cố định ~20 MB, hỗ trợ `cancel` & RF64 (>3.8 GB), trộn 200 clip / 10 phút stereo 48 kHz chỉ mất `0.35s`.
         - Sửa `_open_in_explorer` dùng Win32 Shell API `SHOpenFolderAndSelectItems` (64-bit safe, fallback `os.startfile`) thay cho `explorer "/select,..."` bị lỗi dấu ngoặc kép khi thư mục có khoảng trắng (như `New folder`) làm Explorer mở nhầm `OneDrive\Documents`.
-      - Test mới tại `tests/test_s3_optimizations.py` (9 tests) và `tests/test_s6_and_explorer_fixes.py` (5 tests).
+      - **Tích hợp nhà cung cấp Groq Cloud (miễn phí, nhanh, dùng lại SDK `openai`, 0 MB tăng thêm):**
+        - Thêm `src/dubtool/llm/groq.py` (`GroqProvider` gọi `https://api.groq.com/openai/v1`, Chat Completions, `json_object` + fallback tự động khi `json_validate_failed`, tắt `<think>` cho `qwen/qwen3-32b`, bắt `finish_reason=length` → `RequestTooLargeError`, map 429 RPM/RPD + `Retry-After`).
+        - Thêm 4 model Groq miễn phí vào `packaging/models.yaml`: `llama-3.3-70b-versatile`, `qwen/qwen3-32b` (tốt cho tiếng Trung), `openai/gpt-oss-120b`, `llama-3.1-8b-instant`.
+        - Nối đầy đủ vào `secrets.py` (`groq_api_keys`, `GROQ_API_KEY`, nhận diện prefix `gsk_`), `key_test.py` (`GET /openai/v1/models`), `settings_dialog.py` (tab Khóa API + Làm mới danh sách mô hình), `main_window.py`, `i18n.py`, `api.py`, `diagnostics.py`/`failguard.py` (che tuyệt đối `gsk_...`), và hỗ trợ **fallback chéo hãng** (Gemini 503 ↔ Groq).
+      - Test mới tại `tests/test_s3_optimizations.py` (10 tests), `tests/test_s6_and_explorer_fixes.py` (5 tests), và `tests/test_groq_provider.py` (7 tests).
 
 ---
 

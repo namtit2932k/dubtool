@@ -311,7 +311,7 @@ def run_dub(
         if secrets is not None:
             from dubtool.app.secrets import normalize_provider
 
-            for pid in ("gemini", "openai", "anthropic"):
+            for pid in ("gemini", "groq", "openai", "anthropic"):
                 getter = getattr(secrets, "get_keys", None)
                 provider_keys: list[str] = []
                 if callable(getter):

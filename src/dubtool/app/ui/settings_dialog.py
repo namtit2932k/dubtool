@@ -50,8 +50,12 @@ from PySide6.QtWidgets import (
 from dubtool.app import i18n, secrets, settings
 from dubtool.app.key_test import run_key_test
 
-PROVIDERS_UI = (("gemini", "Gemini"), ("openai", "OpenAI (ChatGPT)"),
-                ("anthropic", "Anthropic (Claude)"))
+PROVIDERS_UI = (
+    ("gemini", "Gemini"),
+    ("groq", "Groq"),
+    ("openai", "OpenAI (ChatGPT)"),
+    ("anthropic", "Anthropic (Claude)"),
+)
 
 # Editable widget types the read-only sweep disables (Update 9 task 2.2).
 _READONLY_TYPES = (QComboBox, QCheckBox, QLineEdit, QSpinBox, QPlainTextEdit, QListWidget)
@@ -113,6 +117,16 @@ def _fetch_models(provider: str, key: str) -> list[str]:
     """Model ids the provider's list endpoint offers to this key (no
     secret appears anywhere; no tokens are billed)."""
     pid = (provider or "gemini").lower()
+    if pid == "groq":
+        from openai import OpenAI
+        from dubtool.llm.groq import GROQ_BASE_URL, is_groq_chat_model
+
+        client = OpenAI(api_key=key, base_url=GROQ_BASE_URL, timeout=15.0, max_retries=0)
+        return sorted(
+            str(m.id)
+            for m in client.models.list().data
+            if getattr(m, "id", None) and is_groq_chat_model(str(m.id))
+        )
     if pid == "openai":
         from openai import OpenAI
 
@@ -170,7 +184,8 @@ class _AddKeysDialog(QDialog):
         self.field = QPlainTextEdit(self)
         self.field.setPlaceholderText(
             "AIza…" if self.provider == "gemini"
-            else ("sk-ant-…" if self.provider == "anthropic" else "sk-proj-…")
+            else ("gsk_…" if self.provider == "groq"
+                  else ("sk-ant-…" if self.provider == "anthropic" else "sk-proj-…"))
         )
         layout.addWidget(self.field)
         row = QHBoxLayout()

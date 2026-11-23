@@ -26,7 +26,10 @@ from pathlib import Path
 # Gemini keys start with "AIza" and are 35–40 chars; newer keys issued by
 # Google AI Studio start with "AQ." (used on this machine). Also scrub
 # generic assignments like GEMINI_API_KEY=... just in case.
-_KEY_PATTERNS = re.compile(r"AIza[0-9A-Za-z_\-]{20,}|AQ\.[0-9A-Za-z_\-]{30,}|GEMINI_API_KEY\s*[=:]\s*\S+")
+_KEY_PATTERNS = re.compile(
+    r"AIza[0-9A-Za-z_\-]{20,}|AQ\.[0-9A-Za-z_\-]{30,}|gsk_[0-9A-Za-z_\-]{20,}"
+    r"|(?:GEMINI|GROQ|OPENAI|ANTHROPIC)_API_KEY\s*[=:]\s*\S+"
+)
 
 
 def _stored_key_values() -> set[str]:
@@ -36,7 +39,13 @@ def _stored_key_values() -> set[str]:
     try:
         from dubtool.app import secrets
 
-        return {k for k in secrets.get_gemini_keys() if k}
+        out: set[str] = {k for k in secrets.get_gemini_keys() if k}
+        for pid in ("groq", "openai", "anthropic"):
+            try:
+                out.update(k for k in secrets.get_keys(pid) if k)
+            except Exception:
+                pass
+        return out
     except Exception:
         return set()
 
