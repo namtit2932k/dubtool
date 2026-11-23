@@ -84,15 +84,17 @@ def run(job, config, force: bool = False, cancel=None) -> None:
     ]
     mix = config.mix
 
-    # Build vi.wav to match the original audio's sample rate and channels.
+    # Build vi.wav directly in streaming blocks matching the original audio's
+    # sample rate and channels (no multi-GB _silence.wav on disk).
     orig_rate, orig_channels = audio_utils.probe_audio_format(src_video)
-    bed_dir = job.dir
-    silence = bed_dir / "_silence.wav"
-    audio_utils.make_silence(
-        video_duration, silence, sample_rate=orig_rate, channels=orig_channels
+    audio_utils.render_dub_track(
+        video_duration,
+        clips,
+        job.vi_audio_path,
+        sample_rate=orig_rate,
+        channels=orig_channels,
+        cancel=cancel,
     )
-    audio_utils.mix_overlays(silence, clips, job.vi_audio_path)
-    silence.unlink(missing_ok=True)
 
     graph = audio_utils.build_mix_graph(
         mix.get("mode", "static"),

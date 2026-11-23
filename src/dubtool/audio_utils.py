@@ -515,20 +515,179 @@ def make_silence(
     ])
 
 
-def mix_overlays(base_wav: Path, clips: list[tuple[Path, float]], out_wav: Path) -> None:
+_STREAM_BLOCK_SECONDS = 30
+_RF64_THRESHOLD_BYTES = 3_800_000_000  # switch WAV -> RF64 safely below 4 GiB RIFF cap
+
+
+def _read_clip_pcm(clip_path: Path, target_rate: int, target_channels: int):
+    """Read a WAV clip as float32 ndarray ``(frames, target_channels)`` at ``target_rate``.
+
+    Uses ``soundfile`` + ``numpy`` directly (O(clip_len), zero full-track copies).
+    Resampling runs only when ``sr != target_rate`` via linear interpolation.
+    """
+    import numpy as np
+    import soundfile as sf
+
+    data, sr = sf.read(str(clip_path), dtype="float32", always_2d=True)
+    if data.size == 0:
+        return np.zeros((0, target_channels), dtype=np.float32)
+
+    # Channel adaptation (mono <-> stereo / multichannel).
+    ch = data.shape[1]
+    if ch != target_channels:
+        if ch == 1 and target_channels > 1:
+            data = np.repeat(data, target_channels, axis=1)
+        elif target_channels == 1:
+            data = data.mean(axis=1, keepdims=True)
+        elif ch < target_channels:
+            pad = np.zeros((data.shape[0], target_channels - ch), dtype=np.float32)
+            data = np.concatenate([data, pad], axis=1)
+        else:
+            data = data[:, :target_channels]
+
+    # Sample-rate adaptation when clip rate differs from output track rate.
+    if sr != target_rate and data.shape[0] > 0:
+        out_len = max(1, int(round(data.shape[0] * (target_rate / float(sr)))))
+        x_old = np.linspace(0.0, 1.0, num=data.shape[0], endpoint=False)
+        x_new = np.linspace(0.0, 1.0, num=out_len, endpoint=False)
+        resampled = np.empty((out_len, target_channels), dtype=np.float32)
+        for c in range(target_channels):
+            resampled[:, c] = np.interp(x_new, x_old, data[:, c])
+        data = resampled
+
+    return data
+
+
+def _stream_mix_to_wav(
+    total_frames: int,
+    clips: list[tuple[Path, float]],
+    out_wav: Path,
+    *,
+    sample_rate: int,
+    channels: int,
+    base_reader=None,
+    cancel=None,
+) -> None:
+    """Stream-mix ``clips`` [(path, offset_seconds)] onto silence (or ``base_reader``)
+    in fixed 30-second blocks using O(N) memory (~10-25 MB RAM regardless of video
+    length) and O(N) time instead of pydub's O(N * total_len) buffer copying."""
+    import numpy as np
+    import soundfile as sf
+    from dubtool.job import StageCancelled
+
+    total_frames = max(1, int(total_frames))
+    block_frames = max(1, int(sample_rate * _STREAM_BLOCK_SECONDS))
+    ordered = sorted(
+        [(Path(p), max(0.0, float(off))) for p, off in clips],
+        key=lambda item: item[1],
+    )
+    clip_idx = 0
+    n_clips = len(ordered)
+    active: list[tuple[int, Any]] = []  # (start_frame, float32 ndarray)
+
+    expected_bytes = total_frames * channels * 2 + 128
+    wav_format = "RF64" if expected_bytes >= _RF64_THRESHOLD_BYTES else "WAV"
+
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    with sf.SoundFile(
+        str(out_wav),
+        mode="w",
+        samplerate=sample_rate,
+        channels=channels,
+        subtype="PCM_16",
+        format=wav_format,
+    ) as sf_out:
+        for block_start in range(0, total_frames, block_frames):
+            if cancel is not None and cancel.is_set():
+                raise StageCancelled("s6: cancelled by user")
+            n = min(block_frames, total_frames - block_start)
+            block_end = block_start + n
+
+            if base_reader is not None:
+                raw = base_reader.read(n, dtype="float32", always_2d=True)
+                if raw.shape[0] < n:
+                    pad = np.zeros((n - raw.shape[0], channels), dtype=np.float32)
+                    buf = np.concatenate([raw, pad], axis=0)
+                else:
+                    buf = raw.copy()
+            else:
+                buf = np.zeros((n, channels), dtype=np.float32)
+
+            while clip_idx < n_clips:
+                c_path, c_offset = ordered[clip_idx]
+                c_start = int(round(c_offset * sample_rate))
+                if c_start >= block_end:
+                    break
+                clip_idx += 1
+                data = _read_clip_pcm(c_path, sample_rate, channels)
+                if data.shape[0] > 0:
+                    active.append((c_start, data))
+
+            next_active: list[tuple[int, Any]] = []
+            for c_start, data in active:
+                c_end = c_start + data.shape[0]
+                ov_start = max(block_start, c_start)
+                ov_end = min(block_end, c_end)
+                if ov_end > ov_start:
+                    buf[ov_start - block_start : ov_end - block_start] += (
+                        data[ov_start - c_start : ov_end - c_start]
+                    )
+                if c_end > block_end:
+                    next_active.append((c_start, data))
+            active = next_active
+
+            np.clip(buf, -1.0, 1.0, out=buf)
+            sf_out.write(buf)
+
+
+def render_dub_track(
+    duration_s: float,
+    clips: list[tuple[Path, float]],
+    out_wav: Path,
+    *,
+    sample_rate: int = OUT_SAMPLE_RATE,
+    channels: int = 1,
+    cancel=None,
+) -> None:
+    """Build the full-length Vietnamese dub track directly onto silence in
+    streaming 30-second blocks — no intermediate ``_silence.wav`` file on disk."""
+    total_frames = max(1, int(round(max(float(duration_s), 0.0) * sample_rate)))
+    _stream_mix_to_wav(
+        total_frames,
+        clips,
+        Path(out_wav),
+        sample_rate=int(sample_rate),
+        channels=max(1, int(channels)),
+        base_reader=None,
+        cancel=cancel,
+    )
+
+
+def mix_overlays(
+    base_wav: Path,
+    clips: list[tuple[Path, float]],
+    out_wav: Path,
+    *,
+    cancel=None,
+) -> None:
     """Overlay `clips` [(path, offset_seconds)] onto `base_wav` -> `out_wav`.
 
-    Uses pydub (bundled with ffmpeg for other formats). All inputs are mono
-    WAV and get normalized to the shared sample rate before mixing.
+    Streams `base_wav` in 30-second blocks via ``soundfile`` + ``numpy`` so
+    mixing thousands of clips over multi-hour audio runs in O(N) time and
+    constant RAM (~10-25 MB).
     """
-    from pydub import AudioSegment
+    import soundfile as sf
 
-    base = AudioSegment.from_wav(str(base_wav))
-    for clip_path, offset in clips:
-        seg = AudioSegment.from_wav(str(clip_path))
-        seg = seg.set_frame_rate(base.frame_rate).set_channels(base.channels)
-        base = base.overlay(seg, position=int(offset * 1000))
-    base.export(str(out_wav), format="wav")
+    with sf.SoundFile(str(base_wav), mode="r") as base_sf:
+        _stream_mix_to_wav(
+            len(base_sf),
+            clips,
+            Path(out_wav),
+            sample_rate=base_sf.samplerate,
+            channels=base_sf.channels,
+            base_reader=base_sf,
+            cancel=cancel,
+        )
 
 
 def mux(video_in: Path, audio_in: Path, out: Path, *, cancel=None) -> None:

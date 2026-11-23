@@ -1,6 +1,6 @@
 # DubTool — Project State (Single Source of Truth)
 
-> **Cập nhật lần cuối:** 2026-11-22  
+> **Cập nhật lần cuối:** 2026-11-23  
 > **Mục đích:** Lưu trạng thái thực tế của dự án để giữ liên tục 100% qua các lần compact context và giữa các session. Luôn đối chiếu với `git status` / `git log` khi bắt đầu phiên mới.
 
 ---
@@ -27,7 +27,10 @@
       - Tự động migrate 1 lần `fallback_model` cũ (`gemini-3.6-flash`/`gemini-3.8-flash` → `gemini-3.1-flash-lite`) cho `settings.json` tiền-schema-2 (`settings_schema: 2`).
       - Sửa `_redact()` ở `main_window.py` không che tên model dài ≥ 20 ký tự (`gemini-3-flash-preview`, `gemini-flash-lite-latest`), vẫn che tuyệt đối API key.
       - Bật `response_json_schema` thực sự cho `GeminiProvider` (`structured = "json_schema"`, map HTTP 400 schema → `SchemaRejectedError` để tự hạ về JSON-only nếu cần) và cho `parsing.py` chấp nhận alias `"text"`/`"translation"` khi model bỏ quên key `"vi"`.
-      - Test mới tại `tests/test_s3_optimizations.py` (9 tests) — tổng bộ test code **604 passed, 2 skipped, 0 failed**.
+      - **Tối ưu S6 & sửa nút `Mở thư mục xuất`:**
+        - Thay `make_silence` + `pydub.AudioSegment.overlay` (O(N×L) copy toàn bộ mảng WAV 1.8 GB × 1,550 lần = ~2.85 TB RAM copy, mất 35.6 phút trên video 2.6 tiếng) bằng bộ trộn streaming `soundfile` + `numpy` theo khối 30 giây (`audio_utils.render_dub_track` & `mix_overlays`), bỏ hẳn file `_silence.wav`, RAM cố định ~20 MB, hỗ trợ `cancel` & RF64 (>3.8 GB), trộn 200 clip / 10 phút stereo 48 kHz chỉ mất `0.35s`.
+        - Sửa `_open_in_explorer` dùng Win32 Shell API `SHOpenFolderAndSelectItems` (64-bit safe, fallback `os.startfile`) thay cho `explorer "/select,..."` bị lỗi dấu ngoặc kép khi thư mục có khoảng trắng (như `New folder`) làm Explorer mở nhầm `OneDrive\Documents`.
+      - Test mới tại `tests/test_s3_optimizations.py` (9 tests) và `tests/test_s6_and_explorer_fixes.py` (5 tests).
 
 ---
 

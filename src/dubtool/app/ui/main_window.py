@@ -49,25 +49,72 @@ from dubtool.app.ui.widgets import DropZone, FileCard, LogView, StageList, STAGE
 VIDEO_FILTERS = "Videos (*.mp4 *.mkv *.mov *.webm *.avi *.m4v)"
 
 
-def _open_in_explorer(path: Path, *, select: Path | None = None) -> None:
-    """Open a folder in Explorer (Update 9 task 5).
+def _win_reveal_in_explorer(target_file: Path) -> bool:
+    """Reveal and highlight ``target_file`` in Windows Explorer via the official
+    Win32 Shell API (SHOpenFolderAndSelectItems).
 
-    Folders go through os.startfile — starting GUI programs through the
-    hidden-window helper was the open-folder bug: the helper's SW_HIDE
-    (the AGU6 console fix) hid Explorer's own window. Only the
-    argument-taking case (reveal/select a file, highlight it) still goes
-    through proc — with gui=True, which skips SW_HIDE/CREATE_NO_WINDOW."""
+    Calling ``explorer.exe /select,<path>`` via subprocess list args breaks
+    whenever ``<path>`` contains spaces (Python quotes the whole argument as
+    ``"/select,C:\\...\\New folder\\file.mp4"``), causing explorer.exe to ignore
+    ``/select`` and open the user's Documents folder instead.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    path_str = os.path.normpath(str(target_file.resolve()))
+    ole32 = ctypes.windll.ole32
+    shell32 = ctypes.windll.shell32
+
+    ole32.CoInitialize.argtypes = [ctypes.c_void_p]
+    ole32.CoInitialize.restype = ctypes.c_long
+    ole32.CoUninitialize.argtypes = []
+    ole32.CoUninitialize.restype = None
+    ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+    ole32.CoTaskMemFree.restype = None
+
+    shell32.SHParseDisplayName.argtypes = [
+        wintypes.LPCWSTR,
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_void_p),
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    shell32.SHParseDisplayName.restype = ctypes.c_long
+    shell32.SHOpenFolderAndSelectItems.argtypes = [
+        ctypes.c_void_p,
+        wintypes.UINT,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    shell32.SHOpenFolderAndSelectItems.restype = ctypes.c_long
+
+    hr_init = ole32.CoInitialize(None)
+    need_uninit = hr_init in (0, 1)  # S_OK or S_FALSE
+    pidl = ctypes.c_void_p()
+    try:
+        hr = shell32.SHParseDisplayName(path_str, None, ctypes.byref(pidl), 0, None)
+        if hr != 0 or not pidl.value:
+            return False
+        hr = shell32.SHOpenFolderAndSelectItems(pidl, 0, None, 0)
+        return hr == 0
+    finally:
+        if pidl.value:
+            ole32.CoTaskMemFree(pidl)
+        if need_uninit:
+            ole32.CoUninitialize()
+
+
+def _open_in_explorer(path: Path, *, select: Path | None = None) -> None:
+    """Open a folder in Explorer, optionally highlighting ``select``."""
     try:
         if sys.platform == "win32":
             if select is not None:
-                from dubtool import proc
-
-                proc.run(
-                    ["explorer", f"/select,{str(select)}"],
-                    capture=False, gui=True,
-                )
-            else:
-                os.startfile(str(path))  # type: ignore[attr-defined]
+                try:
+                    if _win_reveal_in_explorer(select):
+                        return
+                except Exception:
+                    pass
+            os.startfile(os.path.normpath(str(path.resolve())))  # type: ignore[attr-defined]
         else:
             from dubtool import proc
 
@@ -597,6 +644,14 @@ class ProgressWidget(QGroupBox):
             target = result.out_video.parent
             if result.out_video.exists():
                 select = result.out_video
+        elif result and result.out_srt is not None:
+            target = result.out_srt.parent
+            if result.out_srt.exists():
+                select = result.out_srt
+        elif result and result.out_readable is not None:
+            target = result.out_readable.parent
+            if result.out_readable.exists():
+                select = result.out_readable
         if target is None:
             target = self.window_ref.output_dir
         if not target or not Path(target).is_dir():
