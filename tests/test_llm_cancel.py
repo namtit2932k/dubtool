@@ -123,3 +123,24 @@ def test_progress_widget_cancel_button_shows_cancelling_feedback(qtbot, monkeypa
     assert called["flag"] is True
     assert not win.progress_group.cancel_btn.isEnabled()
     assert win.progress_group.cancel_btn.text() == i18n.tr("progress.cancelling")
+
+
+def test_s2_transcribe_collect_stops_immediately_on_cancel() -> None:
+    """Pressing Cancel during Whisper ASR stops on the next yielded segment."""
+    from types import SimpleNamespace
+    from dubtool.stages import s2_transcribe as s2
+
+    cancel = threading.Event()
+    yielded = 0
+
+    def _gen():
+        nonlocal yielded
+        for i in range(100):
+            yielded += 1
+            if i == 2:
+                cancel.set()
+            yield SimpleNamespace(start=float(i), end=float(i + 1), text=f"seg {i}", words=[])
+
+    with pytest.raises(StageCancelled):
+        s2._collect(_gen(), cancel=cancel)
+    assert yielded <= 3

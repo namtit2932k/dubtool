@@ -34,6 +34,7 @@
         - Thêm `src/dubtool/llm/groq.py` (`GroqProvider` gọi `https://api.groq.com/openai/v1`, Chat Completions, `json_object` + fallback tự động khi `json_validate_failed`, tắt `<think>` cho `qwen/qwen3-32b`, bắt `finish_reason=length` → `RequestTooLargeError`, map 429 RPM/RPD + `Retry-After`).
         - Thêm 3 model Groq miễn phí đã kiểm chứng live trên `/openai/v1/models` (2026-11-24): `qwen/qwen3.8-27b` (1.32s, tắt `<think>`, tốt cho tiếng Trung), `openai/gpt-oss-120b` (2.35s, `reasoning_effort=low`), `openai/gpt-oss-20b` (2.69s, `reasoning_effort=low`).
         - Bỏ `provider:model` khỏi `api._stable_job_id` để đổi model dịch vẫn tái sử dụng kết quả S1/S2 (Whisper) trong khi `stage_inputs_hash` vẫn invalidate đúng S3/S5.
+        - Nối `cancel` vào `s2_transcribe.run` / `_collect` (trước đây `s2` là stage duy nhất trong `api.py` không nhận `cancel`) để bấm Hủy dừng Whisper ngay sau đoạn hiện tại thay vì chạy hết 100%.
         - Nối đầy đủ vào `secrets.py` (`groq_api_keys`, `GROQ_API_KEY`, nhận diện prefix `gsk_`), `key_test.py` (`GET /openai/v1/models`), `settings_dialog.py` (tab Khóa API + Làm mới danh sách mô hình), `main_window.py`, `i18n.py`, `api.py`, `diagnostics.py`/`failguard.py` (che tuyệt đối `gsk_...`), và hỗ trợ **fallback chéo hãng** (Gemini 503 ↔ Groq).
       - Test mới tại `tests/test_s3_optimizations.py` (10 tests), `tests/test_s6_and_explorer_fixes.py` (5 tests), và `tests/test_groq_provider.py` (7 tests).
 

@@ -612,8 +612,16 @@ def detect_source_language(
     return info
 
 
-def _transcribe(model, job, config, *, multilingual: bool = False) -> None:
+def _check_cancel(cancel) -> None:
+    if cancel is not None and cancel.is_set():
+        from dubtool.job import StageCancelled
+
+        raise StageCancelled("s2: cancelled by user")
+
+
+def _transcribe(model, job, config, *, multilingual: bool = False, cancel=None) -> None:
     """Whisper pass + cleanup + write transcript.json (AGU6 4.2 split)."""
+    _check_cancel(cancel)
     want_words = bool(config.asr.get("word_timestamps", True))
     lang = config.asr.get("language")
     effective_lang = lang if lang and lang != "auto" else None
@@ -636,7 +644,7 @@ def _transcribe(model, job, config, *, multilingual: bool = False) -> None:
             # contract stays untouched).
             kwargs["word_timestamps"] = True
         raw_segments, info = model.transcribe(str(job.audio_path), **kwargs)
-        segments, words = _collect(raw_segments, _asr_progress_cb(info.duration))
+        segments, words = _collect(raw_segments, _asr_progress_cb(info.duration), cancel=cancel)
     except TypeError as exc:
         retried = False
         if "vad_parameters" in kwargs and "vad_parameters" in str(exc):
@@ -657,7 +665,7 @@ def _transcribe(model, job, config, *, multilingual: bool = False) -> None:
         if not retried:
             raise
         raw_segments, info = model.transcribe(str(job.audio_path), **kwargs)
-        segments, words = _collect(raw_segments, _asr_progress_cb(info.duration))
+        segments, words = _collect(raw_segments, _asr_progress_cb(info.duration), cancel=cancel)
     if not segments:
         raise RuntimeError("transcription produced no segments — is the audio silent?")
 
@@ -712,10 +720,11 @@ def _transcribe(model, job, config, *, multilingual: bool = False) -> None:
     )
 
 
-def _collect(raw_segments, progress_cb=None) -> tuple[list[dict], list[dict] | None]:
+def _collect(raw_segments, progress_cb=None, cancel=None) -> tuple[list[dict], list[dict] | None]:
     segments: list[dict] = []
     words: list[dict] = []
     for s in raw_segments:
+        _check_cancel(cancel)
         if not (s.text and s.text.strip()):
             continue
         segments.append({"start": float(s.start), "end": float(s.end), "text": s.text.strip()})
@@ -726,6 +735,7 @@ def _collect(raw_segments, progress_cb=None) -> tuple[list[dict], list[dict] | N
             token = (getattr(w, "word", "") or "").strip()
             if token:
                 words.append({"w": token, "start": float(w.start), "end": float(w.end)})
+    _check_cancel(cancel)
     return segments, words
 
 
@@ -764,7 +774,8 @@ def _fw_version() -> str:
         return "?"
 
 
-def run(job, config, force: bool = False) -> None:
+def run(job, config, force: bool = False, cancel=None) -> None:
+    _check_cancel(cancel)
     out = job.transcript_path
     if out.exists() and not force:
         log.info("s2: transcript.json already exists, skipping")
@@ -786,16 +797,18 @@ def run(job, config, force: bool = False) -> None:
     )
     model = None
     try:
+        _check_cancel(cancel)
         model = WhisperModel(
             config.whisper_model,
             device=config.device,
             compute_type=config.compute_type,
             cpu_threads=threads,
         )
-
+        _check_cancel(cancel)
         lang_info = detect_source_language(model, job, config)
+        _check_cancel(cancel)
         min_conf = float(config.asr.get("language_min_confidence", 0.60) or 0.60)
-        _transcribe(model, job, config, multilingual=bool(lang_info.get("mixed")))
+        _transcribe(model, job, config, multilingual=bool(lang_info.get("mixed")), cancel=cancel)
         detected_code = str(lang_info.get("code") or "en").lower()
         detected_prob = float(lang_info.get("probability") or 0.0)
         if detected_code == "vi" and (detected_prob >= min_conf or lang_info.get("method") == "manual"):

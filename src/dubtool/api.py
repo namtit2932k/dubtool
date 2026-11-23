@@ -463,9 +463,17 @@ def run_dub(
         from dubtool.stages import s1_extract_audio, s2_transcribe
         from dubtool.stages import s3_translate, s4_tts, s5_fit_duration, s6_mix, s7_subtitles
 
+        def _run_s2(j, c, force):
+            try:
+                return s2_transcribe.run(j, c, force=force, cancel=cancel)
+            except TypeError as exc:
+                if "cancel" in str(exc):
+                    return s2_transcribe.run(j, c, force=force)
+                raise
+
         stage_map = {
             "s1": lambda j, c, force: s1_extract_audio.run(j, c, force=force, cancel=cancel),
-            "s2": s2_transcribe.run,
+            "s2": _run_s2,
             "s3": lambda j, c, force: s3_translate.run(j, c, force=force, cancel=cancel, api_keys=keys),
             "s4": lambda j, c, force: s4_tts.run(j, c, force=force, cancel=cancel),
             "s5": lambda j, c, force: s5_fit_duration.run(j, c, force=force, cancel=cancel, api_keys=keys),
