@@ -82,7 +82,7 @@ qwen/qwen3.8-27b:
   translate_concurrency: 1
   request_timeout_s: 60
   chunk_max_chars: 1200
-  max_output_tokens: 2400
+  max_output_tokens: 950
   verified: console.groq.com /openai/v1/models live probe (2026-11-24)
 openai/gpt-oss-120b:
   provider: groq
@@ -93,7 +93,7 @@ openai/gpt-oss-120b:
   translate_concurrency: 1
   request_timeout_s: 60
   chunk_max_chars: 1400
-  max_output_tokens: 2400
+  max_output_tokens: 950
   verified: console.groq.com /openai/v1/models live probe (2026-11-24)
 openai/gpt-oss-20b:
   provider: groq
@@ -104,7 +104,7 @@ openai/gpt-oss-20b:
   translate_concurrency: 1
   request_timeout_s: 60
   chunk_max_chars: 1200
-  max_output_tokens: 2400
+  max_output_tokens: 950
   verified: console.groq.com /openai/v1/models live probe (2026-11-24)
 gpt-5.4-nano:
   provider: openai

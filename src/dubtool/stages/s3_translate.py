@@ -1160,6 +1160,8 @@ def run(
         from dubtool.stages._units_runner import adaptive_state
 
         adaptive = adaptive_state(config, lang=_resolved_source_lang_code(job, config))
+        if pid == "groq":
+            adaptive["max_units"] = min(int(adaptive.get("max_units", 20)), 15)
         unit_by_id = {u["unit_id"]: u for u in todo_units}
 
         def unit_chunk_fn(chunk, label):

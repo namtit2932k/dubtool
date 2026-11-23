@@ -244,48 +244,77 @@ def test_stable_job_id_reuses_s1_s2_across_model_switch(tmp_path: Path):
     assert id_gemini == id_groq
 
 
-def test_groq_compact_prompt_max_tokens_and_proactive_tpm_pacing(monkeypatch):
-    """Groq trims verbose TRANSLATE_SYSTEM, caps max_tokens <= 2400, and paces
-    proactively when x-ratelimit-remaining-tokens drops below threshold."""
-    import time
-    from dubtool.llm.prompts import TRANSLATE_SYSTEM
+def test_groq_compact_prompt_max_tokens_and_keypool_rotation(monkeypatch):
+    """Groq trims verbose system + user prompts, caps max_tokens <= 950 (OTPM),
+    and immediately rotates to the next Groq key on low TPM or 429."""
+    from dubtool.llm.client import LLMClient
+    from dubtool.llm.prompts import TRANSLATE_SYSTEM, render_translate_user
 
-    seen_kwargs: list[dict] = []
+    seen_calls: list[tuple[str, dict]] = []
 
-    class _RawResp:
-        headers = {
-            "x-ratelimit-remaining-tokens": "900",
-            "x-ratelimit-reset-tokens": "5s",
-        }
+    def _make_client(key: str):
+        class _RawResp:
+            headers = {
+                "x-ratelimit-remaining-tokens": "900",
+                "x-ratelimit-reset-tokens": "15s",
+            }
 
-        def parse(self):
-            return SimpleNamespace(
-                choices=[
-                    SimpleNamespace(
-                        finish_reason="stop",
-                        message=SimpleNamespace(content='{"items":[{"id":0,"vi":"Xin chào."}]}'),
-                    )
-                ],
-                usage=SimpleNamespace(prompt_tokens=150, completion_tokens=30),
+            def parse(self):
+                return SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            finish_reason="stop",
+                            message=SimpleNamespace(content='{"items":[{"id":0,"vi":"Xin chào."}]}'),
+                        )
+                    ],
+                    usage=SimpleNamespace(prompt_tokens=150, completion_tokens=30),
+                )
+
+        def _create(**kw):
+            seen_calls.append((key, kw))
+            return _RawResp()
+
+        return SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(with_raw_response=SimpleNamespace(create=_create))
             )
-
-    class _FakeCompletions:
-        with_raw_response = SimpleNamespace(
-            create=lambda **kw: (seen_kwargs.append(kw), _RawResp())[1]
         )
 
-    prov = GroqProvider(model="qwen/qwen3.8-27b", api_keys=["gsk_FAKEKEY12345678901234567890"])
-    monkeypatch.setattr(
-        prov, "_client_for", lambda _k: SimpleNamespace(chat=SimpleNamespace(completions=_FakeCompletions()))
-    )
+    k1 = "gsk_KEYONE12345678901234567890"
+    k2 = "gsk_KEYTWO12345678901234567890"
+    prov = GroqProvider(model="qwen/qwen3.8-27b", api_keys=[k1, k2])
+    monkeypatch.setattr(prov, "_client_for", _make_client)
 
-    res = prov.complete(TRANSLATE_SYSTEM, '[{"id":0,"text":"你好"}]', json_mode=True, max_tokens=8000)
-    assert res.text == '{"items":[{"id":0,"vi":"Xin chào."}]}'
-    assert len(seen_kwargs) == 1
-    assert seen_kwargs[0]["max_tokens"] <= 2400
-    assert len(seen_kwargs[0]["messages"][0]["content"]) < 700
-    # Remaining tokens (900) < 2400 -> proactive pace scheduled ~5.8s ahead.
-    assert prov._pace_until > time.monotonic() + 3.0
+    usr = render_translate_user([{"id": 0, "text": "你好", "max_chars": 30}], [], None, source_lang="Chinese")
+    r1 = prov.complete(TRANSLATE_SYSTEM, usr, json_mode=True, max_tokens=8000)
+    assert r1.text == '{"items":[{"id":0,"vi":"Xin chào."}]}'
+    assert seen_calls[0][0] == k1
+    assert seen_calls[0][1]["max_tokens"] <= 950
+    assert len(seen_calls[0][1]["messages"][0]["content"]) < 700
+    assert len(seen_calls[0][1]["messages"][1]["content"]) < len(usr) * 0.5
+
+    # Because k1 returned remaining=900 (<1800), k1 was cooled down in KeyPool ->
+    # second call rotates immediately to k2 with ZERO wait!
+    r2 = prov.complete(TRANSLATE_SYSTEM, usr, json_mode=True, max_tokens=8000)
+    assert r2.text == '{"items":[{"id":0,"vi":"Xin chào."}]}'
+    assert seen_calls[1][0] == k2
+
+    # Also verify LLMClient rotates keys immediately on a per-minute 429.
+    used_keys: list[str] = []
+
+    class _TwoKey429Groq(GroqProvider):
+        def complete(self, system, user, *, schema=None, json_mode=True, max_tokens=8000):
+            k = self.pool.acquire()
+            used_keys.append(k)
+            if k == k1:
+                raise RateLimitError("groq", "otpm", kind="minute", retry_after=30.0, key_used=k)
+            return LLMResult(text='{"items":[{"id":0,"vi":"Xoay khóa OK."}]}', input_tokens=10, output_tokens=10)
+
+    p2 = _TwoKey429Groq(model="qwen/qwen3.8-27b", api_keys=[k1, k2])
+    client = LLMClient(p2)
+    out = client.translate_batch([{"id": 0, "text": "hi", "max_chars": 20}], [])
+    assert out == [{"id": 0, "vi": "Xoay khóa OK."}]
+    assert used_keys == [k1, k2]
 
 
 def test_llm_client_survives_more_than_three_per_minute_pauses(monkeypatch):

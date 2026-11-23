@@ -680,7 +680,7 @@ class LLMClient:
         cap_attempts = 0
         max_cap_attempts = max(1, min(4, len(self.backoff_s)))
         gen_attempts = 0
-        pauses_left = 3
+        pauses_left = 10
         last_error: Exception | None = None
         while True:
             self._check_cancel()
@@ -798,8 +798,9 @@ class LLMClient:
                             f"({self.provider.name}): {exc}"
                         ) from exc
                     pauses_left -= 1
-                    self.rate_pause_until = _time.monotonic() + min(retry_after, 600.0)
-                    _panel("llm.rate_pause", n=int(min(retry_after, 600.0)))
+                    wait_s = min(retry_after + 1.5, 600.0)
+                    self.rate_pause_until = _time.monotonic() + wait_s
+                    _panel("llm.rate_pause", n=int(wait_s + 0.999))
                 # All keys limited: wait until the earliest cooldown; the
                 # reduced-concurrency callback fires ONLY in this case.
                 if self.on_rate_limit is not None:
