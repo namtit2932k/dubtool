@@ -77,11 +77,10 @@ def test_build_interleaved_slots_spreads_providers_and_tiers():
     assert len(t1) == 8
     # First 4 Tier-1 slots alternate Gemini and Groq 1:1
     assert [s.provider for s in t1[:4]] == ["gemini", "groq", "gemini", "groq"]
-    # Tier 2 holds Gemini 3.6/3.8 Flash overflow (2 models x 2 keys = 4) and NO gpt-oss reasoning models
-    assert len(t2) == 4
-    assert all(s.provider == "gemini" for s in t2)
-    assert {s.model for s in t2} == {"gemini-3.6-flash", "gemini-3.8-flash"}
+    # Pool stays strictly on fast non-thinking Tier-1 models (no gpt-oss, no 3.6/3.8 thinking models)
+    assert t2 == []
     assert all("gpt-oss" not in s.model for s in slots)
+    assert all(s.model not in ("gemini-3.6-flash", "gemini-3.8-flash") for s in slots)
 
 
 def test_auto_rotate_adaptive_503_cooldown_ladder():

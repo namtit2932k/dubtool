@@ -340,3 +340,27 @@ def test_llm_client_survives_more_than_three_per_minute_pauses(monkeypatch):
     client = LLMClient(_Flaky429Provider())
     out = client.translate_batch([{"id": 0, "text": "hi", "max_chars": 20}], [])
     assert out == [{"id": 0, "vi": "Xong."}]
+
+
+def test_groq_429_request_too_large_distinguishes_used_tokens():
+    """429 with Used > 0 is a per-minute bucket limit (RateLimitError), whereas
+    Used 0 means the single request itself exceeds Groq's OTPM cap."""
+    from dubtool.llm.base import RequestTooLargeError
+
+    prov = GroqProvider(model="qwen/qwen3.8-27b", api_keys=["gsk_test1234567890"])
+
+    class _Exc(Exception):
+        status_code = 429
+        response = None
+
+    err_used = prov._map_error(
+        _Exc("Request too large for model on output tokens per minute (OTPM): Limit 1000, Used 520, Requested 700. Please try again in 21.5s.")
+    )
+    assert isinstance(err_used, RateLimitError)
+    assert err_used.kind == "minute"
+    assert err_used.retry_after == pytest.approx(21.5)
+
+    err_zero = prov._map_error(
+        _Exc("Request too large for model on output tokens per minute (OTPM): Limit 1000, Used 0, Requested 1200.")
+    )
+    assert isinstance(err_zero, RequestTooLargeError)

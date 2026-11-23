@@ -346,10 +346,11 @@ class GroqProvider:
         return base + hint
 
     def _compute_max_tokens(self, user: str, requested: int) -> int:
-        """Keep Groq max_tokens safely under Groq Free Tier's 1,000 OTPM cap."""
+        """Keep Groq max_tokens safely under Groq Free Tier's 1,000 OTPM cap,
+        and avoid over-reserving tokens on tiny tail chunks (e.g. 3 units)."""
         cap = min(int(requested or _GROQ_MAX_OUTPUT_CAP), self.default_max_output_tokens, _GROQ_MAX_OUTPUT_CAP)
-        estimated = max(700, int(len(user or "") * 1.0))
-        return max(512, min(cap, estimated))
+        estimated = max(384, int(len(user or "") * 0.9))
+        return max(384, min(cap, estimated))
 
     def _update_pace_from_headers(self, headers, used_key: str) -> None:
         """When this key's remaining TPM drops below threshold, mark ONLY this
@@ -525,9 +526,16 @@ class GroqProvider:
         if status == 413:
             return RequestTooLargeError("groq request too large (413)", status=413)
         if status == 429:
-            # Groq Free Tier can reject a single request whose max_tokens exceeds
-            # the model's OTPM ceiling ("Request too large ... on output tokens per minute").
-            if "request too large" in low or "reduce max_tokens" in low:
+            # Groq Free Tier returns "Request too large ... Limit 1000, Used X,
+            # Requested Y" both when a single request exceeds the 1,000 OTPM
+            # ceiling (Used == 0) AND when prior requests in the same minute
+            # already consumed part of the bucket (Used > 0). Only the former
+            # is a true RequestTooLargeError; the latter is a normal per-minute
+            # rate limit that resolves once the minute window resets or we
+            # rotate to another key.
+            used_match = re.search(r"\bused\s+(\d+)\b", low)
+            used_tokens = int(used_match.group(1)) if used_match else 0
+            if ("request too large" in low or "reduce max_tokens" in low) and used_tokens == 0:
                 return RequestTooLargeError(
                     f"groq output budget exceeded per-minute ceiling ({exc})",
                     status=400,

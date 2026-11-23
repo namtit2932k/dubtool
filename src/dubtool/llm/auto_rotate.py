@@ -50,14 +50,10 @@ _GEMINI_TIER1_MODELS = (
     "gemini-flash-lite-latest",
 )
 _GROQ_TIER1_MODELS = ("qwen/qwen3.8-27b",)
-# Tier 2 (overflow only when every Tier 1 slot is temporarily cooling down):
-# Gemini 3.6/3.8 Flash share Gemini's 8,000-token json_schema budget (never
-# truncated like Groq's reasoning gpt-oss models under 1,000 OTPM) and run on
-# separate clusters from Flash-Lite so they absorb Flash-Lite 503 bursts.
-_GEMINI_TIER2_MODELS = (
-    "gemini-3.6-flash",
-    "gemini-3.8-flash",
-)
+# Keep the pool strictly on fast non-thinking models (Flash-Lite + Qwen 3.8).
+# Both Groq gpt-oss and Gemini 3.6/3.8 Flash run thinking loops by default
+# (taking 50-110s or hitting MAX_TOKENS on even 3-sentence chunks).
+_GEMINI_TIER2_MODELS: tuple[str, ...] = ()
 
 # Adaptive 503 cooldown ladder per model: 15s -> 30s -> 45s on consecutive 503s,
 # reset immediately back to 0 on any successful reply from that model.
