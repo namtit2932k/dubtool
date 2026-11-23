@@ -916,7 +916,12 @@ def run(
     throttle_state: dict = {"max_workers": concurrency, "drop_requested": False}
 
     def _on_server_error(_status: int | None = None) -> None:
-        throttle_state["drop_requested"] = True
+        # Auto-Rotate manages its own multi-provider pool across 6+ keys;
+        # and HTTP 400 (request-size split) is not a server capacity overload.
+        if pid == "auto":
+            return
+        if _status in (None, 503, 504):
+            throttle_state["drop_requested"] = True
 
     client_options = {
         "backoff_s": llm_cfg.get("backoff_s"),
@@ -943,6 +948,10 @@ def run(
     base_policy = fill_state["policy"]
 
     def _overload_callback(info: dict | None = None) -> str:
+        # Auto-Rotate already spans every saved free-tier provider & key; never
+        # downgrade it to a single fallback model on transient errors.
+        if pid == "auto":
+            return "wait"
         # AGU8 3.4. interactive asks the dialog; 'ask' without a dialog and
         # 'wait' keep backing off; 'fallback_fast' makes the wrapper raise
         # OverloadFallbackFast, which translate_resilient turns into the

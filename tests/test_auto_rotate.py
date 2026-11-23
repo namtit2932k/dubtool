@@ -77,10 +77,9 @@ def test_build_interleaved_slots_spreads_providers_and_tiers():
     assert len(t1) == 8
     # First 4 Tier-1 slots alternate Gemini and Groq 1:1
     assert [s.provider for s in t1[:4]] == ["gemini", "groq", "gemini", "groq"]
-    # Tier-2 has only Groq overflow models (gpt-oss-120b, gpt-oss-20b) x 2 keys = 4
-    assert len(t2) == 4
-    assert all(s.provider == "groq" for s in t2)
-    assert {s.model for s in t2} == {"openai/gpt-oss-120b", "openai/gpt-oss-20b"}
+    # No reasoning gpt-oss models in Tier 2 (they truncate under 1,000 OTPM)
+    assert t2 == []
+    assert all("gpt-oss" not in s.model for s in slots)
 
 
 def test_auto_rotate_round_robins_across_gemini_and_groq():
@@ -188,16 +187,36 @@ def test_auto_rotate_401_disables_key_across_all_models():
     assert all(not s.dead for s in prov._slots if s.key == "AIzaGood")
 
 
-def test_auto_rotate_propagates_request_too_large():
-    def handler(pt, schema, max_tokens):
-        raise RequestTooLargeError("too large", status=413)
+def test_auto_rotate_propagates_request_too_large_from_gemini_and_hands_off_from_groq():
+    # From Gemini (8,000-token cap), RequestTooLargeError propagates to split the chunk.
+    def handler_all_large(pt, schema, max_tokens):
+        raise RequestTooLargeError("too large", status=400)
 
     prov = AutoRotateProvider(
         api_keys={"gemini": ["AIzaGood"], "groq": ["gsk_Good"]},
-        provider_factory=lambda p, m, k: _FakeInner(p, m, k, handler),
+        provider_factory=lambda p, m, k: _FakeInner(p, m, k, handler_all_large),
     )
     with pytest.raises(RequestTooLargeError):
         prov.complete("sys", "usr")
+
+    # From Groq (950-token cap), if a Gemini slot is ready, hand off cleanly without splitting!
+    calls: list[tuple[str, str, str]] = []
+
+    def handler_groq_large(pt, schema, max_tokens):
+        calls.append(pt)
+        if pt[0] == "groq":
+            raise RequestTooLargeError("groq length", status=400)
+        return LLMResult(text="ok-from-gemini")
+
+    prov2 = AutoRotateProvider(
+        api_keys={"gemini": ["AIzaGood"], "groq": ["gsk_Good"]},
+        provider_factory=lambda p, m, k: _FakeInner(p, m, k, handler_groq_large),
+    )
+    prov2._cursor_t1 = 1  # start on Groq slot
+    res = prov2.complete("sys", "usr")
+    assert res.text == "ok-from-gemini"
+    assert calls[0][0] == "groq"
+    assert calls[1][0] == "gemini"
 
 
 def test_auto_rotate_handles_persisted_daily_key_exhausted():

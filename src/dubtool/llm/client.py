@@ -379,18 +379,27 @@ class LLMClient:
         """
         import time as _time
 
+        status = getattr(exc, "status", None)
+        if isinstance(exc, RequestTooLargeError):
+            _panel("llm.request_too_large", model=self.provider.model)
+            log.warning(
+                "llm %s/%s request too large (%s, attempt %d/%d, %s): %s",
+                self.provider.name, self.provider.model,
+                status if status is not None else "size", attempt, max_attempts,
+                self.request_label or "", exc,
+            )
+            self._maybe_split(exc)   # raises SplitRequiredError without tripping overload fallback
+            return self._server_backoff_s(attempt)
+
         self.consecutive_server_errors += 1
         self.consecutive_since_consult += 1
-        status = getattr(exc, "status", None)
         on_server_error = self.options.get("on_server_error")
         if callable(on_server_error):
             try:
                 on_server_error(status)
             except Exception:
                 pass
-        if isinstance(exc, RequestTooLargeError):
-            _panel("llm.request_too_large", model=self.provider.model)
-        elif status == 503:
+        if status == 503:
             _panel("llm.server_503", model=self.provider.model)
         elif status == 504:
             _panel("llm.server_504", model=self.provider.model)

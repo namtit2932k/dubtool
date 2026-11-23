@@ -50,7 +50,12 @@ _GEMINI_TIER1_MODELS = (
     "gemini-flash-lite-latest",
 )
 _GROQ_TIER1_MODELS = ("qwen/qwen3.8-27b",)
-_GROQ_TIER2_MODELS = ("openai/gpt-oss-120b", "openai/gpt-oss-20b")
+# Note: Groq's gpt-oss-120b / gpt-oss-20b are reasoning models that consume
+# 400-600 tokens of internal reasoning before emitting JSON, causing repeated
+# finish_reason=length truncations under Groq Free Tier's 1,000 OTPM cap.
+# Waiting a few seconds for a clean Tier-1 slot (Gemini or qwen3.8-27b) is
+# both faster and far more reliable than overflowing into reasoning models.
+_GROQ_TIER2_MODELS: tuple[str, ...] = ()
 
 _MODEL_503_COOLDOWN_S = 45.0
 _MODEL_TIMEOUT_COOLDOWN_S = 30.0
@@ -242,6 +247,14 @@ class AutoRotateProvider:
         model_cd = self._model_cooldowns.get((slot.provider, slot.model), 0.0)
         return max(slot.cooldown_until, model_cd)
 
+    def _has_ready_slot(self, provider: str) -> bool:
+        now = self._clock()
+        with self._lock:
+            return any(
+                (not s.dead) and s.provider == provider and self._slot_ready_at(s) <= now
+                for s in self._slots
+            )
+
     def _pick_slot(self) -> tuple[_Slot | None, float]:
         """Pick the next ready slot (Tier 1 first, then Tier 2), or return
         ``(None, wait_seconds)`` if every live slot is cooling down."""
@@ -391,7 +404,19 @@ class AutoRotateProvider:
                 return res
             except StageCancelled:
                 raise
-            except RequestTooLargeError:
+            except RequestTooLargeError as exc:
+                # Groq has a 950-token output ceiling while Gemini allows 8,000
+                # tokens. If a Groq slot hit output length and a Gemini slot is
+                # ready right now, hand the chunk to Gemini instead of splitting.
+                if slot.provider == "groq" and self._has_ready_slot("gemini"):
+                    last_err = exc
+                    log.warning(
+                        "auto-rotate: %s hit output length — rotating chunk to ready Gemini slot",
+                        slot.label,
+                    )
+                    self._mark_slot_cooldown(slot, 10.0)
+                    self.switches += 1
+                    continue
                 # Chunk-size issue, not a slot outage — let LLMClient split the chunk.
                 raise
             except SchemaRejectedError:
