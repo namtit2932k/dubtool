@@ -1168,9 +1168,21 @@ def run(
         translated_units = 0
         from dubtool.stages._units_runner import adaptive_state
 
-        adaptive = adaptive_state(config, lang=_resolved_source_lang_code(job, config))
-        if pid in ("groq", "auto"):
+        src_lang_code = _resolved_source_lang_code(job, config)
+        adaptive = adaptive_state(config, lang=src_lang_code)
+        if pid == "groq":
             adaptive["max_units"] = min(int(adaptive.get("max_units", 20)), 15)
+        elif pid == "auto":
+            from dubtool import languages as lang_mod
+
+            adaptive["max_units"] = min(int(adaptive.get("max_units", 20)), 20)
+            has_groq_in_pool = (
+                bool(api_keys.get("groq")) if isinstance(api_keys, dict) else False
+            )
+            if has_groq_in_pool:
+                cap = 450 if lang_mod.is_spaceless(src_lang_code) else 1000
+                adaptive["max_chars"] = min(int(adaptive.get("max_chars", cap)), cap)
+                adaptive["cur_chars"] = min(int(adaptive.get("cur_chars", cap)), cap)
         unit_by_id = {u["unit_id"]: u for u in todo_units}
 
         def unit_chunk_fn(chunk, label):

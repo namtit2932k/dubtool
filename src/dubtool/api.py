@@ -340,6 +340,11 @@ def run_dub(
         selected_model = str(options.model or catalog_mod.DEFAULT_MODEL_ID)
         info = catalog_mod.require(selected_model)
         pid = str(options.provider or info.provider).lower()
+        default_conc = int(info.translate_concurrency)
+        if pid == "auto":
+            free_key_count = len(keys.get("gemini") or []) + len(keys.get("groq") or [])
+            if free_key_count >= 4:
+                default_conc = max(default_conc, 3)
         overrides: dict[str, Any] = {
             "llm_provider": pid,
             "llm": {pid: {"model": selected_model}},
@@ -349,7 +354,7 @@ def run_dub(
             "translate": {"concurrency": int(
                 options.translate_concurrency
                 if options.translate_concurrency is not None
-                else info.translate_concurrency
+                else default_conc
             )},
         }
         # AGU8 6.3: the Settings → General fidelity preset rides inside
