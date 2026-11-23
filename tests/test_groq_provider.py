@@ -364,3 +364,58 @@ def test_groq_429_request_too_large_distinguishes_used_tokens():
         _Exc("Request too large for model on output tokens per minute (OTPM): Limit 1000, Used 0, Requested 1200.")
     )
     assert isinstance(err_zero, RequestTooLargeError)
+
+
+def test_cjk_leak_triggers_validation_retry_and_respects_keep_original():
+    from dubtool.llm import parsing
+    from dubtool.llm.base import LLMError
+    from dubtool.llm.client import LLMClient
+
+    with pytest.raises(LLMError, match="untranslated source-script"):
+        parsing.check_no_untranslated_cjk([{"id": 1, "vi": "Vương爷 nói đùa rồi"}])
+
+    # Explicit glossary "keep original" is allowed
+    parsing.check_no_untranslated_cjk(
+        [{"id": 1, "vi": "Đi đến 東京 chơi."}],
+        glossary={"東京": "keep original"},
+    )
+
+    class _LeakyOnceProvider:
+        name = "groq"
+        model = "qwen/qwen3.8-27b"
+        structured = "none"
+        timeout_s = 30.0
+
+        def __init__(self):
+            self.calls = 0
+            self.prompts: list[str] = []
+
+        def complete(self, system, user, *, schema=None, json_mode=True, max_tokens=8000):
+            self.calls += 1
+            self.prompts.append(user)
+            if self.calls == 1:
+                return LLMResult(text='{"items":[{"id":1,"vi":"本王 quyết định rồi."}]}')
+            return LLMResult(text='{"items":[{"id":1,"vi":"Bản vương quyết định rồi."}]}')
+
+    prov = _LeakyOnceProvider()
+    client = LLMClient(prov, source_lang="Chinese")
+    out = client.translate_batch([{"id": 1, "text": "本王要定了", "max_chars": 30}], [])
+    assert out == [{"id": 1, "vi": "Bản vương quyết định rồi."}]
+    assert prov.calls == 2
+    assert "untranslated source-script" in prov.prompts[1]
+
+
+def test_groq_compact_prompt_defers_pronouns_to_brief():
+    from dubtool.llm.groq import _compact_user_prompt
+    from dubtool.llm.prompts import render_translate_user
+
+    raw = render_translate_user(
+        [{"id": 0, "text": "本王要定了", "max_chars": 25}],
+        [],
+        {},
+        brief="bối cảnh cổ trang trung quốc, xưng hô cổ trang",
+        source_lang="Chinese",
+    )
+    compact = _compact_user_prompt(raw)
+    assert "Brief: bối cảnh cổ trang trung quốc, xưng hô cổ trang" in compact
+    assert "follow Brief style/pronouns" in compact

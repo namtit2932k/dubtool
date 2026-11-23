@@ -8,6 +8,46 @@ from typing import Any
 
 from dubtool.llm.base import LLMError
 
+# Chinese Hanzi, Japanese Kana, Korean Hangul — never allowed to leak into
+# Vietnamese dubbing text (TTS cannot pronounce them), unless explicitly kept
+# via glossary ("keep original").
+_UNTRANSLATED_CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]+")
+
+
+def check_no_untranslated_cjk(
+    items: list[dict[str, Any]],
+    glossary: dict[str, str] | None = None,
+) -> None:
+    """Raise ``LLMError`` if any translated Vietnamese item still contains
+    untranslated CJK/Kana/Hangul characters (excluding terms explicitly marked
+    ``keep original`` in ``glossary``)."""
+    allowed: list[str] = []
+    if isinstance(glossary, dict):
+        for term, val in glossary.items():
+            if isinstance(term, str) and term.strip():
+                v = str(val or "").strip().lower()
+                if v == "keep original":
+                    allowed.append(term.strip())
+                elif _UNTRANSLATED_CJK_RE.search(str(val or "")):
+                    allowed.append(str(val).strip())
+
+    bad: list[tuple[Any, str]] = []
+    for item in items:
+        vi = str(item.get("vi") or "")
+        cleaned = vi
+        for keep in allowed:
+            cleaned = cleaned.replace(keep, "")
+        m = _UNTRANSLATED_CJK_RE.search(cleaned)
+        if m:
+            bad.append((item.get("id"), m.group(0)))
+    if bad:
+        ids_str = ", ".join(str(i) for i, _ in bad[:6])
+        samples = ", ".join(f"id={i}({tok})" for i, tok in bad[:4])
+        raise LLMError(
+            f"untranslated source-script characters left in Vietnamese for id(s) [{ids_str}] "
+            f"({samples}); translate or transliterate every character into pure Vietnamese"
+        )
+
 
 def strip_code_fences(text: str) -> str:
     """Remove ```...``` wrapping if present."""

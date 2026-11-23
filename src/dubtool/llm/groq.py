@@ -54,12 +54,13 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 # boilerplate from system + user prompts cuts per-chunk input by ~65% while
 # preserving every translation rule, brief, context, glossary and pronoun pick.
 _COMPACT_TRANSLATE_SYSTEM = (
-    "Translate video subtitles into natural, neutral Vietnamese for dubbing. "
+    "Translate video subtitles into concise, natural spoken Vietnamese for dubbing. "
     "Rules: faithful meaning, no dropped clauses, no added facts, no slang "
-    "unless in source; keep subjects and pronoun choices consistent (avoid "
-    "literary 'ta' unless brief asks); apply glossary exactly; treat max_chars "
-    "as a soft guide (cut filler first, never meaning); complete sentences with "
-    "matching punctuation; reply ONLY with JSON object: "
+    "unless in source; never leave untranslated Chinese/Japanese/Korean characters "
+    "in Vietnamese (transliterate names/titles into Vietnamese); follow Brief style "
+    "and pronouns if given, otherwise keep default pronouns consistent; apply glossary "
+    "exactly; keep phrasing concise near max_chars (cut filler first, never meaning); "
+    "complete sentences with matching punctuation; reply ONLY with JSON object: "
     '{"items":[{"id":<int>,"vi":"<str>"}]}.'
 )
 _GROQ_MAX_OUTPUT_CAP = 950
@@ -140,13 +141,19 @@ def _compact_user_prompt(user: str) -> str:
         except ValueError:
             pass
 
-    # Compact pronoun pick
+    # Compact pronoun pick (Brief overrides default pronouns when provided)
+    has_brief = bool(m_brief and m_brief.group(1).strip())
     m_first = _USER_FIRST_RE.search(head)
     m_second = _USER_SECOND_RE.search(head)
     if m_first or m_second:
         p1 = m_first.group(1).strip() if m_first else "tôi"
         p2 = m_second.group(1).strip() if m_second else "bạn / các bạn"
-        parts.append(f"Pronouns: 1st={p1}; 2nd={p2}")
+        if has_brief:
+            parts.append(
+                f"Pronouns: follow Brief style/pronouns if specified (fallback 1st={p1}; 2nd={p2})"
+            )
+        else:
+            parts.append(f"Pronouns: 1st={p1}; 2nd={p2}")
 
     # Source language + compact JSON segments
     m_lang = _USER_LANG_RE.search(head)

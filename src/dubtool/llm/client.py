@@ -958,7 +958,9 @@ class LLMClient:
         ids = [s["id"] for s in segments]
 
         def validate(text: str) -> list[dict]:
-            return parsing.parse_json_items(text, ids)
+            items = parsing.parse_json_items(text, ids)
+            parsing.check_no_untranslated_cjk(items, glossary=glossary)
+            return items
 
         def note(exc: Exception) -> str:
             return (
@@ -984,10 +986,15 @@ class LLMClient:
                 '{"vi": "..."} as JSON.'
             )
 
+        def validate_one(text: str) -> str:
+            vi = parsing.parse_shortened(text)
+            parsing.check_no_untranslated_cjk([{"id": 0, "vi": vi}])
+            return vi
+
         return self._call_and_validate(
             _system_of("shorten"),
             render_shorten_user(english, current_vi, max_chars, source_lang=self.source_lang),
-            parsing.parse_shortened,
+            validate_one,
             note,
             schema=self._stage_schema("shorten"),
         )
@@ -997,7 +1004,9 @@ class LLMClient:
         ids = [s["id"] for s in items]
 
         def validate(text: str) -> list[dict]:
-            return parsing.parse_batch_shortened(text, ids)
+            out = parsing.parse_batch_shortened(text, ids)
+            parsing.check_no_untranslated_cjk(out)
+            return out
 
         def note(exc: Exception) -> str:
             return (

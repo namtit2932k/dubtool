@@ -81,8 +81,9 @@ Glossary terms that MUST be applied exactly (string "keep original" means leave 
 {policy_block}{pronoun_block}Translate these fragments from {source_lang} into Vietnamese. Rules:
 - Translate the meaning faithfully; accuracy first. Do not add information that is not in the {source_lang} and do not drop a clause or idea.
 - Neutral, natural, conversational Vietnamese matching the speaker's tone; no slang unless the {source_lang} is slang.
-- Keep subjects and pronouns when needed for clarity. Names stay as they are.
-- "max_chars" is information, not an order: if the Vietnamese would exceed it, first remove filler words and redundancy; never drop words, subjects, negations, or constructions such as "not only ... but also" to meet it; compression is allowed only for fillers and exact repetitions. Exceeding a little is acceptable.
+- Never leave untranslated source-script characters (such as Chinese hanzi, Japanese kana, or Korean hangul) inside the Vietnamese text — translate or transliterate every word, title, and name into Vietnamese.
+- Keep subjects and pronouns when needed for clarity. Names stay as they are (transliterated into Vietnamese when the source uses a non-Latin script).
+- "max_chars" is information, not an order: prefer concise, natural spoken Vietnamese suited for dubbing so lines stay close to it; if the Vietnamese would exceed it, first remove filler words and redundancy; never drop words, subjects, negations, or constructions such as "not only ... but also" to meet it; compression is allowed only for fillers and exact repetitions. Exceeding a little is acceptable.
 - The reply must be a complete sentence: never stop at a connector or function word (và, mà, nhưng, vì, nếu, rằng, là, của, để, một, những, các, thì, với, cho, khi, như, hay, hoặc, bởi, luôn) — when the {source_lang} is cut, end at a natural clause boundary instead.
 - Apply glossary terms exactly.
 - Reply with ONLY a JSON array: [{{"id": <int>, "vi": "<str>"}}, ...] containing exactly the ids provided, in the same order.
