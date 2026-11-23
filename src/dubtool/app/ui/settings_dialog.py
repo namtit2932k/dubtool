@@ -65,6 +65,30 @@ _READONLY_TYPES = (QComboBox, QCheckBox, QLineEdit, QSpinBox, QPlainTextEdit, QL
 _READ_ONLY_OK_BUTTONS = ("test_all_btn", "test_one_btn", "close_btn")
 
 
+class _WrapLabel(QLabel):
+    """Word-wrapped QLabel that dynamically updates its minimum height from
+    ``heightForWidth(width)`` on every resize so QGridLayout inside a
+    QScrollArea NEVER clips 2-3 wrapped lines at any DPI or narrow width."""
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.setWordWrap(True)
+        self.setMinimumWidth(0)
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        self._last_w = -1
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        w = self.width()
+        if w > 0 and w != self._last_w:
+            self._last_w = w
+            h = self.heightForWidth(w)
+            if h > 0 and h != self.minimumHeight():
+                self.setMinimumHeight(h)
+                self.updateGeometry()
+
+
 def _asr_progress() -> dict:
     """The last stage-2 measurement for the whisper-model tooltip (AGU8 7);
     imported lazily so the dialog loads on a machine without audio files."""
@@ -717,12 +741,7 @@ class SettingsDialog(QDialog):
 
     @staticmethod
     def _wrap_label(text: str) -> QLabel:
-        lbl = QLabel(text)
-        lbl.setWordWrap(True)
-        lbl.setMinimumWidth(0)
-        lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        lbl.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
-        return lbl
+        return _WrapLabel(text)
 
     # ---------------------------------------------------------- general tab
     def _build_general_tab(self) -> QWidget:

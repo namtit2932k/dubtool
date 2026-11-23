@@ -418,6 +418,15 @@ def test_settings_dialog_dedups_env_keys_and_aligns_spinboxes(monkeypatch):
         assert not any("1111" in r and "(từ .env)" in r for r in rows)
         assert any("3333" in r and "GEMINI_API_KEY_2" in r for r in rows)
 
+        dlg.tabs.setCurrentIndex(1)
+        dlg.resize(320, 440)
+        for _ in range(4):
+            app.processEvents()
+        from dubtool.app.ui.settings_dialog import _WrapLabel
+
+        for lbl in dlg.findChildren(_WrapLabel):
+            assert lbl.height() >= lbl.heightForWidth(lbl.width()), lbl.text()
+
         dlg.tabs.setCurrentIndex(2)
         app.processEvents()
         assert dlg.jobs_days_spin.width() == dlg.jobs_total_mb_spin.width()
