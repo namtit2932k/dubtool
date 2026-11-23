@@ -382,3 +382,48 @@ def test_voice_preview_cache_and_default_gemini_catalog(monkeypatch, tmp_path):
     assert calls == 1  # second call hits cache immediately
 
 
+def test_settings_dialog_dedups_env_keys_and_aligns_spinboxes(monkeypatch):
+    """SettingsDialog hides duplicate .env rows already saved in Credential
+    Manager, keeps unimported .env rows visible, and aligns both job-limit
+    spinboxes to the exact same width and right edge."""
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    from dubtool.app import secrets
+    from dubtool.app.ui.settings_dialog import SettingsDialog
+
+    app = QApplication.instance() or QApplication([])
+    stored = ["AIzaTESTKEY00001111", "AIzaTESTKEY00002222"]
+    monkeypatch.setattr(secrets, "_stored_list", lambda p="gemini": list(stored) if p == "gemini" else [])
+    monkeypatch.setattr(secrets, "get_keys", lambda p="gemini": list(stored) if p == "gemini" else [])
+    monkeypatch.setattr(secrets, "has_key", lambda p="gemini": p in ("gemini", "auto"))
+    monkeypatch.setattr(
+        secrets,
+        "env_key_sources",
+        lambda p="gemini": [
+            ("GEMINI_API_KEY", secrets.mask("AIzaTESTKEY00001111")),
+            ("GEMINI_API_KEY_2", secrets.mask("AIzaTESTKEY00003333")),
+        ] if p == "gemini" else [],
+    )
+
+    dlg = SettingsDialog()
+    try:
+        dlg.resize(480, 580)
+        dlg.show()
+        app.processEvents()
+        rows = [dlg.key_list.item(i).text() for i in range(dlg.key_list.count())]
+        assert len(rows) == 3
+        assert any("1111" in r and "(từ .env)" not in r for r in rows)
+        assert not any("1111" in r and "(từ .env)" in r for r in rows)
+        assert any("3333" in r and "GEMINI_API_KEY_2" in r for r in rows)
+
+        dlg.tabs.setCurrentIndex(2)
+        app.processEvents()
+        assert dlg.jobs_days_spin.width() == dlg.jobs_total_mb_spin.width()
+        assert dlg.jobs_days_spin.geometry().right() == dlg.jobs_total_mb_spin.geometry().right()
+    finally:
+        dlg.close()
+
+
+

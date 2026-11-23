@@ -42,6 +42,10 @@
       - **Nâng cao chất lượng dịch S3 (Brief + chặn sót CJK + bám sát `max_chars`):**
         - `parsing.check_no_untranslated_cjk()` + `LLMClient.translate_batch`/`shorten`/`shorten_batch` tự động từ chối & retry khi bản dịch tiếng Việt còn sót chữ Hán/Kana/Hangul (vẫn tôn trọng glossary `"keep original"`).
         - `groq._compact_user_prompt` ưu tiên xưng hô & phong cách theo `Brief` giống `prompts.py` của Gemini; `prompts.py` + `groq.py` nhắc ưu tiên văn nói gọn tự nhiên cho lồng tiếng để bám sát `max_chars`.
+      - **Sửa 3 lỗi UI trong `SettingsDialog` (`settings_dialog.py`):**
+        - Khử trùng lặp dòng `(từ .env)` với các khóa đã lưu trong Credential Manager (`_unimported_env_rows()`), chỉ hiển thị khóa `.env` chưa nhập.
+        - Đổi tab *Chung* từ `QFormLayout` sang `QGridLayout` (`4:5`) + ẩn `models_status` khi rỗng, chấm dứt triệt để lỗi cắt mất nửa dưới nhãn `Chế độ giọng đọc (cục bộ)` / `Giọng đọc lồng tiếng`.
+        - Đặt `jobs_days_spin` và `jobs_total_mb_spin` cùng `minimumWidth=140` + `Expanding` để 2 ô thẳng tắp cả mép trái lẫn mép phải trong tab *Nâng cao*.
       - Test mới tại `tests/test_s3_optimizations.py` (10 tests), `tests/test_s6_and_explorer_fixes.py` (5 tests), `tests/test_groq_provider.py` (10 tests), và `tests/test_auto_rotate.py` (13 tests).
 
 ---

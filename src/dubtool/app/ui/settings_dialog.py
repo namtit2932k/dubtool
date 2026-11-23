@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -405,6 +406,16 @@ class SettingsDialog(QDialog):
             saved = ""
         return saved or "gemini-3.5-flash-lite"
 
+    def _unimported_env_rows(self) -> list[tuple[str, str]]:
+        """Read-only `.env` rows for the current provider whose key is not
+        already stored in Credential Manager (prevents duplicate rows)."""
+        stored_masks = {secrets.mask(k) for k in self._keys()}
+        return [
+            (name, masked)
+            for name, masked in secrets.env_key_sources(self._provider)
+            if masked not in stored_masks
+        ]
+
     def _refresh_rows(self, select: int | None = None) -> None:
         """Rebuild the masked rows (never shows key values; position + ••••).
 
@@ -437,9 +448,9 @@ class SettingsDialog(QDialog):
                 item = QListWidgetItem(label)
                 item.setToolTip(i18n.tr("settings.badge_quota_until_tooltip", model=self._accurate_model()))
             self.key_list.addItem(item)
-        # The read-only `.env` rows for this provider: a key the app did not
-        # store (masked, position shown) with an import action.
-        env_rows = secrets.env_key_sources(self._provider)
+        # The read-only `.env` rows for this provider: only keys the app has
+        # not yet stored in Credential Manager (masked, with import action).
+        env_rows = self._unimported_env_rows()
         for name, masked in env_rows:
             item = QListWidgetItem(i18n.tr("settings.env_row", name=name, masked=masked))
             item.setData(Qt.ItemDataRole.UserRole, "env")
@@ -567,7 +578,7 @@ class SettingsDialog(QDialog):
         env_position = self._env_row_position(row)
         if env_position is None:
             return
-        env_rows = secrets.env_key_sources(self._provider)
+        env_rows = self._unimported_env_rows()
         if not 0 <= env_position < len(env_rows):
             return
         name = env_rows[env_position][0]
@@ -709,28 +720,43 @@ class SettingsDialog(QDialog):
         lbl = QLabel(text)
         lbl.setWordWrap(True)
         lbl.setMinimumWidth(0)
+        lbl.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         return lbl
 
     # ---------------------------------------------------------- general tab
     def _build_general_tab(self) -> QWidget:
         page = QWidget()
-        form = QFormLayout(page)
-        form.setContentsMargins(10, 10, 14, 10)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        grid = QGridLayout(page)
+        grid.setContentsMargins(10, 10, 14, 10)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(8)
+        grid.setColumnStretch(0, 4)
+        grid.setColumnStretch(1, 5)
+        row_idx = 0
+
+        def _add_row(label_text: str, field: QWidget) -> None:
+            nonlocal row_idx
+            if label_text:
+                lbl = self._wrap_label(label_text)
+                grid.addWidget(lbl, row_idx, 0, Qt.AlignmentFlag.AlignVCenter)
+                grid.addWidget(field, row_idx, 1, Qt.AlignmentFlag.AlignVCenter)
+            else:
+                grid.addWidget(field, row_idx, 1)
+            row_idx += 1
+
         self.lang_combo = self._shrinkable(QComboBox())
         self.lang_combo.addItem("Tiếng Việt", "vi")
         self.lang_combo.addItem("English", "en")
-        form.addRow(self._wrap_label(i18n.tr("settings.language")), self.lang_combo)
+        _add_row(i18n.tr("settings.language"), self.lang_combo)
         self.tts_mode_combo = self._shrinkable(QComboBox())
         self.tts_mode_combo.addItem(i18n.tr("settings.tts_mode_turbo"), "v3turbo_int8")
         self.tts_mode_combo.addItem(i18n.tr("settings.tts_mode_nano"), "v3nano")
         self.tts_mode_combo.setToolTip(i18n.tr("settings.tts_model_tip"))
         self.tts_mode_combo.currentIndexChanged.connect(self._on_tts_mode_changed)
-        form.addRow(self._wrap_label(i18n.tr("settings.tts_model")), self.tts_mode_combo)
+        _add_row(i18n.tr("settings.tts_model"), self.tts_mode_combo)
         self.voice_combo = self._shrinkable(QComboBox())
         self._populate_voices(DEFAULT_TTS_MODE, DEFAULT_VOICE)
-        form.addRow(self._wrap_label(i18n.tr("options.voice")), self.voice_combo)
+        _add_row(i18n.tr("options.voice"), self.voice_combo)
         from dubtool.app.voice_preview import make_preview_button
 
         self.preview_voice_btn = make_preview_button(
@@ -741,7 +767,7 @@ class SettingsDialog(QDialog):
             parent=page,
         )
         self.preview_voice_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        form.addRow("", self.preview_voice_btn)
+        _add_row("", self.preview_voice_btn)
 
         # The translation-model group (one model, no Fast/Accurate modes):
         # the fallback model used when the selected model is overloaded or
@@ -778,14 +804,15 @@ class SettingsDialog(QDialog):
                 continue
             self.fallback_combo.addItem(f"{model_id} ({pid})", model_id)
         self.fallback_combo.setToolTip(i18n.tr("settings.fallback_model_tip"))
-        form.addRow(self._wrap_label(i18n.tr("settings.fallback_model")), self.fallback_combo)
+        _add_row(i18n.tr("settings.fallback_model"), self.fallback_combo)
         self.refresh_models_btn = QPushButton(i18n.tr("settings.refresh_models_btn"))
         self.refresh_models_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.refresh_models_btn.clicked.connect(self._refresh_provider_models)
-        form.addRow("", self.refresh_models_btn)
+        _add_row("", self.refresh_models_btn)
         self.models_status = QLabel("")
         self.models_status.setWordWrap(True)
-        form.addRow("", self.models_status)
+        self.models_status.setVisible(False)
+        _add_row("", self.models_status)
 
         # Update 12 task 2.4: what happens when the selected model is
         # overloaded or out of quota for every key (disabled while a run is
@@ -795,7 +822,7 @@ class SettingsDialog(QDialog):
         self.overload_combo.addItem(i18n.tr("settings.overload_ask"), "ask")
         self.overload_combo.addItem(i18n.tr("settings.overload_wait"), "keep_backoff")
         self.overload_combo.setToolTip(i18n.tr("settings.overload_tooltip"))
-        form.addRow(self._wrap_label(i18n.tr("settings.overload_label")), self.overload_combo)
+        _add_row(i18n.tr("settings.overload_label"), self.overload_combo)
         self.whisper_combo = self._shrinkable(QComboBox())
         # AGU8 task 7: base/small/medium/large-v3 with a one-line description
         # ("nhanh nhất", "cân bằng", …) baked into the item text.
@@ -815,11 +842,11 @@ class SettingsDialog(QDialog):
             )
         else:
             self.whisper_combo.setToolTip(i18n.tr("settings.whisper_size_hint"))
-        form.addRow(self._wrap_label(i18n.tr("settings.whisper_model")), self.whisper_combo)
+        _add_row(i18n.tr("settings.whisper_model"), self.whisper_combo)
         self.device_combo = self._shrinkable(QComboBox())
         for dev in ("auto", "cpu", "cuda"):
             self.device_combo.addItem(dev, dev)
-        form.addRow(self._wrap_label(i18n.tr("settings.whisper_device")), self.device_combo)
+        _add_row(i18n.tr("settings.whisper_device"), self.device_combo)
         # AGU8 6.3 fidelity preset: the meaning-vs-timing trade-off.
         self.priority_combo = self._shrinkable(QComboBox())
         for key in ("faithful", "balanced", "timing"):
@@ -827,19 +854,20 @@ class SettingsDialog(QDialog):
                 i18n.tr("settings.priority_" + key), key
             )
         self.priority_combo.setToolTip(i18n.tr("settings.priority_tooltip"))
-        form.addRow(self._wrap_label(i18n.tr("settings.priority")), self.priority_combo)
+        _add_row(i18n.tr("settings.priority"), self.priority_combo)
         # AGU6 4.2: "Mức dùng CPU / CPU usage" — thread budget for Whisper
         # and the FFmpeg encode (low = 1/4 of cores, balanced = 1/2, max = all).
         self.cpu_combo = self._shrinkable(QComboBox())
         self.cpu_combo.addItem(i18n.tr("settings.cpu_low"), "low")
         self.cpu_combo.addItem(i18n.tr("settings.cpu_balanced"), "balanced")
         self.cpu_combo.addItem(i18n.tr("settings.cpu_maximum"), "maximum")
-        form.addRow(self._wrap_label(i18n.tr("settings.cpu_usage")), self.cpu_combo)
+        _add_row(i18n.tr("settings.cpu_usage"), self.cpu_combo)
         # AGU9 10.4: the punctuation-hint checkbox — present, not decided.
         # Default stays off; the tooltip states the measured trade-off.
         self.asr_prompt_check = QCheckBox(i18n.tr("settings.asr_prompt"))
         self.asr_prompt_check.setToolTip(i18n.tr("settings.asr_prompt_tooltip"))
-        form.addRow(self.asr_prompt_check)
+        grid.addWidget(self.asr_prompt_check, row_idx, 0, 1, 2)
+        grid.setRowStretch(row_idx + 1, 1)
         return self._wrap_tab_scroll(page)
 
     def _refresh_provider_models(self) -> None:
@@ -860,14 +888,18 @@ class SettingsDialog(QDialog):
                 providers.append(pid)
                 keys[pid] = provider_keys[0]
         if not providers:
-            self.models_status.setText(i18n.tr("settings.refresh_none"))
+            self._set_models_status(i18n.tr("settings.refresh_none"))
             return
         self._refreshing = True
         self.refresh_models_btn.setEnabled(False)
-        self.models_status.setText(i18n.tr("settings.refresh_started"))
+        self._set_models_status(i18n.tr("settings.refresh_started"))
         self._refresh_work.fire(lambda: [
             (pid, _fetch_models(pid, keys[pid])) for pid in providers
         ])
+
+    def _set_models_status(self, text: str) -> None:
+        self.models_status.setText(text)
+        self.models_status.setVisible(bool(text))
 
     def _on_models_fetched(self, payload) -> None:
         self._refreshing = False
@@ -877,7 +909,7 @@ class SettingsDialog(QDialog):
             and len(payload) == 2
             and payload[0] == "__error__"
         ):
-            self.models_status.setText(i18n.tr("settings.refresh_none"))
+            self._set_models_status(i18n.tr("settings.refresh_none"))
             return
         s = settings.load()
         known = list(s.get("known_models") or [])
@@ -899,11 +931,11 @@ class SettingsDialog(QDialog):
                             f"{model_id} ({pid})", model_id
                         )
         if not added_total:
-            self.models_status.setText(i18n.tr("settings.refresh_none"))
+            self._set_models_status(i18n.tr("settings.refresh_none"))
             return
         s["known_models"] = known  # ids only, never any secret
         settings.save(s)
-        self.models_status.setText(i18n.tr("settings.refresh_added", n=added_total))
+        self._set_models_status(i18n.tr("settings.refresh_added", n=added_total))
 
     # ------------------------------------------------ offline VieNeu voices
     def _populate_voices(self, mode: str, preferred_voice: str | None = None) -> None:
@@ -988,8 +1020,8 @@ class SettingsDialog(QDialog):
         days_lbl.setWordWrap(True)
         self.jobs_days_spin = QSpinBox(group)
         self.jobs_days_spin.setRange(1, 365)
-        self.jobs_days_spin.setMinimumWidth(130)
-        self.jobs_days_spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.jobs_days_spin.setMinimumWidth(140)
+        self.jobs_days_spin.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         limits_grid.addWidget(days_lbl, 0, 0)
         limits_grid.addWidget(self.jobs_days_spin, 0, 1)
 
@@ -1005,8 +1037,8 @@ class SettingsDialog(QDialog):
         self.jobs_total_mb_spin = QSpinBox(group)
         self.jobs_total_mb_spin.setRange(200, 200000)
         self.jobs_total_mb_spin.setSuffix(" MB")
-        self.jobs_total_mb_spin.setMinimumWidth(130)
-        self.jobs_total_mb_spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.jobs_total_mb_spin.setMinimumWidth(140)
+        self.jobs_total_mb_spin.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         limits_grid.addWidget(mb_lbl, 2, 0)
         limits_grid.addWidget(self.jobs_total_mb_spin, 2, 1)
         gv.addLayout(limits_grid)
