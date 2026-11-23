@@ -261,9 +261,14 @@ class GroqProvider:
         )
         if use_json_obj:
             kwargs["response_format"] = {"type": "json_object"}
-        # Disable Qwen3 chain-of-thought on Groq so translation stays fast & clean.
-        if "qwen3" in self.model.lower() and self.model not in self._reasoning_opt_degraded:
-            kwargs["extra_body"] = {"reasoning_effort": "none"}
+        # Keep reasoning minimal/off on Groq models so translation stays fast &
+        # doesn't burn Free Tier TPM on internal chain-of-thought.
+        mid_low = self.model.lower()
+        if self.model not in self._reasoning_opt_degraded:
+            if "qwen3" in mid_low:
+                kwargs["extra_body"] = {"reasoning_effort": "none"}
+            elif "gpt-oss" in mid_low:
+                kwargs["extra_body"] = {"reasoning_effort": "low"}
 
         response = self._client_for(key).chat.completions.create(**kwargs)
         choice = response.choices[0] if getattr(response, "choices", None) else None
@@ -327,6 +332,8 @@ class GroqProvider:
             return InvalidKeyError(
                 f"groq rejected the API key ({status})", key_used=self.current_key()
             )
+        if status == 404:
+            return InternalLLMError(f"groq model not found (404): {exc}")
         if status == 413:
             return RequestTooLargeError("groq request too large (413)", status=413)
         if status == 429:

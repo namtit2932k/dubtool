@@ -73,20 +73,9 @@ gemini-3.8-flash:
   chunk_max_chars: 1200
   max_output_tokens: 8000
   verified: ai.google.dev/gemini-api/docs/models (2026-11-20)
-llama-3.3-70b-versatile:
+qwen/qwen3.8-27b:
   provider: groq
-  label: Llama 3.3 70B Versatile (Groq)
-  paid: false
-  structured: json_object
-  reasoning: false
-  translate_concurrency: 1
-  request_timeout_s: 60
-  chunk_max_chars: 1400
-  max_output_tokens: 8000
-  verified: console.groq.com/docs/models (2026-11-24)
-qwen/qwen3-32b:
-  provider: groq
-  label: Qwen3 32B — Tốt cho tiếng Trung (Groq)
+  label: Qwen 3.8 27B — Nhanh, tốt cho tiếng Trung (Groq)
   paid: false
   structured: json_object
   reasoning: false
@@ -94,7 +83,7 @@ qwen/qwen3-32b:
   request_timeout_s: 60
   chunk_max_chars: 1200
   max_output_tokens: 8000
-  verified: console.groq.com/docs/models (2026-11-24)
+  verified: console.groq.com /openai/v1/models live probe (2026-11-24)
 openai/gpt-oss-120b:
   provider: groq
   label: GPT-OSS 120B (Groq)
@@ -105,10 +94,10 @@ openai/gpt-oss-120b:
   request_timeout_s: 60
   chunk_max_chars: 1400
   max_output_tokens: 8000
-  verified: console.groq.com/docs/models (2026-11-24)
-llama-3.1-8b-instant:
+  verified: console.groq.com /openai/v1/models live probe (2026-11-24)
+openai/gpt-oss-20b:
   provider: groq
-  label: Llama 3.1 8B Instant (Groq)
+  label: GPT-OSS 20B (Groq)
   paid: false
   structured: json_object
   reasoning: false
@@ -116,7 +105,7 @@ llama-3.1-8b-instant:
   request_timeout_s: 60
   chunk_max_chars: 1200
   max_output_tokens: 8000
-  verified: console.groq.com/docs/models (2026-11-24)
+  verified: console.groq.com /openai/v1/models live probe (2026-11-24)
 gpt-5.4-nano:
   provider: openai
   label: GPT-5.4 nano

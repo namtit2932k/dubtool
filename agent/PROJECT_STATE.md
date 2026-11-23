@@ -32,7 +32,8 @@
         - Sửa `_open_in_explorer` dùng Win32 Shell API `SHOpenFolderAndSelectItems` (64-bit safe, fallback `os.startfile`) thay cho `explorer "/select,..."` bị lỗi dấu ngoặc kép khi thư mục có khoảng trắng (như `New folder`) làm Explorer mở nhầm `OneDrive\Documents`.
       - **Tích hợp nhà cung cấp Groq Cloud (miễn phí, nhanh, dùng lại SDK `openai`, 0 MB tăng thêm):**
         - Thêm `src/dubtool/llm/groq.py` (`GroqProvider` gọi `https://api.groq.com/openai/v1`, Chat Completions, `json_object` + fallback tự động khi `json_validate_failed`, tắt `<think>` cho `qwen/qwen3-32b`, bắt `finish_reason=length` → `RequestTooLargeError`, map 429 RPM/RPD + `Retry-After`).
-        - Thêm 4 model Groq miễn phí vào `packaging/models.yaml`: `llama-3.3-70b-versatile`, `qwen/qwen3-32b` (tốt cho tiếng Trung), `openai/gpt-oss-120b`, `llama-3.1-8b-instant`.
+        - Thêm 3 model Groq miễn phí đã kiểm chứng live trên `/openai/v1/models` (2026-11-24): `qwen/qwen3.8-27b` (1.32s, tắt `<think>`, tốt cho tiếng Trung), `openai/gpt-oss-120b` (2.35s, `reasoning_effort=low`), `openai/gpt-oss-20b` (2.69s, `reasoning_effort=low`).
+        - Bỏ `provider:model` khỏi `api._stable_job_id` để đổi model dịch vẫn tái sử dụng kết quả S1/S2 (Whisper) trong khi `stage_inputs_hash` vẫn invalidate đúng S3/S5.
         - Nối đầy đủ vào `secrets.py` (`groq_api_keys`, `GROQ_API_KEY`, nhận diện prefix `gsk_`), `key_test.py` (`GET /openai/v1/models`), `settings_dialog.py` (tab Khóa API + Làm mới danh sách mô hình), `main_window.py`, `i18n.py`, `api.py`, `diagnostics.py`/`failguard.py` (che tuyệt đối `gsk_...`), và hỗ trợ **fallback chéo hãng** (Gemini 503 ↔ Groq).
       - Test mới tại `tests/test_s3_optimizations.py` (10 tests), `tests/test_s6_and_explorer_fixes.py` (5 tests), và `tests/test_groq_provider.py` (7 tests).
 

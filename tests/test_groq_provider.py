@@ -25,19 +25,18 @@ from dubtool.stages import s3_translate as s3
 def test_groq_models_in_catalog_and_not_paid():
     cat = catalog_mod.load()
     for mid in (
-        "llama-3.3-70b-versatile",
-        "qwen/qwen3-32b",
+        "qwen/qwen3.8-27b",
         "openai/gpt-oss-120b",
-        "llama-3.1-8b-instant",
+        "openai/gpt-oss-20b",
     ):
         assert mid in cat, mid
         info = cat[mid]
         assert info.provider == "groq"
         assert info.paid is False
         assert info.translate_concurrency == 1
-    assert catalog_mod.infer_provider("llama-3.3-70b-versatile") == "groq"
-    assert catalog_mod.infer_provider("qwen/qwen3-32b") == "groq"
+    assert catalog_mod.infer_provider("qwen/qwen3.8-27b") == "groq"
     assert catalog_mod.infer_provider("openai/gpt-oss-120b") == "groq"
+    assert catalog_mod.infer_provider("openai/gpt-oss-20b") == "groq"
 
 
 def test_groq_key_detection_and_redaction():
@@ -86,7 +85,7 @@ def test_groq_provider_complete_qwen3_think_strip_and_json_fallback(monkeypatch)
             )
 
     fake_client = SimpleNamespace(chat=SimpleNamespace(completions=_FakeCompletions()))
-    prov = GroqProvider(model="qwen/qwen3-32b", api_keys=["gsk_FAKEKEY12345678901234567890"])
+    prov = GroqProvider(model="qwen/qwen3.8-27b", api_keys=["gsk_FAKEKEY12345678901234567890"])
     monkeypatch.setattr(prov, "_client_for", lambda _k: fake_client)
 
     res = prov.complete("sys", "usr", json_mode=True)
@@ -149,10 +148,10 @@ def test_get_provider_and_key_test_route_groq(monkeypatch):
         cfg,
         "groq",
         api_keys={"groq": ["gsk_FAKEKEY12345678901234567890"]},
-        model_override="llama-3.3-70b-versatile",
+        model_override="qwen/qwen3.8-27b",
     )
     assert isinstance(prov, GroqProvider)
-    assert prov.model == "llama-3.3-70b-versatile"
+    assert prov.model == "qwen/qwen3.8-27b"
     assert prov._base_url == GROQ_BASE_URL
 
     seen_urls: list[str] = []
@@ -179,7 +178,7 @@ def test_cross_provider_fallback_gemini_to_groq(tmp_path: Path, monkeypatch):
 
     cfg = Config()
     cfg.llm_model = "gemini-3.5-flash-lite"
-    cfg.llm_fallback_model = "qwen/qwen3-32b"
+    cfg.llm_fallback_model = "qwen/qwen3.8-27b"
     cfg.llm = {
         **(cfg.llm or {}),
         "backoff_s": [0.001, 0.001],
@@ -228,6 +227,18 @@ def test_cross_provider_fallback_gemini_to_groq(tmp_path: Path, monkeypatch):
             "groq": ["gsk_FAKE12345678901234567890"],
         },
     )
-    assert built == [("gemini", "gemini-3.5-flash-lite"), ("groq", "qwen/qwen3-32b")]
+    assert built == [("gemini", "gemini-3.5-flash-lite"), ("groq", "qwen/qwen3.8-27b")]
     translated = json.loads(job.translated_path.read_text(encoding="utf-8"))
     assert translated[0]["vi"] == "Xin chào thế giới."
+
+
+def test_stable_job_id_reuses_s1_s2_across_model_switch(tmp_path: Path):
+    """Switching LLM provider/model must reuse the same job_id so S1/S2
+    (Whisper transcription) are skipped instead of re-running for 15+ min."""
+    from dubtool.api import DubOptions, _stable_job_id
+
+    vid = tmp_path / "demo.mp4"
+    vid.write_bytes(b"mp4data")
+    id_gemini = _stable_job_id(vid, DubOptions(provider="gemini", model="gemini-3.5-flash-lite"))
+    id_groq = _stable_job_id(vid, DubOptions(provider="groq", model="qwen/qwen3.8-27b"))
+    assert id_gemini == id_groq

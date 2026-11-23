@@ -37,7 +37,7 @@ PROVIDERS = ("gemini", "groq", "openai", "anthropic", "ollama")
 # per-model detail now lives in the catalog (packaging/models.yaml).
 PROVIDER_DEFAULTS = {
     "gemini": {"model": "gemini-3.5-flash-lite", "chunk_size": 25},
-    "groq": {"model": "llama-3.3-70b-versatile", "chunk_size": 20},
+    "groq": {"model": "qwen/qwen3.8-27b", "chunk_size": 20},
     "openai": {"model": "gpt-5.4-nano", "chunk_size": 40},
     "ollama": {"model": "gemma3:12b", "chunk_size": 20, "host": "http://localhost:11434", "timeout_sec": 300},
     "anthropic": {"model": "claude-sonnet-5-5", "chunk_size": 40},

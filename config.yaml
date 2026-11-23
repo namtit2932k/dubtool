@@ -52,7 +52,7 @@ llm:
     model: gemini-3.5-flash-lite   # default: stable, free-of-charge tier (checked official docs 2026-10-25)
     chunk_size: 25
   groq:
-    model: llama-3.3-70b-versatile # free-tier fast OpenAI-compatible endpoint (console.groq.com)
+    model: qwen/qwen3.8-27b        # free-tier fast OpenAI-compatible endpoint (console.groq.com)
     chunk_size: 20
   ollama:
     host: http://localhost:11434

@@ -972,6 +972,11 @@ def run(
         "gemini-3.1-flash-lite",
         "gemini-flash-lite-latest",
     )
+    _GROQ_FALLBACK_CHAIN = (
+        "qwen/qwen3.8-27b",
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+    )
     tried_models: set[str] = {str(getattr(provider, "model", "") or "")}
     switch_lock = threading.Lock()
 
@@ -1001,6 +1006,17 @@ def run(
             pid == "gemini" or catalog_mod.require(fallback_model).provider == "gemini"
         ):
             for m in _GEMINI_FALLBACK_CHAIN:
+                if m not in candidates:
+                    candidates.append(m)
+        has_groq_keys = (
+            bool(api_keys.get("groq"))
+            if isinstance(api_keys, dict)
+            else (pid == "groq")
+        )
+        if has_groq_keys and (
+            pid == "groq" or catalog_mod.require(fallback_model).provider == "groq"
+        ):
+            for m in _GROQ_FALLBACK_CHAIN:
                 if m not in candidates:
                     candidates.append(m)
 

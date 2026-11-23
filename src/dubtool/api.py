@@ -133,7 +133,9 @@ class _LogBridge(logging.Handler):
 
 
 def _stable_job_id(video: Path, options: DubOptions) -> str:
-    """Same video (path, size, mtime) + relevant options -> same job id,\n    so re-running the same inputs resumes instead of starting over."""
+    """Same video (path, size, mtime) + output/voice options -> same job id,
+    so switching translation models reuses S1/S2 (Whisper transcript) while
+    stage_inputs_hash still invalidates S3/S5 when the LLM model changes."""
     import hashlib
 
     h = hashlib.sha256()
@@ -141,7 +143,6 @@ def _stable_job_id(video: Path, options: DubOptions) -> str:
         str(video.resolve()),
         str(video.stat().st_size),
         str(int(video.stat().st_mtime)),
-        (options.provider or "") + ":" + options.model,
         "burn" if options.burn_subtitles else "noburn",
         "srt" if options.save_srt else "nosrt",
         f"{options.original_gain_db}",
