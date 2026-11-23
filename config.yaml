@@ -38,8 +38,8 @@ llm:
   split_min_units: 4           # a chunk must be larger than this to split
   split_min_chars: 600         # ...and larger than this many source chars
   # Request size caps (chars first, then unit count; CJK scripts cap chars at 900).
-  chunk_max_chars: 1800        # ~25-30 utterances/request -> 3-4x fewer API calls & 503s
-  chunk_max_units: 30
+  chunk_max_chars: 1800        # ~15-20 utterances/request -> 2.5x fewer API calls, avoids output truncation
+  chunk_max_units: 20
   breaker_failures: 3          # consecutive failed REQUESTS before the breaker opens
   breaker_cooldown_s: 60       # the open window; a half-open probe decides
   fallback_after_opens: 2      # breaker opens this many times -> Fast model

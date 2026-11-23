@@ -970,7 +970,6 @@ def run(
     _GEMINI_FALLBACK_CHAIN = (
         "gemini-3.5-flash-lite",
         "gemini-3.1-flash-lite",
-        "gemini-3-flash-preview",
         "gemini-flash-lite-latest",
     )
     tried_models: set[str] = {str(getattr(provider, "model", "") or "")}

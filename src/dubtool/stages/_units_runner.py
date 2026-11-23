@@ -61,7 +61,7 @@ def adaptive_state(config, lang: str = "en") -> dict:
     max_chars = int(llm_cfg.get("chunk_max_chars", 1800) or 1800)
     if lang_mod.is_spaceless(lang):
         max_chars = min(max_chars, CJK_MAX_CAP_CHARS)
-    max_units = int(llm_cfg.get("chunk_max_units", 30) or 30)
+    max_units = int(llm_cfg.get("chunk_max_units", 20) or 20)
     return {
         "max_chars": max_chars,
         "cur_chars": max_chars,
@@ -129,7 +129,7 @@ def run_units_parallel(
 
     if adaptive is None:
         adaptive = {
-            "max_chars": 1800, "cur_chars": 1800, "max_units": 30,
+            "max_chars": 1800, "cur_chars": 1800, "max_units": 20,
             "timeout_s": 0.0, "quick_streak": 0, "latencies": [],
         }
 

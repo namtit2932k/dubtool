@@ -63,21 +63,21 @@ def test_default_punctuate_off_skips_llm_prepass(tmp_path: Path, monkeypatch):
 
 
 def test_adaptive_chunk_sizing_cjk_vs_latin():
-    """CJK packs ~30 short units up to 900 chars (not 8 units / 150 chars);
-    Latin packs up to 30 units / 1800 chars."""
+    """CJK packs ~20 short units up to 900 chars (not 8 units / 150 chars);
+    Latin packs up to 20 units / 1800 chars."""
     cfg = Config()
     st_zh = adaptive_state(cfg, lang="zh")
-    assert st_zh["max_units"] == 30
+    assert st_zh["max_units"] == 20
     assert st_zh["max_chars"] == 900
 
     st_en = adaptive_state(cfg, lang="en")
-    assert st_en["max_units"] == 30
+    assert st_en["max_units"] == 20
     assert st_en["max_chars"] == 1800
 
-    # 30 short Chinese utterances (~15 chars each = 450 chars total) -> 1 request!
+    # 20 short Chinese utterances (~15 chars each = 300 chars total) -> 1 request!
     zh_units = [
         {"unit_id": i, "text": "今天天气非常好我们去玩吧你好吗", "start": float(i), "end": float(i + 1), "max_chars": 40}
-        for i in range(30)
+        for i in range(20)
     ]
     chunks_seen: list[int] = []
     run_units_parallel(
@@ -89,7 +89,7 @@ def test_adaptive_chunk_sizing_cjk_vs_latin():
         concurrency=1,
         adaptive=st_zh,
     )
-    assert chunks_seen == [30]
+    assert chunks_seen == [20]
 
 
 def test_fallback_chain_never_loops_on_same_model(tmp_path: Path, monkeypatch):
@@ -147,6 +147,8 @@ def test_fallback_chain_never_loops_on_same_model(tmp_path: Path, monkeypatch):
     assert models_built[0] == "gemini-3.5-flash-lite"
     assert models_built[1] == "gemini-3.6-flash"
     assert "gemini-3.1-flash-lite" in models_built
+    # Slow/preview thinking model must never be pulled into auto-fallback implicitly.
+    assert "gemini-3-flash-preview" not in models_built
 
 
 def test_fallback_recovers_on_healthy_sibling_after_congested_fallback(tmp_path: Path, monkeypatch):
@@ -339,4 +341,56 @@ def test_gemini_provider_attaches_response_json_schema(monkeypatch):
 
     mapped = prov._map_error(_Schema400("Invalid response_json_schema field"), "k")
     assert isinstance(mapped, SchemaRejectedError)
+
+
+def test_gemini_max_tokens_and_truncated_json_trigger_split(monkeypatch):
+    """finish_reason=MAX_TOKENS raises RequestTooLargeError, and a truncated JSON
+    reply on a split-eligible chunk raises SplitRequiredError so translate_resilient
+    halves the chunk instead of failing the stage."""
+    from dubtool.llm.base import RequestTooLargeError, SplitRequiredError
+    from dubtool.llm.client import LLMClient
+    from dubtool.llm.gemini import GeminiProvider
+
+    class _CutCandidate:
+        finish_reason = "FinishReason.MAX_TOKENS"
+
+    class _CutResp:
+        text = '{"items":[{"id":0,"vi":"cut off'
+        usage_metadata = None
+        candidates = [_CutCandidate()]
+
+    class _FakeModels:
+        def generate_content(self, *, model, contents, config):
+            return _CutResp()
+
+    class _FakeClient:
+        models = _FakeModels()
+
+    prov = GeminiProvider(model="gemini-3.5-flash-lite", api_keys=["AIzaFAKEKEY12345678901234567890"])
+    monkeypatch.setattr(prov, "client_for", lambda _k: _FakeClient())
+    with pytest.raises(RequestTooLargeError):
+        prov.complete("sys", "usr", json_mode=True)
+
+    # Even when a provider returns a truncated JSON string with STOP finish_reason,
+    # LLMClient raises SplitRequiredError on split-eligible chunks.
+    class _TruncatedStopProvider:
+        name = "gemini"
+        model = "gemini-3.5-flash-lite"
+        structured = "none"
+        timeout_s = 30.0
+
+        def complete(self, system, user, *, schema=None, json_mode=True, max_tokens=8000):
+            return LLMResult(text='{"items":[{"id":0,"vi":"bị cắt giữa chừng', input_tokens=10, output_tokens=10)
+
+    client = LLMClient(
+        _TruncatedStopProvider(),
+        options={"split_on_timeout": True, "split_min_units": 4, "split_min_chars": 600},
+    )
+    client.request_units = 20
+    client.request_chars = 500
+    with pytest.raises(SplitRequiredError):
+        client.translate_batch(
+            [{"id": i, "text": "hello", "max_chars": 40} for i in range(20)], []
+        )
+
 

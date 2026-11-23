@@ -905,6 +905,22 @@ class LLMClient:
                 except LLMError as exc:
                     last_error = exc
                     _log_raw_reply_diagnosis(text)
+                    # A JSON reply cut off mid-sentence (does not end with '}' or ']')
+                    # on a split-eligible chunk will likely truncate again at the same
+                    # size — split the chunk in two once instead of failing the run.
+                    if (
+                        text
+                        and not text.strip().endswith(("}", "]"))
+                        and bool(self.options.get("split_on_timeout", False))
+                        and self._split_eligible()
+                    ):
+                        units = self.request_units or 0
+                        _panel("llm.chunk_split", n=units, err="truncated reply")
+                        raise SplitRequiredError(
+                            f"chunk of {units} units returned a truncated JSON reply — "
+                            "splitting in two once",
+                            status=400,
+                        ) from exc
                     error_note = error_note_builder(exc)
                     log.warning("llm validation retry: %s", exc)
             except (StageCancelled, OverloadFallbackFast, SplitRequiredError, budget_mod.BudgetExhausted):

@@ -22,6 +22,7 @@ from dubtool.llm.base import (
     NetworkLLMError,
     RateLimitError,
     RateLimitExhausted,
+    RequestTooLargeError,
     SchemaRejectedError,
     ServerErrorLLMError,
     TimeoutLLMError,
@@ -283,6 +284,17 @@ class GeminiProvider:
         input_tokens = getattr(usage, "prompt_token_count", None) if usage else None
         output_tokens = getattr(usage, "candidates_token_count", None) if usage else None
         thinking_tokens = getattr(usage, "thoughts_token_count", None) if usage else None
+
+        candidates = getattr(response, "candidates", None) or []
+        if candidates:
+            finish_reason = getattr(candidates[0], "finish_reason", None)
+            if finish_reason is not None and "MAX_TOKENS" in str(finish_reason).upper():
+                raise RequestTooLargeError(
+                    "the reply hit the output budget (finish_reason=MAX_TOKENS) and "
+                    "arrived truncated",
+                    status=400,
+                    cut=True,
+                )
 
         text = None
         try:
