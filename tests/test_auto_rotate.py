@@ -77,9 +77,37 @@ def test_build_interleaved_slots_spreads_providers_and_tiers():
     assert len(t1) == 8
     # First 4 Tier-1 slots alternate Gemini and Groq 1:1
     assert [s.provider for s in t1[:4]] == ["gemini", "groq", "gemini", "groq"]
-    # No reasoning gpt-oss models in Tier 2 (they truncate under 1,000 OTPM)
-    assert t2 == []
+    # Tier 2 holds Gemini 3.6/3.8 Flash overflow (2 models x 2 keys = 4) and NO gpt-oss reasoning models
+    assert len(t2) == 4
+    assert all(s.provider == "gemini" for s in t2)
+    assert {s.model for s in t2} == {"gemini-3.6-flash", "gemini-3.8-flash"}
     assert all("gpt-oss" not in s.model for s in slots)
+
+
+def test_auto_rotate_adaptive_503_cooldown_ladder():
+    clock = _FakeClock(start=1000.0)
+    prov = AutoRotateProvider(
+        api_keys={"gemini": ["AIzaK1", "AIzaK2"]},
+        clock=clock,
+        provider_factory=lambda p, m, k: _FakeInner(p, m, k, lambda *a: LLMResult(text="ok")),
+    )
+    slot = next(s for s in prov._slots if s.model == "gemini-3.5-flash-lite")
+
+    # 1st 503 -> 15s
+    assert prov._mark_model_503(slot) == 15.0
+    # Concurrent 503 from a 2nd thread while still cooling -> stays 15s (no double bump)
+    clock.advance(2.0)
+    assert prov._mark_model_503(slot) == 15.0
+    # After 15s expires, 2nd wave 503 -> 30s
+    clock.advance(14.0)
+    assert prov._mark_model_503(slot) == 30.0
+    # After 30s expires, 3rd wave 503 -> 45s
+    clock.advance(31.0)
+    assert prov._mark_model_503(slot) == 45.0
+    # Any success resets streak back to 15s
+    prov._clear_model_503_streak(slot)
+    clock.advance(46.0)
+    assert prov._mark_model_503(slot) == 15.0
 
 
 def test_auto_rotate_round_robins_across_gemini_and_groq():

@@ -50,17 +50,22 @@ _GEMINI_TIER1_MODELS = (
     "gemini-flash-lite-latest",
 )
 _GROQ_TIER1_MODELS = ("qwen/qwen3.8-27b",)
-# Note: Groq's gpt-oss-120b / gpt-oss-20b are reasoning models that consume
-# 400-600 tokens of internal reasoning before emitting JSON, causing repeated
-# finish_reason=length truncations under Groq Free Tier's 1,000 OTPM cap.
-# Waiting a few seconds for a clean Tier-1 slot (Gemini or qwen3.8-27b) is
-# both faster and far more reliable than overflowing into reasoning models.
-_GROQ_TIER2_MODELS: tuple[str, ...] = ()
+# Tier 2 (overflow only when every Tier 1 slot is temporarily cooling down):
+# Gemini 3.6/3.8 Flash share Gemini's 8,000-token json_schema budget (never
+# truncated like Groq's reasoning gpt-oss models under 1,000 OTPM) and run on
+# separate clusters from Flash-Lite so they absorb Flash-Lite 503 bursts.
+_GEMINI_TIER2_MODELS = (
+    "gemini-3.6-flash",
+    "gemini-3.8-flash",
+)
 
-_MODEL_503_COOLDOWN_S = 45.0
-_MODEL_TIMEOUT_COOLDOWN_S = 30.0
+# Adaptive 503 cooldown ladder per model: 15s -> 30s -> 45s on consecutive 503s,
+# reset immediately back to 0 on any successful reply from that model.
+_MODEL_503_LADDER = (15.0, 30.0, 45.0)
+_MODEL_TIMEOUT_COOLDOWN_S = 25.0
 _DEFAULT_MINUTE_429_COOLDOWN_S = 25.0
 _MAX_TOTAL_WAIT_PER_CALL_S = 600.0
+_WAIT_LOG_DEDUP_S = 4.0
 
 
 @dataclass
@@ -139,11 +144,33 @@ def _build_interleaved_slots(
     else:
         tier1 = gemini_t1 or groq_t1
 
-    tier2: list[_Slot] = [
-        _Slot(provider="groq", model=m, key=k, key_pos=k_idx + 1, tier=2)
-        for m in _GROQ_TIER2_MODELS
-        for k_idx, k in enumerate(groq_keys)
-    ]
+    tier2: list[_Slot] = []
+    if gemini_keys and _GEMINI_TIER2_MODELS:
+        n_keys = len(gemini_keys)
+        n_models = len(_GEMINI_TIER2_MODELS)
+        seen_t2: set[tuple[str, int]] = set()
+        for step in range(n_models * n_keys):
+            m_idx = step % n_models
+            k_idx = (step + (step // n_models)) % n_keys
+            sig = (_GEMINI_TIER2_MODELS[m_idx], k_idx + 1)
+            if sig not in seen_t2:
+                seen_t2.add(sig)
+                tier2.append(
+                    _Slot(
+                        provider="gemini",
+                        model=_GEMINI_TIER2_MODELS[m_idx],
+                        key=gemini_keys[k_idx],
+                        key_pos=k_idx + 1,
+                        tier=2,
+                    )
+                )
+        for m in _GEMINI_TIER2_MODELS:
+            for k_idx, k in enumerate(gemini_keys):
+                if (m, k_idx + 1) not in seen_t2:
+                    seen_t2.add((m, k_idx + 1))
+                    tier2.append(
+                        _Slot(provider="gemini", model=m, key=k, key_pos=k_idx + 1, tier=2)
+                    )
     return tier1 + tier2
 
 
@@ -190,6 +217,8 @@ class AutoRotateProvider:
         self._cursor_t2 = 0
         self._inner_cache: dict[tuple[str, str, str], object] = {}
         self._model_cooldowns: dict[tuple[str, str], float] = {}
+        self._model_503_streak: dict[tuple[str, str], int] = {}
+        self._last_wait_emit_at: float = -1e9
         self._n_gemini = len(g_keys)
         self._n_groq = len(q_keys)
         self._announced_pool = False
@@ -293,6 +322,27 @@ class AutoRotateProvider:
             prev = self._model_cooldowns.get((slot.provider, slot.model), 0.0)
             self._model_cooldowns[(slot.provider, slot.model)] = max(prev, until)
 
+    def _mark_model_503(self, slot: _Slot) -> float:
+        """Adaptive 503 cooldown (15s -> 30s -> 45s). Concurrent 503s from a
+        second worker while the model is already cooling neither double-bump
+        nor extend the existing cooldown window."""
+        now = self._clock()
+        key = (slot.provider, slot.model)
+        with self._lock:
+            prev_until = self._model_cooldowns.get(key, 0.0)
+            streak = self._model_503_streak.get(key, 0)
+            if now < prev_until:
+                return _MODEL_503_LADDER[min(max(1, streak) - 1, len(_MODEL_503_LADDER) - 1)]
+            streak += 1
+            self._model_503_streak[key] = streak
+            cd = _MODEL_503_LADDER[min(streak - 1, len(_MODEL_503_LADDER) - 1)]
+            self._model_cooldowns[key] = now + cd
+            return cd
+
+    def _clear_model_503_streak(self, slot: _Slot) -> None:
+        with self._lock:
+            self._model_503_streak.pop((slot.provider, slot.model), None)
+
     def _mark_slot_cooldown(self, slot: _Slot, seconds: float) -> None:
         until = self._clock() + max(1.0, seconds)
         with self._lock:
@@ -370,12 +420,20 @@ class AutoRotateProvider:
                 log.info("auto-rotate: all slots cooling down — waiting %.1fs", wait_s)
 
                 def _wait_msg(rem: float) -> str:
+                    sec = max(1, int(rem + 0.999))
+                    if sec < 2:
+                        return ""
+                    now_t = self._clock()
+                    with self._lock:
+                        if now_t - self._last_wait_emit_at < _WAIT_LOG_DEDUP_S:
+                            return ""
+                        self._last_wait_emit_at = now_t
                     try:
                         from dubtool.app import i18n
 
-                        return i18n.tr("llm.rate_pause", n=max(1, int(rem + 0.999)))
+                        return i18n.tr("llm.rate_pause", n=sec)
                     except Exception:
-                        return f"all keys cooling down ({int(rem)} s)"
+                        return f"all keys cooling down ({sec} s)"
 
                 slept = heartbeat.sleeping(wait_s, _wait_msg, self._cancel)
                 waited_total += max(0.0, float(slept))
@@ -399,6 +457,7 @@ class AutoRotateProvider:
                 )
                 if slot.provider == "groq":
                     self._sync_groq_pool_cooldown(slot, inner)
+                self._clear_model_503_streak(slot)
                 self.last_slot_label = slot.label
                 log.info("auto-rotate: succeeded via %s", slot.label)
                 return res
@@ -468,12 +527,15 @@ class AutoRotateProvider:
             except ServerErrorLLMError as exc:
                 last_err = exc
                 status = getattr(exc, "status", None)
-                cd = _MODEL_TIMEOUT_COOLDOWN_S if status == 504 else _MODEL_503_COOLDOWN_S
+                if status == 504:
+                    cd = _MODEL_TIMEOUT_COOLDOWN_S
+                    self._mark_model_cooldown(slot, cd)
+                else:
+                    cd = self._mark_model_503(slot)
                 log.warning(
                     "auto-rotate: %s server error (%s) — cooling model %.0fs, rotating immediately",
                     slot.label, status or "5xx", cd,
                 )
-                self._mark_model_cooldown(slot, cd)
                 self.switches += 1
                 continue
             except (TimeoutLLMError, NetworkLLMError) as exc:

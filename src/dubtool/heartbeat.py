@@ -110,7 +110,9 @@ def sleeping(seconds: float, text=None, cancel=None) -> float:
         now = time.monotonic()
         if text is not None and now - last_emit >= emit_step - 1e-6:
             try:
-                emit(text(round(max(0.0, remaining))))
+                msg = text(round(max(0.0, remaining)))
+                if msg:
+                    emit(msg)
             except Exception:
                 pass
             last_emit = now
