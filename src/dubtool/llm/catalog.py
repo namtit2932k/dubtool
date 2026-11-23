@@ -50,6 +50,13 @@ def _shipped() -> dict[str, dict]:
     """Baseline entries that must exist even when the file is missing
     from a bundle (resilience, mirroring the shipped defaults)."""
     return {
+        "auto-rotate": dict(
+            provider="auto", label="Tối ưu — Xoay tua toàn bộ API Key (Miễn phí)", paid=False,
+            structured="json_schema", reasoning=False,
+            translate_concurrency=2, request_timeout_s=60.0,
+            chunk_max_chars=1200, max_output_tokens=8000,
+            verified="shipped default",
+        ),
         "gemini-3.5-flash-lite": dict(
             provider="gemini", label="Gemini 3.5 Flash-Lite", paid=False,
             structured="json_schema", reasoning=False,
@@ -185,4 +192,4 @@ def grouped_order(path: Path | None = None) -> list[tuple[str, list[ModelInfo]]]
     return [(pid, groups.get(pid, [])) for pid in ("auto", "gemini", "groq", "openai", "anthropic", "ollama")]
 
 
-DEFAULT_MODEL_ID = "gemini-3.5-flash-lite"
+DEFAULT_MODEL_ID = "auto-rotate"

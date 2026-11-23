@@ -14,7 +14,7 @@ FILENAME = "settings.json"
 
 DEFAULTS: dict = {
     "language": "vi",            # vi | en
-    "model_id": "gemini-3.5-flash-lite",
+    "model_id": "auto-rotate",
     "fallback_model": "gemini-3.1-flash-lite",
     "overload_policy": "fallback_fast",
     "known_models": [],
@@ -59,8 +59,8 @@ def load(raw_path: Path | None = None) -> dict:
     # ignored; the model becomes the default gemini-3.5-flash-lite.
     if "last_mode" in (data or {}) or "mode_models" in (data or {}):
         import logging
-        logging.getLogger("dubtool").info("migrating legacy modes settings: resetting model to default gemini-3.5-flash-lite")
-        merged["model_id"] = "gemini-3.5-flash-lite"
+        logging.getLogger("dubtool").info("migrating legacy modes settings: resetting model to default auto-rotate")
+        merged["model_id"] = "auto-rotate"
     merged.pop("last_mode", None)
     merged.pop("mode_models", None)
     # AGU8 task 7.3: one key for the output folder. Migrate the old

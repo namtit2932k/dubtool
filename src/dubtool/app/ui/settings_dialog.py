@@ -720,6 +720,7 @@ class SettingsDialog(QDialog):
         lbl = QLabel(text)
         lbl.setWordWrap(True)
         lbl.setMinimumWidth(0)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         lbl.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         return lbl
 
@@ -738,7 +739,10 @@ class SettingsDialog(QDialog):
             nonlocal row_idx
             if label_text:
                 lbl = self._wrap_label(label_text)
-                grid.addWidget(lbl, row_idx, 0, Qt.AlignmentFlag.AlignVCenter)
+                # Do NOT pass an explicit alignment flag to grid.addWidget() for
+                # word-wrapped QLabels: Qt6 disables heightForWidth when a cell
+                # has an alignment flag, clipping wrapped lines vertically!
+                grid.addWidget(lbl, row_idx, 0)
                 grid.addWidget(field, row_idx, 1, Qt.AlignmentFlag.AlignVCenter)
             else:
                 grid.addWidget(field, row_idx, 1)

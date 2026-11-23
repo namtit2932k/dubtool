@@ -22,7 +22,7 @@ def test_settings_defaults_and_roundtrip(tmp_path, monkeypatch):
     s = settings.load()
     assert s["language"] == "vi"
     assert s["burn_subtitles"] is True
-    assert s["model_id"] == "gemini-3.5-flash-lite"
+    assert s["model_id"] == "auto-rotate"
     s["original_gain_db"] = -20
     settings.save(s)
     assert settings.load()["original_gain_db"] == -20
@@ -164,7 +164,7 @@ def test_settings_migrates_legacy_modes(tmp_path, monkeypatch):
     p.write_text(json.dumps({"mode_models": {"fast": "old-fast"}, "last_mode": "accurate"}), encoding="utf-8")
     monkeypatch.setattr(settings, "path", lambda: p)
     loaded = settings.load()
-    assert loaded["model_id"] == "gemini-3.5-flash-lite"
+    assert loaded["model_id"] == "auto-rotate"
     assert "mode_models" not in loaded
     assert "last_mode" not in loaded
 

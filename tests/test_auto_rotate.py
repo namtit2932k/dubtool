@@ -60,7 +60,7 @@ def test_catalog_contains_auto_rotate_and_preserves_default():
     assert info.paid is False
     assert info.translate_concurrency == 2
     assert info.max_output_tokens == 8000
-    assert catalog_mod.DEFAULT_MODEL_ID == "gemini-3.5-flash-lite"
+    assert catalog_mod.DEFAULT_MODEL_ID == AUTO_ROTATE_MODEL_ID
     assert "auto" not in catalog_mod.PAID_PROVIDERS
     groups = dict(catalog_mod.grouped_order())
     assert [e.id for e in groups["auto"]] == [AUTO_ROTATE_MODEL_ID]

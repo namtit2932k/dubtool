@@ -355,7 +355,7 @@ def test_voice_preview_cache_and_default_gemini_catalog(monkeypatch, tmp_path):
     from dubtool.app import paths, voice_preview
     from dubtool.llm import catalog
 
-    assert catalog.DEFAULT_MODEL_ID == "gemini-3.5-flash-lite"
+    assert catalog.DEFAULT_MODEL_ID == "auto-rotate"
     items = catalog.load()
     assert "gemini-3.5-flash-lite" in items
     assert "gemini-3.1-flash-lite" in items
