@@ -15,7 +15,7 @@ from pathlib import Path
 
 log = logging.getLogger("dubtool")
 
-PROVIDERS = ("gemini", "groq", "openai", "anthropic", "ollama")
+PROVIDERS = ("auto", "gemini", "groq", "openai", "anthropic", "ollama")
 PAID_PROVIDERS = ("openai", "anthropic")
 
 
@@ -129,6 +129,7 @@ def _build(model_id: str, raw: dict) -> ModelInfo | None:
 
 
 _DEFAULT_PROVIDER_BY_PREFIX = (
+    ("auto-", "auto"),
     ("claude", "anthropic"),
     ("openai/", "groq"),
     ("qwen/", "groq"),
@@ -181,7 +182,7 @@ def entries_by_provider(path: Path | None = None) -> dict[str, list[ModelInfo]]:
 
 def grouped_order(path: Path | None = None) -> list[tuple[str, list[ModelInfo]]]:
     groups = entries_by_provider(path)
-    return [(pid, groups.get(pid, [])) for pid in ("gemini", "groq", "openai", "anthropic", "ollama")]
+    return [(pid, groups.get(pid, [])) for pid in ("auto", "gemini", "groq", "openai", "anthropic", "ollama")]
 
 
 DEFAULT_MODEL_ID = "gemini-3.5-flash-lite"

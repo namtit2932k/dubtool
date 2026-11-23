@@ -7,6 +7,17 @@
 # temperature/top_p sent, larger output budget). Defaults come with the
 # entry: translate_concurrency, request_timeout_s, chunk_max_chars,
 # max_output_tokens. NO PRICES HERE.
+auto-rotate:
+  provider: auto
+  label: Tối ưu — Xoay tua toàn bộ API Key (Miễn phí)
+  paid: false
+  structured: json_schema
+  reasoning: false
+  translate_concurrency: 2
+  request_timeout_s: 60
+  chunk_max_chars: 1200
+  max_output_tokens: 8000
+  verified: built-in multi-key free-tier pool (Gemini + Groq)
 gemini-3.5-flash-lite:
   provider: gemini
   label: Gemini 3.5 Flash-Lite

@@ -36,7 +36,10 @@
         - Bỏ `provider:model` khỏi `api._stable_job_id` để đổi model dịch vẫn tái sử dụng kết quả S1/S2 (Whisper) trong khi `stage_inputs_hash` vẫn invalidate đúng S3/S5.
         - Nối `cancel` vào `s2_transcribe.run` / `_collect` (trước đây `s2` là stage duy nhất trong `api.py` không nhận `cancel`) để bấm Hủy dừng Whisper ngay sau đoạn hiện tại thay vì chạy hết 100%.
         - Nối đầy đủ vào `secrets.py` (`groq_api_keys`, `GROQ_API_KEY`, nhận diện prefix `gsk_`), `key_test.py` (`GET /openai/v1/models`), `settings_dialog.py` (tab Khóa API + Làm mới danh sách mô hình), `main_window.py`, `i18n.py`, `api.py`, `diagnostics.py`/`failguard.py` (che tuyệt đối `gsk_...`), và hỗ trợ **fallback chéo hãng** (Gemini 503 ↔ Groq).
-      - Test mới tại `tests/test_s3_optimizations.py` (10 tests), `tests/test_s6_and_explorer_fixes.py` (5 tests), và `tests/test_groq_provider.py` (7 tests).
+      - **Tùy chọn `auto-rotate` (`Tối ưu — Xoay tua toàn bộ API Key (Miễn phí)`) trong dropdown mô hình chính:**
+        - Thêm `src/dubtool/llm/auto_rotate.py` (`AutoRotateProvider`) ghép toàn bộ API key miễn phí (Gemini + Groq) thành pool xoay vòng 2 tầng (`Tier 1`: đan xen `gemini-3.5-flash-lite`/`3.1-flash-lite`/`flash-lite-latest` × mọi khóa Gemini và `qwen/qwen3.8-27b` × mọi khóa Groq; `Tier 2` overflow: `openai/gpt-oss-120b`/`20b`), tuyệt đối không đụng nhà cung cấp trả phí (OpenAI/Anthropic), chạy `translate_concurrency: 2`, `max_output_tokens: 8000` (Groq tự clamp `<= 950`), chunk `<= 15` câu, tự cách ly model 503 trong 45s và xoay sang khóa/hãng khác trong 0ms.
+        - Kiểm chứng thực tế trên pool 4 khóa Gemini + 2 khóa Groq (18 slot): 3 lần gọi liên tiếp xoay đều Gemini key #1 (1.59s) → Groq key #1 (0.63s) → Gemini 3.1 gặp 503 tự xoay tức thì sang Groq key #2 thành công; 94 tests + `--layout-check` (0 lỗi) + `--gui-smoke` (10/10 PASS).
+      - Test mới tại `tests/test_s3_optimizations.py` (10 tests), `tests/test_s6_and_explorer_fixes.py` (5 tests), `tests/test_groq_provider.py` (7 tests), và `tests/test_auto_rotate.py` (12 tests).
 
 ---
 

@@ -31,11 +31,12 @@ from dubtool.llm.parsing import (
     strip_code_fences,
 )
 
-PROVIDERS = ("gemini", "groq", "openai", "anthropic", "ollama")
+PROVIDERS = ("auto", "gemini", "groq", "openai", "anthropic", "ollama")
 
 # Default chunk sizes / models per provider (AGENT_UPDATE.md 3.3 / 4);
 # per-model detail now lives in the catalog (packaging/models.yaml).
 PROVIDER_DEFAULTS = {
+    "auto": {"model": "auto-rotate", "chunk_size": 15},
     "gemini": {"model": "gemini-3.5-flash-lite", "chunk_size": 25},
     "groq": {"model": "qwen/qwen3.8-27b", "chunk_size": 20},
     "openai": {"model": "gpt-5.4-nano", "chunk_size": 40},
@@ -149,6 +150,7 @@ def get_provider(config, provider_id: str | None = None,
     pid = (provider_id or getattr(config, "llm_provider", None) or "gemini").lower()
     if pid not in PROVIDERS:
         raise LLMError(f"unknown llm provider: {pid!r} (choose from {', '.join(PROVIDERS)})")
+    all_api_keys = api_keys
     if isinstance(api_keys, dict):
         api_keys = api_keys.get(pid)
     llm_cfg_root = getattr(config, "llm", {}) or {}
@@ -165,6 +167,15 @@ def get_provider(config, provider_id: str | None = None,
         paid_cap = int(llm_cfg_root.get("paid_request_cap", 0) or 0)
     except (TypeError, ValueError):
         paid_cap = 0
+    if pid == "auto":
+        from dubtool.llm.auto_rotate import AutoRotateProvider
+
+        provider = AutoRotateProvider(
+            api_keys=all_api_keys if isinstance(all_api_keys, dict) else None,
+            timeout_s=timeout_s or float(cfg.get("timeout_s") or 60.0),
+            cancel=cancel,
+        )
+        return _wrap_faults(provider)
     if pid == "gemini":
         from dubtool.llm.gemini import GeminiProvider
 
@@ -247,6 +258,15 @@ def _wrap_faults(provider: LLMProvider) -> LLMProvider:
 def require_provider_ready(config, provider_id: str | None = None) -> str:
     """Fail early and clearly if the *selected* provider is not configured."""
     pid = (provider_id or getattr(config, "llm_provider", None) or "gemini").lower()
+    if pid == "auto":
+        g = _env("GEMINI_API_KEY")
+        q = _env("GROQ_API_KEY")
+        if (not g or looks_like_placeholder(g)) and (not q or looks_like_placeholder(q)):
+            raise LLMError(
+                "Auto-Rotate mode requires at least one GEMINI_API_KEY or GROQ_API_KEY "
+                "in Settings → API keys or .env."
+            )
+        return "Auto-Rotate free-tier keys ready"
     if pid == "gemini":
         key = _env("GEMINI_API_KEY")
         if not key or looks_like_placeholder(key):

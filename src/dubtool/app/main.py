@@ -760,7 +760,12 @@ def _run_gui_smoke_body(workspace) -> int:
             fake_store[:] = list(keys)
     secrets_mod._stored_list = fake_stored_list
     secrets_mod._save_list = fake_save_list
-    secrets_mod.has_key = lambda p="gemini": bool(fake_stores.get(secrets_mod.normalize_provider(str(p)), []))
+    def _fake_has_key(p="gemini"):
+        pid_ = secrets_mod.normalize_provider(str(p))
+        if pid_ == "auto":
+            return bool(fake_stores.get("gemini") or fake_stores.get("groq"))
+        return bool(fake_stores.get(pid_, []))
+    secrets_mod.has_key = _fake_has_key
 
     tester_calls: list[str] = []
 

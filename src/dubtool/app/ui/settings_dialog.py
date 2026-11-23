@@ -753,7 +753,7 @@ class SettingsDialog(QDialog):
         from dubtool.llm import catalog as catalog_mod
 
         for _pid, entries in catalog_mod.grouped_order():
-            if not entries:
+            if not entries or _pid == "auto":
                 continue
             try:
                 has_k = secrets.has_key(_pid)

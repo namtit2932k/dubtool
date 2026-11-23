@@ -431,9 +431,14 @@ def run_dub(
         # stage's LLMClient shares the same counter.
         from dubtool.llm import budget as llm_budget
 
-        active_key_count = len(keys.get(pid) or []) or max(
-            (len(v) for v in keys.values()), default=1
-        )
+        if pid == "auto":
+            active_key_count = max(
+                1, len(keys.get("gemini") or []) + len(keys.get("groq") or [])
+            )
+        else:
+            active_key_count = len(keys.get(pid) or []) or max(
+                (len(v) for v in keys.values()), default=1
+            )
         budget = llm_budget.from_config(cfg, key_count=active_key_count)
         budget_token = llm_budget.bind(budget)
         # Update 9 task 3.3: bind the heartbeat emitter — while a stage

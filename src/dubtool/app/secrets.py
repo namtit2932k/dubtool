@@ -300,7 +300,10 @@ def get_keys(provider: str = "gemini") -> list[str]:
 
 
 def has_key(provider: str = "gemini") -> bool:
-    return bool(get_keys(provider))
+    pid = normalize_provider(provider)
+    if pid == "auto":
+        return has_key("gemini") or has_key("groq")
+    return bool(get_keys(pid))
 
 
 def has_any_key() -> bool:

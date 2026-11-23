@@ -991,6 +991,7 @@ class MainWindow(QMainWindow):
         _PAID_SFX = i18n.tr("run.model_paid")
         _NO_KEY_SFX = i18n.tr("run.model_no_key")
         headers = {
+            "auto": i18n.tr("run.provider_auto"),
             "gemini": i18n.tr("run.provider_gemini"),
             "groq": i18n.tr("run.provider_groq"),
             "openai": i18n.tr("run.provider_openai"),
@@ -1064,6 +1065,7 @@ class MainWindow(QMainWindow):
         model_id = self._selected_model_id()
         entry = self._selected_model_entry()
         provider_name = {
+            "auto": i18n.tr("run.provider_auto"),
             "gemini": i18n.tr("run.provider_gemini"),
             "groq": i18n.tr("run.provider_groq"),
             "openai": i18n.tr("run.provider_openai"),
@@ -1251,7 +1253,7 @@ class MainWindow(QMainWindow):
                 self, i18n.tr("app.settings"),
                 i18n.tr("run.no_key", provider=self._provider_label(provider)),
             )
-            self.open_settings(provider)
+            self.open_settings("gemini" if provider == "auto" else provider)
             return
         if entry and entry.paid and provider not in self._paid_provider_seen:
             s = settings.load()
@@ -1489,6 +1491,7 @@ class MainWindow(QMainWindow):
 
     def _provider_label(self, provider: str) -> str:
         return {
+            "auto": i18n.tr("run.provider_auto"),
             "gemini": i18n.tr("run.provider_gemini"),
             "groq": i18n.tr("run.provider_groq"),
             "openai": i18n.tr("run.provider_openai"),
