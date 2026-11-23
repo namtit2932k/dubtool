@@ -192,6 +192,7 @@ def get_provider(config, provider_id: str | None = None,
             api_keys=api_keys,
             timeout_s=timeout_s or float(cfg.get("timeout_s") or 60.0),
             max_output_tokens=(info.max_output_tokens if info is not None else None),
+            cancel=cancel,
         )
         return _wrap_faults(provider)
     if pid == "openai":

@@ -524,7 +524,7 @@ class LLMClient:
         cap_attempts = 0          # 503/500/502/504/timeouts: at most len(backoff_s)
         max_cap_attempts = max(1, min(4, len(self.backoff_s)))
         gen_attempts = 0          # connection/misc failures
-        pauses_left = 3           # per-minute pause occurrences per request
+        pauses_left = 10          # per-minute pause occurrences per request (handles TPM-throttled free tiers)
         first_attempt = True
         while True:
             self._check_cancel()
@@ -639,13 +639,14 @@ class LLMClient:
                         f"({self.provider.name}): {last_error}"
                     ) from exc
                 pauses_left -= 1
-                self.rate_pause_until = _time.monotonic() + min(retry_after, 600.0)
+                wait_s = min(retry_after + 1.5, 600.0)
+                self.rate_pause_until = _time.monotonic() + wait_s
                 log.warning(
                     "llm %s per-minute rate limit: %s — pausing every request "
                     "to this model for %.0f s",
-                    self.provider.name, exc, min(retry_after, 600.0),
+                    self.provider.name, exc, wait_s,
                 )
-                _panel("llm.rate_pause", n=int(min(retry_after, 600.0)))
+                _panel("llm.rate_pause", n=int(wait_s + 0.999))
             except (StageCancelled, InternalLLMError, budget_mod.BudgetExhausted):
                 # Deterministic, cancel, or run-budget errors fail immediately.
                 raise

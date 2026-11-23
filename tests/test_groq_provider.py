@@ -242,3 +242,72 @@ def test_stable_job_id_reuses_s1_s2_across_model_switch(tmp_path: Path):
     id_gemini = _stable_job_id(vid, DubOptions(provider="gemini", model="gemini-3.5-flash-lite"))
     id_groq = _stable_job_id(vid, DubOptions(provider="groq", model="qwen/qwen3.8-27b"))
     assert id_gemini == id_groq
+
+
+def test_groq_compact_prompt_max_tokens_and_proactive_tpm_pacing(monkeypatch):
+    """Groq trims verbose TRANSLATE_SYSTEM, caps max_tokens <= 2400, and paces
+    proactively when x-ratelimit-remaining-tokens drops below threshold."""
+    import time
+    from dubtool.llm.prompts import TRANSLATE_SYSTEM
+
+    seen_kwargs: list[dict] = []
+
+    class _RawResp:
+        headers = {
+            "x-ratelimit-remaining-tokens": "900",
+            "x-ratelimit-reset-tokens": "5s",
+        }
+
+        def parse(self):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        finish_reason="stop",
+                        message=SimpleNamespace(content='{"items":[{"id":0,"vi":"Xin chào."}]}'),
+                    )
+                ],
+                usage=SimpleNamespace(prompt_tokens=150, completion_tokens=30),
+            )
+
+    class _FakeCompletions:
+        with_raw_response = SimpleNamespace(
+            create=lambda **kw: (seen_kwargs.append(kw), _RawResp())[1]
+        )
+
+    prov = GroqProvider(model="qwen/qwen3.8-27b", api_keys=["gsk_FAKEKEY12345678901234567890"])
+    monkeypatch.setattr(
+        prov, "_client_for", lambda _k: SimpleNamespace(chat=SimpleNamespace(completions=_FakeCompletions()))
+    )
+
+    res = prov.complete(TRANSLATE_SYSTEM, '[{"id":0,"text":"你好"}]', json_mode=True, max_tokens=8000)
+    assert res.text == '{"items":[{"id":0,"vi":"Xin chào."}]}'
+    assert len(seen_kwargs) == 1
+    assert seen_kwargs[0]["max_tokens"] <= 2400
+    assert len(seen_kwargs[0]["messages"][0]["content"]) < 700
+    # Remaining tokens (900) < 2400 -> proactive pace scheduled ~5.8s ahead.
+    assert prov._pace_until > time.monotonic() + 3.0
+
+
+def test_llm_client_survives_more_than_three_per_minute_pauses(monkeypatch):
+    """TPM-throttled free tiers must not give up after only 3 per-minute pauses."""
+    from dubtool.llm.client import LLMClient
+
+    class _Flaky429Provider:
+        name = "groq"
+        model = "qwen/qwen3.8-27b"
+        structured = "none"
+        timeout_s = 30.0
+
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, system, user, *, schema=None, json_mode=True, max_tokens=8000):
+            self.calls += 1
+            if self.calls <= 5:
+                raise RateLimitError("groq", "tpm", kind="minute", retry_after=0.01)
+            return LLMResult(text='{"items":[{"id":0,"vi":"Xong."}]}', input_tokens=10, output_tokens=10)
+
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    client = LLMClient(_Flaky429Provider())
+    out = client.translate_batch([{"id": 0, "text": "hi", "max_chars": 20}], [])
+    assert out == [{"id": 0, "vi": "Xong."}]

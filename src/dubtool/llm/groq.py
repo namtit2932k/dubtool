@@ -22,7 +22,10 @@ from __future__ import annotations
 import logging
 import re
 import threading
+import time
 
+from dubtool import heartbeat
+from dubtool.job import StageCancelled
 from dubtool.llm.base import (
     InternalLLMError,
     InvalidKeyError,
@@ -40,11 +43,27 @@ from dubtool.llm.base import (
     looks_like_placeholder,
     read_env_key,
 )
-from dubtool.llm.openai import _error_code, _retry_after_of
+from dubtool.llm.openai import _error_code, _parse_timespan, _retry_after_of
 
 log = logging.getLogger("dubtool")
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+
+# Groq Free Tier allows 8,000 TPM per model; trimming duplicated boilerplate from
+# the ~800-token TRANSLATE_SYSTEM saves ~650 tokens on every single chunk while
+# keeping every translation rule intact.
+_COMPACT_TRANSLATE_SYSTEM = (
+    "You are a professional translator for video dubbing into natural, neutral "
+    "Vietnamese. Rules: translate meaning faithfully (no dropped clauses, no "
+    "added facts, no slang unless in source); keep subjects/pronouns clear and "
+    "consistent with the user's pronoun choices (avoid literary 'ta' unless "
+    "asked); apply glossary terms exactly; treat 'max_chars' as a soft guide "
+    "(trim filler first, never drop meaning); write complete sentences with "
+    "matching punctuation; reply ONLY with a valid JSON object: "
+    '{"items": [{"id": <int>, "vi": "<str>"}, ...]}.'
+)
+_GROQ_MAX_OUTPUT_CAP = 2400
+_GROQ_MIN_REMAINING_TOKENS = 2400
 
 _THINK_TAG_RE = re.compile(r"<think>.*?</think>", flags=re.DOTALL | re.IGNORECASE)
 _SIZE_CODES = {"context_length_exceeded", "context_token_exceeded", "string_above_max_length"}
@@ -102,6 +121,7 @@ class GroqProvider:
         timeout_s: float | None = None,
         max_output_tokens: int | None = None,
         base_url: str = GROQ_BASE_URL,
+        cancel=None,
         mock_transport=None,
     ):
         self.model = model
@@ -117,11 +137,13 @@ class GroqProvider:
         self._position = 0
         self._clients: dict[str, object] = {}
         self._base_url = base_url
+        self._cancel = cancel
         self._transport = mock_transport
         self._timeout_s = float(timeout_s) if timeout_s else 60.0
-        self.default_max_output_tokens = int(max_output_tokens or 8000)
+        self.default_max_output_tokens = int(max_output_tokens or _GROQ_MAX_OUTPUT_CAP)
         self._json_mode_degraded: set[str] = set()
         self._reasoning_opt_degraded: set[str] = set()
+        self._pace_until: float = 0.0
 
     @property
     def timeout_s(self) -> float:
@@ -165,17 +187,67 @@ class GroqProvider:
             raise self._map_error(exc) from exc
 
     def _system_with_json_object_hint(self, system: str, json_mode: bool) -> str:
+        # Replace the verbose ~800-token default translation prompt with the
+        # compact equivalent to preserve Groq's 8,000 TPM budget.
+        base = system or ""
+        if len(base) > 1200 and "professional translator" in base.lower() and "vietnamese" in base.lower():
+            return _COMPACT_TRANSLATE_SYSTEM
         if not json_mode or self.model in self._json_mode_degraded:
-            return system
-        # Groq json_object mode requires a JSON object root (not a bare array).
-        # Our shared parser (`parse_json_items` / `parse_batch_shortened`) unwraps
-        # `{"items": [...]}` automatically and `parse_shortened` reads `{"vi": "..."}`.
+            return base
         hint = (
             '\n\nOutput requirement: Reply with a single valid JSON object. '
             'For batch lists, wrap the array under the "items" key: '
             '{"items": [{"id": <int>, "vi": "<str>"}, ...]}.'
         )
-        return (system or "") + hint
+        return base + hint
+
+    def _compute_max_tokens(self, user: str, requested: int) -> int:
+        """Keep Groq max_tokens proportional to chunk size so Groq's TPM
+        reservation never blocks a 20-unit chunk against the 8,000 TPM cap."""
+        cap = min(int(requested or _GROQ_MAX_OUTPUT_CAP), self.default_max_output_tokens, _GROQ_MAX_OUTPUT_CAP)
+        estimated = max(1024, int(len(user or "") * 0.9))
+        return max(512, min(cap, estimated))
+
+    def _wait_for_pace(self) -> None:
+        if self._cancel is not None and self._cancel.is_set():
+            raise StageCancelled("groq: cancelled by user")
+        wait_s = self._pace_until - time.monotonic()
+        if wait_s <= 0:
+            return
+        wait_s = min(wait_s, 65.0)
+        log.info("groq/%s: proactive TPM pacing %.1f s before next chunk", self.model, wait_s)
+
+        def _pace_msg(rem: float) -> str:
+            try:
+                from dubtool.app import i18n
+
+                return i18n.tr("llm.rate_pause", n=max(1, int(rem + 0.999)))
+            except Exception:
+                return f"waiting {int(rem)} s for Groq TPM window"
+
+        heartbeat.sleeping(wait_s, _pace_msg, self._cancel)
+        if self._cancel is not None and self._cancel.is_set():
+            raise StageCancelled("groq: cancelled by user")
+
+    def _update_pace_from_headers(self, headers) -> None:
+        if headers is None:
+            return
+        try:
+            rem_raw = headers.get("x-ratelimit-remaining-tokens")
+            reset_raw = headers.get("x-ratelimit-reset-tokens")
+            if rem_raw is None or reset_raw is None:
+                return
+            remaining = int(float(rem_raw))
+            reset_s = _parse_timespan(str(reset_raw))
+            if reset_s is None:
+                try:
+                    reset_s = float(reset_raw)
+                except (TypeError, ValueError):
+                    return
+            if remaining < _GROQ_MIN_REMAINING_TOKENS and reset_s > 0:
+                self._pace_until = max(self._pace_until, time.monotonic() + reset_s + 0.8)
+        except Exception:
+            pass
 
     def complete(
         self,
@@ -186,7 +258,8 @@ class GroqProvider:
         json_mode: bool = True,
         max_tokens: int = 8000,
     ) -> LLMResult:
-        budget = min(int(max_tokens or 8000), self.default_max_output_tokens)
+        self._wait_for_pace()
+        budget = self._compute_max_tokens(user, max_tokens)
         key = self.current_key()
         try:
             return self._call_chat(key, system, user, json_mode=json_mode, max_tokens=budget)
@@ -270,7 +343,14 @@ class GroqProvider:
             elif "gpt-oss" in mid_low:
                 kwargs["extra_body"] = {"reasoning_effort": "low"}
 
-        response = self._client_for(key).chat.completions.create(**kwargs)
+        completions = self._client_for(key).chat.completions
+        raw_api = getattr(completions, "with_raw_response", None)
+        if raw_api is not None and callable(getattr(raw_api, "create", None)):
+            raw_resp = raw_api.create(**kwargs)
+            self._update_pace_from_headers(getattr(raw_resp, "headers", None))
+            response = raw_resp.parse()
+        else:
+            response = completions.create(**kwargs)
         choice = response.choices[0] if getattr(response, "choices", None) else None
         finish_reason = getattr(choice, "finish_reason", None) if choice is not None else None
         if finish_reason == "length":
