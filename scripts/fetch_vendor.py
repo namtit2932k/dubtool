@@ -64,24 +64,44 @@ def _download_with_retry(url: str, dest: Path, *, attempts: int = 3, timeout: in
     raise RuntimeError(f"failed to download {url} after {attempts} attempts: {last_err}")
 
 
-def _ensure_asset(name: str, spec: dict, vendor_dir: Path, *, verify_only: bool) -> None:
-    dest = vendor_dir / spec["dest"]
-    expected_sha = spec["sha256"].lower()
-    if dest.is_file():
-        actual = _sha256_file(dest)
-        if actual == expected_sha:
-            print(f"[ok] {name}: {dest} ({dest.stat().st_size} bytes, sha256={actual[:16]}...)", flush=True)
-            return
-        if verify_only:
-            raise SystemExit(
-                f"SHA-256 mismatch for {name} ({dest}): expected {expected_sha}, got {actual}"
-            )
-        print(f"[refresh] {name}: hash mismatch ({actual[:12]} != {expected_sha[:12]}), re-fetching...", flush=True)
-    elif verify_only:
-        raise SystemExit(f"missing required vendor asset {name}: {dest}")
+def _ensure_asset(
+    name: str,
+    spec: dict,
+    vendor_dir: Path,
+    *,
+    verify_only: bool,
+    sidecars: list[tuple[str, dict, Path]] | None = None,
+) -> None:
+    targets: list[tuple[str, str | None, Path, str]] = [
+        (name, spec.get("archive_member"), vendor_dir / spec["dest"], spec["sha256"].lower())
+    ]
+    for sc_name, sc_spec, sc_dir in sidecars or []:
+        targets.append((sc_name, sc_spec["archive_member"], sc_dir / sc_spec["dest"], sc_spec["sha256"].lower()))
 
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=str(dest.parent), prefix=f".fetch-{name}-") as td:
+    pending: list[tuple[str, str | None, Path, str]] = []
+    for t_name, member, dest, expected_sha in targets:
+        if dest.is_file():
+            actual = _sha256_file(dest)
+            if actual == expected_sha:
+                print(f"[ok] {t_name}: {dest} ({dest.stat().st_size} bytes, sha256={actual[:16]}...)", flush=True)
+                continue
+            if verify_only:
+                raise SystemExit(
+                    f"SHA-256 mismatch for {t_name} ({dest}): expected {expected_sha}, got {actual}"
+                )
+            print(f"[refresh] {t_name}: hash mismatch ({actual[:12]} != {expected_sha[:12]}), re-fetching...", flush=True)
+        elif verify_only:
+            raise SystemExit(f"missing required vendor asset {t_name}: {dest}")
+        pending.append((t_name, member, dest, expected_sha))
+
+    if not pending:
+        return
+
+    for _t_name, _member, dest, _sha in pending:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+    primary_dest = pending[0][2]
+    with tempfile.TemporaryDirectory(dir=str(primary_dest.parent), prefix=f".fetch-{name}-") as td:
         tmp_dir = Path(td)
         if "archive_member" in spec:
             zip_tmp = tmp_dir / "archive.zip"
@@ -93,24 +113,35 @@ def _ensure_asset(name: str, spec: dict, vendor_dir: Path, *, verify_only: bool)
                 raise SystemExit(
                     f"ZIP SHA-256 mismatch for {name}: expected {expected_zip_sha}, got {actual_zip_sha}"
                 )
-            extracted = tmp_dir / "extracted.bin"
-            member = spec["archive_member"]
             with zipfile.ZipFile(zip_tmp) as zf:
-                with zf.open(member) as src, extracted.open("wb") as dst:
-                    shutil.copyfileobj(src, dst)
-            staged = extracted
+                for t_name, member, dest, expected_sha in pending:
+                    assert member is not None
+                    staged = dest.parent / f".{dest.name}.tmp"
+                    try:
+                        with zf.open(member) as src, staged.open("wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                        actual_sha = _sha256_file(staged)
+                        if actual_sha != expected_sha:
+                            raise SystemExit(
+                                f"SHA-256 mismatch for {t_name}: expected {expected_sha}, got {actual_sha}"
+                            )
+                        os.replace(staged, dest)
+                    finally:
+                        if staged.exists():
+                            staged.unlink(missing_ok=True)
+                    print(f"[verified] {t_name}: {dest} ({dest.stat().st_size} bytes, sha256={actual_sha})", flush=True)
         else:
+            t_name, _member, dest, expected_sha = pending[0]
             staged = tmp_dir / "asset.bin"
-            print(f"[fetch] {name}: {spec['url']}", flush=True)
+            print(f"[fetch] {t_name}: {spec['url']}", flush=True)
             _download_with_retry(spec["url"], staged)
-
-        actual_sha = _sha256_file(staged)
-        if actual_sha != expected_sha:
-            raise SystemExit(
-                f"SHA-256 mismatch for {name}: expected {expected_sha}, got {actual_sha}"
-            )
-        os.replace(staged, dest)
-        print(f"[verified] {name}: {dest} ({dest.stat().st_size} bytes, sha256={actual_sha})", flush=True)
+            actual_sha = _sha256_file(staged)
+            if actual_sha != expected_sha:
+                raise SystemExit(
+                    f"SHA-256 mismatch for {t_name}: expected {expected_sha}, got {actual_sha}"
+                )
+            os.replace(staged, dest)
+            print(f"[verified] {t_name}: {dest} ({dest.stat().st_size} bytes, sha256={actual_sha})", flush=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -128,6 +159,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Only fetch/verify specific asset key(s) from packaging/vendor_manifest.json.",
     )
     parser.add_argument(
+        "--ci-sidecar-dir",
+        type=Path,
+        default=None,
+        help="Optional directory OUTSIDE vendor/ to extract test-only sidecars (e.g. ffprobe.exe for CI parity tests).",
+    )
+    parser.add_argument(
         "--verify-only",
         action="store_true",
         help="Do not download; fail if any selected asset is missing or has a wrong SHA-256.",
@@ -143,8 +180,26 @@ def main(argv: list[str] | None = None) -> int:
 
     vendor_dir = args.vendor_dir.resolve() if args.vendor_dir else (_resolve_build_root() / "vendor")
     vendor_dir.mkdir(parents=True, exist_ok=True)
+
+    sidecar_by_asset: dict[str, list[tuple[str, dict, Path]]] = {}
+    if args.ci_sidecar_dir is not None:
+        sidecar_dir = args.ci_sidecar_dir.resolve()
+        if sidecar_dir == vendor_dir or vendor_dir in sidecar_dir.parents:
+            raise SystemExit(f"--ci-sidecar-dir must be outside vendor/: {sidecar_dir}")
+        sidecar_dir.mkdir(parents=True, exist_ok=True)
+        for sc_name, sc_spec in manifest.get("test_sidecars", {}).items():
+            parent = sc_spec["from_asset"]
+            if parent in selected:
+                sidecar_by_asset.setdefault(parent, []).append((sc_name, sc_spec, sidecar_dir))
+
     for key in selected:
-        _ensure_asset(key, assets[key], vendor_dir, verify_only=args.verify_only)
+        _ensure_asset(
+            key,
+            assets[key],
+            vendor_dir,
+            verify_only=args.verify_only,
+            sidecars=sidecar_by_asset.get(key),
+        )
     return 0
 
 

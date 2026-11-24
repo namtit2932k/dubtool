@@ -26,12 +26,19 @@ pytestmark = pytest.mark.usefixtures("require_ffmpeg")
 def _ffmpeg_or_skip():
     try:
         audio_utils.require_ffmpeg()
-        if shutil.which("ffprobe") is None:
-            # probed via PyAV, but the parity tests need a real ffprobe
-            pytest.skip("ffprobe not available for parity comparison")
-        audio_utils.ffprobe_bin()
     except audio_utils.FFmpegMissing:
         pytest.skip("ffmpeg not available")
+
+
+@pytest.fixture(name="require_ffprobe", scope="module")
+def _ffprobe_or_skip():
+    if shutil.which("ffprobe") is None:
+        # Runtime probes use PyAV; only parity tests require an external ffprobe on PATH.
+        pytest.skip("ffprobe not available for parity comparison")
+    try:
+        audio_utils.ffprobe_bin()
+    except audio_utils.FFmpegMissing:
+        pytest.skip("ffprobe not available for parity comparison")
 
 
 def _ffprobe_json(path: Path, entries: str = "format:stream", select: str | None = None) -> dict:
@@ -77,6 +84,7 @@ class TestProbeParity:
         _clip(src, seconds=2.0)
         assert audio_utils.probe_duration(src) == pytest.approx(2.0, abs=0.05)
 
+    @pytest.mark.usefixtures("require_ffprobe")
     def test_audio_format(self, tmp_path: Path):
         src = tmp_path / "tone44100stereo.wav"
         _tone(src, seconds=1.0, rate=44100, channels=2)
@@ -85,6 +93,7 @@ class TestProbeParity:
         assert rate == int(probe["streams"][0]["sample_rate"])
         assert channels == int(probe["streams"][0]["channels"])
 
+    @pytest.mark.usefixtures("require_ffprobe")
     def test_audio_stream_count(self, tmp_path: Path):
         src = tmp_path / "clip.mp4"
         _clip(src, seconds=1.0)
@@ -121,12 +130,14 @@ class TestDurationUnitsKnownLength:
         data = _ffprobe_json(path, "format=duration")
         return float(data["format"]["duration"])
 
+    @pytest.mark.usefixtures("require_ffprobe")
     def test_2s(self, tmp_path: Path):
         src = self._make(tmp_path, 2.0)
         expected = self._ffprobe_duration(src)
         assert audio_utils.probe_video_info(src)["duration"] == pytest.approx(expected, abs=0.05)
         assert audio_utils.probe_duration(src) == pytest.approx(expected, abs=0.05)
 
+    @pytest.mark.usefixtures("require_ffprobe")
     def test_120s(self, tmp_path: Path):
         src = self._make(tmp_path, 120.0)
         expected = self._ffprobe_duration(src)
@@ -136,6 +147,7 @@ class TestDurationUnitsKnownLength:
         assert got_probe == pytest.approx(expected, abs=0.05)
         assert got_info <= 121  # seconds, never raw microseconds
 
+    @pytest.mark.usefixtures("require_ffprobe")
     def test_1861s(self, tmp_path: Path):
         src = self._make(tmp_path, 1861.0)
         expected = self._ffprobe_duration(src)

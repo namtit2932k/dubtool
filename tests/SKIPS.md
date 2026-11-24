@@ -6,6 +6,7 @@ Every skipped test reported by `pytest tests -q --timeout=120 -rs` must be liste
 |---|---|---|
 | `tests/test_cleanup.py::test_symlink_removed_without_touching_target` | `symlink unavailable: [WinError 1314] A required privilege is not held by the client` | Runs on POSIX (Linux/macOS) or on Windows when Developer Mode is enabled or the process holds `SeCreateSymbolicLinkPrivilege` (elevated Administrator session). |
 | `tests/test_housekeeping.py::test_symlink_removed_not_target` | `symlink unavailable: [WinError 1314] A required privilege is not held by the client` | Runs on POSIX (Linux/macOS) or on Windows when Developer Mode is enabled or the process holds `SeCreateSymbolicLinkPrivilege` (elevated Administrator session). |
+| `tests/test_probe_av.py::TestProbeParity::test_audio_format`, `test_audio_stream_count`; `tests/test_probe_av.py::TestDurationUnitsKnownLength::test_2s`, `test_120s`, `test_1861s` | `ffprobe not available for parity comparison` | Runs whenever `ffprobe` is available on `PATH` (including CI test jobs via the pinned FFmpeg 8.1.2 sidecar outside `vendor/`). Runtime probing uses PyAV in-process (`ffprobe.exe` is intentionally never bundled in `dist/DubTool`). |
 
 ## Non-Environmental Skips Fixed in Update 15 (Now Running & Passing)
 
