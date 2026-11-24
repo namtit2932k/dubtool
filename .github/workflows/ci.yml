@@ -163,7 +163,7 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $relSrc "packaging\build_exe.ps1") -SkipTests -KeepBuild -SkipReadmeImages
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Verify release artifacts (ZIP integrity & extracted exe, SHA256SUMS, BUILD_INFO, --version, --selftest, --layout-check, --gui-smoke)
+      - name: Verify release ZIP integrity, provenance & extracted executable (--version, --selftest, --layout-check, --gui-smoke)
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
@@ -175,30 +175,17 @@ jobs:
           build_root = Path(os.environ['DUBTOOL_BUILD_ROOT'])
           dist_dir = build_root / 'dist'
           app_dir = dist_dir / 'DubTool'
-          exe = app_dir / 'DubTool.exe'
-          assert exe.is_file(), f'missing {exe}'
+          build_exe = app_dir / 'DubTool.exe'
+          assert build_exe.is_file(), f'missing {build_exe}'
 
           update_num = Path('packaging/update_number.txt').read_text(encoding='utf-8').strip()
           expected_ver = f'1.0.{update_num}'
           expected_head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          expected_lock_sha = hashlib.sha256(Path('packaging/requirements-lock.txt').read_bytes()).hexdigest()
+          expected_manifest_sha = hashlib.sha256(Path('packaging/vendor_manifest.json').read_bytes()).hexdigest()
+          manifest = json.loads(Path('packaging/vendor_manifest.json').read_text(encoding='utf-8'))
 
-          # 1. Verify BUILD_INFO.txt matches version, commit SHA, and DubTool.exe hash.
-          binfo_path = app_dir / 'BUILD_INFO.txt'
-          assert binfo_path.is_file(), f'missing {binfo_path}'
-          binfo = {}
-          for ln in binfo_path.read_text(encoding='utf-8-sig').splitlines():
-              if ':' in ln:
-                  k, v = ln.split(':', 1)
-                  binfo[k.strip()] = v.strip()
-          exe_sha = hashlib.sha256(exe.read_bytes()).hexdigest()
-          assert binfo.get('version') == expected_ver, f'BUILD_INFO version mismatch: {binfo}'
-          assert binfo.get('git') == expected_head, f'BUILD_INFO git mismatch: {binfo}'
-          assert binfo.get('sha256') == exe_sha, f'BUILD_INFO exe sha256 mismatch: {binfo}'
-          assert binfo.get('build id') == f'Update {update_num} ({expected_head})', f'BUILD_INFO build id mismatch: {binfo}'
-          bid = binfo.get('build id')
-          print(f'Verified BUILD_INFO.txt: {bid}', flush=True)
-
-          # 2. Verify ZIP hash vs SHA256SUMS.txt, CRC integrity (testzip), and required members.
+          # 1. Verify ZIP hash vs SHA256SUMS.txt, CRC integrity (testzip), and required members.
           zip_name = f'DubTool-{expected_ver}-win64.zip'
           zip_path = dist_dir / zip_name
           sums_path = dist_dir / 'SHA256SUMS.txt'
@@ -232,44 +219,59 @@ jobs:
               assert '_internal/vendor/ffprobe.exe' not in members, 'ffprobe.exe must NOT be inside the release ZIP'
               print(f'Verified ZIP CRC & structure ({len(members)} entries, no ffprobe.exe)', flush=True)
 
-          # 3. Verify all bundled vendor assets (FFmpeg + NotoSans + OFL) against vendor_manifest.json.
-          manifest = json.loads(Path('packaging/vendor_manifest.json').read_text(encoding='utf-8'))
-          for name, spec in manifest['assets'].items():
-              p = app_dir / '_internal' / 'vendor' / spec['dest']
-              assert p.is_file(), f'missing bundled vendor asset {name}: {p}'
-              actual = hashlib.sha256(p.read_bytes()).hexdigest()
-              assert actual == spec['sha256'].lower(), f'bundled {name} sha mismatch: {actual}'
-              print(f'Verified bundled {name}: {p.stat().st_size} bytes, sha256={actual}', flush=True)
-
-          # 4. Run full smoke suite on dist/DubTool/DubTool.exe.
-          for flag in ('--version', '--selftest', '--layout-check', '--gui-smoke'):
-              print(f'=== {exe} {flag} ===', flush=True)
-              r = subprocess.run([str(exe), flag], capture_output=True, text=True, timeout=180)
-              if r.stdout: print(r.stdout, flush=True)
-              if r.stderr: print(r.stderr, file=sys.stderr, flush=True)
-              if r.returncode != 0:
-                  sys.exit(r.returncode)
-              if flag == '--version':
-                  assert expected_ver in r.stdout and expected_head in r.stdout, f'unexpected --version output: {r.stdout}'
-
-          # 5. Extract release ZIP to a clean temp directory and verify the extracted executable boots cleanly.
+          # 2. Extract release ZIP into an isolated temp directory outside dist/DubTool and verify everything from it.
           with tempfile.TemporaryDirectory(prefix='dubtool-zip-verify-') as td:
-              extract_dir = Path(td)
+              extract_dir = Path(td).resolve()
               with zipfile.ZipFile(zip_path, 'r') as zf:
                   zf.extractall(extract_dir)
-              ext_exe = extract_dir / 'DubTool.exe'
-              ext_binfo = (extract_dir / 'BUILD_INFO.txt').read_text(encoding='utf-8-sig')
-              assert expected_head in ext_binfo and expected_ver in ext_binfo
-              for flag in ('--version', '--selftest'):
-                  print(f'=== [extracted ZIP] {ext_exe.name} {flag} ===', flush=True)
+
+              ext_exe = (extract_dir / 'DubTool.exe').resolve()
+              assert ext_exe.is_file(), f'missing extracted {ext_exe}'
+              assert ext_exe != build_exe.resolve(), 'smoke test must run from extracted ZIP, not dist/DubTool'
+              assert dist_dir.resolve() not in ext_exe.parents, 'extracted ZIP dir must live outside dist/'
+
+              # 2a. Verify BUILD_INFO.txt provenance inside the extracted ZIP.
+              binfo_path = extract_dir / 'BUILD_INFO.txt'
+              assert binfo_path.is_file(), f'missing extracted {binfo_path}'
+              binfo = {}
+              for ln in binfo_path.read_text(encoding='utf-8-sig').splitlines():
+                  if ':' in ln:
+                      k, v = ln.split(':', 1)
+                      binfo[k.strip()] = v.strip()
+              ext_exe_sha = hashlib.sha256(ext_exe.read_bytes()).hexdigest()
+              assert binfo.get('version') == expected_ver, f'BUILD_INFO version mismatch: {binfo}'
+              assert binfo.get('git') == expected_head, f'BUILD_INFO git mismatch: {binfo}'
+              assert binfo.get('sha256') == ext_exe_sha, f'BUILD_INFO exe sha256 mismatch: {binfo}'
+              assert binfo.get('build id') == f'Update {update_num} ({expected_head})', f'BUILD_INFO build id mismatch: {binfo}'
+              py_meta = binfo.get('python', '')
+              assert py_meta.startswith('3.13.') and '64-bit' in py_meta, f'unexpected BUILD_INFO python: {py_meta!r}'
+              assert binfo.get('pip') == '26.3', f'unexpected BUILD_INFO pip: {binfo}'
+              assert binfo.get('lockfile_sha256') == expected_lock_sha, f'BUILD_INFO lockfile_sha256 mismatch: {binfo}'
+              assert binfo.get('vendor_manifest_sha256') == expected_manifest_sha, f'BUILD_INFO vendor_manifest_sha256 mismatch: {binfo}'
+              assert binfo.get('ffmpeg_version') == manifest['assets']['ffmpeg']['version'], f'BUILD_INFO ffmpeg_version mismatch: {binfo}'
+              assert binfo.get('ffmpeg_sha256') == manifest['assets']['ffmpeg']['sha256'].lower(), f'BUILD_INFO ffmpeg_sha256 mismatch: {binfo}'
+              bid = binfo.get('build id')
+              print(f'Verified extracted BUILD_INFO.txt provenance: {bid} | Python {py_meta} | pip 26.3', flush=True)
+
+              # 2b. Verify all bundled vendor assets inside the extracted ZIP against vendor_manifest.json.
+              for name, spec in manifest['assets'].items():
+                  p = extract_dir / '_internal' / 'vendor' / spec['dest']
+                  assert p.is_file(), f'missing extracted vendor asset {name}: {p}'
+                  actual = hashlib.sha256(p.read_bytes()).hexdigest()
+                  assert actual == spec['sha256'].lower(), f'extracted {name} sha mismatch: {actual}'
+                  print(f'Verified extracted {name}: {p.stat().st_size} bytes, sha256={actual}', flush=True)
+
+              # 2c. Run ALL 4 smoke gates directly from the extracted ZIP executable.
+              for flag in ('--version', '--selftest', '--layout-check', '--gui-smoke'):
+                  print(f'=== [extracted ZIP] {ext_exe} {flag} ===', flush=True)
                   r = subprocess.run([str(ext_exe), flag], cwd=extract_dir, capture_output=True, text=True, timeout=180)
                   if r.stdout: print(r.stdout, flush=True)
                   if r.stderr: print(r.stderr, file=sys.stderr, flush=True)
                   if r.returncode != 0:
                       sys.exit(r.returncode)
                   if flag == '--version':
-                      assert expected_ver in r.stdout and expected_head in r.stdout
-              print('Verified extracted release ZIP executable (--version & --selftest): PASS', flush=True)
+                      assert expected_ver in r.stdout and expected_head in r.stdout, f'unexpected --version output: {r.stdout}'
+              print('Verified extracted release ZIP executable (all 4 smoke gates): PASS', flush=True)
           "
 
       - name: Upload packaged diagnostics on failure
