@@ -119,13 +119,37 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
         }
     }
     if (-not (Test-Path $venvDir)) {
-        # Prefer Python 3.13 (64-bit) which matches packaging/requirements-lock.txt
-        # and has prebuilt wheels for onnxruntime, sea-g2p, PySide6, av.
-        $pyLauncherArgs = @("-3.13")
-        & py -3.13 -c "import sys" 2>$null
-        if ($LASTEXITCODE -ne 0) { $pyLauncherArgs = @() }
-        & py @pyLauncherArgs -m venv $venvDir
-        if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
+        # Prefer Python 3.13 (64-bit) matching packaging/requirements-lock.txt:
+        # 1) explicit $env:DUBTOOL_PYTHON override,
+        # 2) active `python` on PATH if already 3.13 (e.g. actions/setup-python in CI),
+        # 3) Windows launcher `py -3.13` (fallback `py`).
+        $created = $false
+        if (-not [string]::IsNullOrWhiteSpace($env:DUBTOOL_PYTHON)) {
+            Write-Host "creating venv-build with DUBTOOL_PYTHON=$($env:DUBTOOL_PYTHON)"
+            & $env:DUBTOOL_PYTHON -m venv $venvDir
+            if ($LASTEXITCODE -ne 0) { throw "venv creation failed with DUBTOOL_PYTHON" }
+            $created = $true
+        }
+        if (-not $created) {
+            $pathPy = Get-Command python -ErrorAction SilentlyContinue
+            if ($pathPy) {
+                & $pathPy.Source -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 13) else 1)" 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "creating venv-build with PATH Python 3.13: $($pathPy.Source)"
+                    & $pathPy.Source -m venv $venvDir
+                    if ($LASTEXITCODE -ne 0) { throw "venv creation failed with $($pathPy.Source)" }
+                    $created = $true
+                }
+            }
+        }
+        if (-not $created) {
+            $pyLauncherArgs = @("-3.13")
+            & py -3.13 -c "import sys" 2>$null
+            if ($LASTEXITCODE -ne 0) { $pyLauncherArgs = @() }
+            Write-Host "creating venv-build with py launcher ($($pyLauncherArgs -join ' '))"
+            & py @pyLauncherArgs -m venv $venvDir
+            if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
+        }
         $py = Join-Path $venvDir "Scripts\python.exe"
         & $py -m pip install --upgrade pip -q --cache-dir $pyCache
         Write-Host "installing locked runtime + build dependencies from packaging/requirements-lock.txt"

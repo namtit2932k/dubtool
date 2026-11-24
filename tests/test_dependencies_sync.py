@@ -112,10 +112,17 @@ def test_github_ci_workflow_exists_and_uses_source_install():
     assert "--no-deps" in wf and "vieneu" in wf
     assert "preflight_gates.py" in wf
     assert "check_readme_links.py" in wf
-    assert "PyInstaller" in wf
+    assert "git archive" in wf
+    assert "build_exe.ps1" in wf
+    assert "DUBTOOL_GIT_HEAD" in wf
+    assert "python -m PyInstaller" not in wf, (
+        "CI package job must invoke packaging/build_exe.ps1 rather than running PyInstaller manually"
+    )
+    assert not any(
+        "release.py" in ln for ln in wf.splitlines() if not ln.lstrip().startswith("#")
+    ), "CI workflow must never invoke scripts/release.py"
+    assert "SHA256SUMS.txt" in wf and "BUILD_INFO.txt" in wf
     assert "--gui-smoke" in wf
-    assert "--screenshots" in wf
-    assert "-m packaged" in wf
     assert "upload-artifact" in wf
 
 

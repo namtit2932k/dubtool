@@ -90,7 +90,7 @@ jobs:
           python -m dubtool.app.main --gui-smoke
 
   package:
-    name: Windows · Python 3.13 · PyInstaller Verify
+    name: Windows · Python 3.13 · Release Build Verify
     runs-on: windows-latest
     needs: test
     timeout-minutes: 30
@@ -114,8 +114,6 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.13"
-          cache: pip
-          cache-dependency-path: packaging/requirements-lock.txt
 
       - name: Install FFmpeg and populate vendor directory
         shell: pwsh
@@ -170,88 +168,101 @@ jobs:
             Write-Host "Verified $(Split-Path -Leaf $asset.Dest): $((Get-Item $asset.Dest).Length) bytes, sha256=$actual"
           }
 
-      - name: Install locked build dependencies
+      - name: Build release package via packaging/build_exe.ps1 from clean git archive
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r packaging/requirements-lock.txt
-          python -m pip install --no-deps vieneu==3.8.5
-          python -m pip install -e . --no-deps
+          # Mirror scripts/release.py: extract a clean .git-less source archive from HEAD
+          # and run packaging/build_exe.ps1 directly (no publish/tag/release).
+          $head = (git rev-parse HEAD).Trim()
+          $relSrc = Join-Path $env:RUNNER_TEMP "dubtool-release-src"
+          $tarFile = Join-Path $env:RUNNER_TEMP "dubtool-release-src.tar"
+          if (Test-Path $relSrc) { Remove-Item -Recurse -Force $relSrc }
+          New-Item -ItemType Directory -Force -Path $relSrc | Out-Null
+          git archive --format=tar -o $tarFile HEAD
+          if ($LASTEXITCODE -ne 0) { throw "git archive HEAD failed" }
+          tar -xf $tarFile -C $relSrc
+          if ($LASTEXITCODE -ne 0) { throw "tar extract failed" }
+          Remove-Item -Force $tarFile
 
-      - name: Build DubTool.exe via PyInstaller
-        shell: pwsh
-        run: |
-          $distDir = Join-Path $env:DUBTOOL_BUILD_ROOT "dist"
-          $workDir = Join-Path $env:DUBTOOL_BUILD_ROOT "build"
-          python -m PyInstaller packaging/dubtool.spec --noconfirm --distpath $distDir --workpath $workDir
+          $env:DUBTOOL_GIT_HEAD = $head
+          $env:DUBTOOL_PYTHON = (Get-Command python).Source
+          # Offline test suite already passed in both matrix jobs (-SkipTests),
+          # while screenshots + test_screenshots.py + README link checks run live here.
+          powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $relSrc "packaging\build_exe.ps1") -SkipTests -KeepBuild
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          $appDir = Join-Path $distDir "DubTool"
-          $exePath = Join-Path $appDir "DubTool.exe"
-          $update = (Get-Content "packaging/update_number.txt" -Raw).Trim()
-          $version = "1.0.$update"
-          $git = $env:GITHUB_SHA
-          $sha = (Get-FileHash $exePath -Algorithm SHA256).Hash.ToLower()
-          $stamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss")
-          $buildLines = @(
-            "update: $update",
-            "version: $version",
-            "git: $git",
-            "built (UTC): $stamp",
-            "sha256: $sha",
-            "build id: Update $update ($git)"
-          )
-          Set-Content -Path (Join-Path $appDir "BUILD_INFO.txt") -Value $buildLines -Encoding UTF8
-
-      - name: Verify packaged DubTool.exe (--version, --selftest, --layout-check, --gui-smoke)
+      - name: Verify release artifacts (ZIP, SHA256SUMS, BUILD_INFO, --version, --selftest, --layout-check, --gui-smoke)
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
           python -c "
           import hashlib, os, subprocess, sys
-          app_dir = os.path.join(os.environ['DUBTOOL_BUILD_ROOT'], 'dist', 'DubTool')
-          exe = os.path.join(app_dir, 'DubTool.exe')
-          assert os.path.isfile(exe), f'missing {exe}'
-          font_path = os.path.join(app_dir, '_internal', 'vendor', 'fonts', 'NotoSans.ttf')
-          ofl_path = os.path.join(app_dir, '_internal', 'vendor', 'fonts', 'OFL.txt')
-          assert os.path.isfile(font_path), f'missing bundled {font_path}'
-          assert os.path.isfile(ofl_path), f'missing bundled {ofl_path}'
-          font_sha = hashlib.sha256(open(font_path, 'rb').read()).hexdigest()
-          expected_font_sha = 'bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d'
-          assert font_sha == expected_font_sha, f'bundled NotoSans.ttf sha256 mismatch: {font_sha}'
-          print(f'Verified bundled NotoSans.ttf ({os.path.getsize(font_path)} bytes, sha256={font_sha})', flush=True)
+          from pathlib import Path
+
+          build_root = Path(os.environ['DUBTOOL_BUILD_ROOT'])
+          dist_dir = build_root / 'dist'
+          app_dir = dist_dir / 'DubTool'
+          exe = app_dir / 'DubTool.exe'
+          assert exe.is_file(), f'missing {exe}'
+
+          update_num = Path('packaging/update_number.txt').read_text(encoding='utf-8').strip()
+          expected_ver = f'1.0.{update_num}'
+          expected_head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+
+          # 1. Verify BUILD_INFO.txt matches version, commit SHA, and DubTool.exe hash.
+          binfo_path = app_dir / 'BUILD_INFO.txt'
+          assert binfo_path.is_file(), f'missing {binfo_path}'
+          binfo = {}
+          for ln in binfo_path.read_text(encoding='utf-8-sig').splitlines():
+              if ':' in ln:
+                  k, v = ln.split(':', 1)
+                  binfo[k.strip()] = v.strip()
+          exe_sha = hashlib.sha256(exe.read_bytes()).hexdigest()
+          assert binfo.get('version') == expected_ver, f'BUILD_INFO version mismatch: {binfo}'
+          assert binfo.get('git') == expected_head, f'BUILD_INFO git mismatch: {binfo}'
+          assert binfo.get('sha256') == exe_sha, f'BUILD_INFO exe sha256 mismatch: {binfo}'
+          assert binfo.get('build id') == f'Update {update_num} ({expected_head})', f'BUILD_INFO build id mismatch: {binfo}'
+          bid = binfo.get('build id')
+          print(f'Verified BUILD_INFO.txt: {bid}', flush=True)
+
+          # 2. Verify ZIP and SHA256SUMS.txt consistency.
+          zip_name = f'DubTool-{expected_ver}-win64.zip'
+          zip_path = dist_dir / zip_name
+          sums_path = dist_dir / 'SHA256SUMS.txt'
+          assert zip_path.is_file(), f'missing {zip_path}'
+          assert sums_path.is_file(), f'missing {sums_path}'
+          zip_sha = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+          sums_text = sums_path.read_text(encoding='utf-8-sig').strip()
+          assert sums_text == f'{zip_sha}  {zip_name}', f'SHA256SUMS mismatch: {sums_text!r} vs {zip_sha}  {zip_name}'
+          print(f'Verified {zip_name} ({zip_path.stat().st_size} bytes, sha256={zip_sha})', flush=True)
+
+          # 3. Verify bundled authentic NotoSans.ttf and OFL.txt.
+          font_path = app_dir / '_internal' / 'vendor' / 'fonts' / 'NotoSans.ttf'
+          ofl_path = app_dir / '_internal' / 'vendor' / 'fonts' / 'OFL.txt'
+          assert font_path.is_file() and ofl_path.is_file()
+          font_sha = hashlib.sha256(font_path.read_bytes()).hexdigest()
+          assert font_sha == 'bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d', f'font sha mismatch: {font_sha}'
+
+          # 4. Run packaged executable smoke gates.
           for flag in ('--version', '--selftest', '--layout-check', '--gui-smoke'):
               print(f'=== {exe} {flag} ===', flush=True)
-              r = subprocess.run([exe, flag], capture_output=True, text=True, timeout=180)
+              r = subprocess.run([str(exe), flag], capture_output=True, text=True, timeout=180)
               if r.stdout: print(r.stdout, flush=True)
               if r.stderr: print(r.stderr, file=sys.stderr, flush=True)
               if r.returncode != 0:
                   sys.exit(r.returncode)
+              if flag == '--version':
+                  assert expected_ver in r.stdout and expected_head in r.stdout, f'unexpected --version output: {r.stdout}'
           "
 
-      - name: Verify packaged screenshots (DubTool.exe --screenshots & test_screenshots.py)
-        shell: pwsh
-        run: |
-          python -c "
-          import os, subprocess, sys
-          build_root = os.environ['DUBTOOL_BUILD_ROOT']
-          exe = os.path.join(build_root, 'dist', 'DubTool', 'DubTool.exe')
-          shot_dir = os.path.join(build_root, 'screenshots', 'ci_' + os.environ['GITHUB_SHA'][:12])
-          os.makedirs(shot_dir, exist_ok=True)
-          env = {k: v for k, v in os.environ.items() if k != 'QT_QPA_PLATFORM'}
-          print(f'=== {exe} --screenshots {shot_dir} ===', flush=True)
-          r = subprocess.run([exe, '--screenshots', shot_dir], env=env, capture_output=True, text=True, timeout=180)
-          if r.stdout: print(r.stdout, flush=True)
-          if r.stderr: print(r.stderr, file=sys.stderr, flush=True)
-          if r.returncode != 0:
-              sys.exit(r.returncode)
-          "
-          python -m pytest tests -m packaged -v --timeout=120
-
-      - name: Upload packaged screenshots on failure
+      - name: Upload packaged diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: packaged-screenshots-diagnostic
-          path: ${{ env.DUBTOOL_BUILD_ROOT }}\screenshots
+          name: packaged-build-diagnostics
+          path: |
+            ${{ env.DUBTOOL_BUILD_ROOT }}\screenshots
+            ${{ env.DUBTOOL_BUILD_ROOT }}\dist\DubTool\BUILD_INFO.txt
+            ${{ env.DUBTOOL_BUILD_ROOT }}\build\dubtool\warn-dubtool.txt
           if-no-files-found: ignore
