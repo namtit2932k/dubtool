@@ -121,7 +121,15 @@ jobs:
         shell: pwsh
         run: |
           choco install ffmpeg --no-progress
-          $ffmpegPath = (Get-Command ffmpeg).Source
+          # Resolve the real Chocolatey ffmpeg.exe binary (not the 5 KB shim in bin/).
+          $ffmpegPath = $null
+          if (Test-Path "C:\ProgramData\chocolatey\lib\ffmpeg") {
+            $ffmpegPath = Get-ChildItem "C:\ProgramData\chocolatey\lib\ffmpeg" -Recurse -Filter "ffmpeg.exe" |
+              Sort-Object Length -Descending |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $ffmpegPath) { $ffmpegPath = (Get-Command ffmpeg).Source }
+          Write-Host "Using real ffmpeg binary: $ffmpegPath ($((Get-Item $ffmpegPath).Length) bytes)"
           $vendorDir  = Join-Path $env:DUBTOOL_BUILD_ROOT "vendor"
           $fontsDir   = Join-Path $vendorDir "fonts"
           Copy-Item $ffmpegPath (Join-Path $vendorDir "ffmpeg.exe") -Force
