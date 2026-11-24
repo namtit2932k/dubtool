@@ -863,8 +863,8 @@ def test_gemini_key_test_with_auto_rotate_uses_models_list(monkeypatch):
 
     monkeypatch.setattr(gemini_mod, "build_gemini_client", lambda key, timeout_ms=None: _FakeClient())
 
-    assert key_test.run_key_test("AIzaFAKEVALIDKEY0001", model="auto-rotate", provider="gemini") == "ok"
-    assert key_test.run_key_test("AIzaFAKEVALIDKEY0002", model="qwen/qwen3.8-27b", provider="gemini") == "ok"
+    assert key_test.run_key_test("fake-gemini-key-0001", model="auto-rotate", provider="gemini") == "ok"
+    assert key_test.run_key_test("fake-gemini-key-0002", model="qwen/qwen3.8-27b", provider="gemini") == "ok"
     assert len(list_calls) == 2
     assert list_calls[0]["config"] == {"page_size": 1}
 
@@ -881,7 +881,7 @@ def test_gemini_key_test_with_auto_rotate_uses_models_list(monkeypatch):
         models = _BadModels()
 
     monkeypatch.setattr(gemini_mod, "build_gemini_client", lambda key, timeout_ms=None: _BadClient())
-    assert key_test.run_key_test("AIzaFAKEBADKEY0003", model="auto-rotate", provider="gemini") == "invalid"
+    assert key_test.run_key_test("fake-gemini-key-0003", model="auto-rotate", provider="gemini") == "invalid"
 
 
 def test_settings_dialog_badges_do_not_leak_across_providers(qtbot, monkeypatch, tmp_path):
@@ -896,8 +896,8 @@ def test_settings_dialog_badges_do_not_leak_across_providers(qtbot, monkeypatch,
     monkeypatch.setattr(settings_mod, "path", lambda: settings_file)
 
     stores = {
-        "gemini": ["AIzaGeminiOne1111", "AIzaGeminiTwo2222"],
-        "groq": ["gsk_GroqOne3333"],
+        "gemini": ["gemini-one-1111", "gemini-two-2222"],
+        "groq": ["groq-one-3333"],
         "openai": [],
         "anthropic": [],
     }
