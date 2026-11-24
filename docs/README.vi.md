@@ -164,5 +164,5 @@ Tổng quan kiến trúc, lịch sử phát hành và báo cáo chi tiết xem t
 
 ## Quyền riêng tư & Giấy phép
 
-- **Quyền riêng tư:** Nhận diện giọng nói (`faster-whisper`), tạo giọng tiếng Việt (`VieNeu-TTS v3 ONNX`), trộn âm thanh và gắn phụ đề đều chạy **100% cục bộ** trên máy của bạn. Chỉ văn bản lời thoại nguồn được gửi tới nhà cung cấp dịch bạn chọn. Khóa API lưu trong Windows Credential Manager (hoặc `.env`) và không bao giờ ghi ra log.
+- **Quyền riêng tư:** Nhận diện giọng nói (`faster-whisper`), tạo giọng tiếng Việt (`VieNeu-TTS v3 ONNX`), trộn âm thanh và gắn phụ đề đều chạy **100% cục bộ** trên máy của bạn. Chỉ văn bản lời thoại nguồn cùng ngữ cảnh tùy chọn bạn cung cấp (như mô tả video Brief và từ điển thuật ngữ Glossary) được gửi tới nhà cung cấp dịch bạn chọn. Khóa API lưu trong Windows Credential Manager (hoặc `.env`) và không bao giờ ghi ra log.
 - **Giấy phép:** [Giấy phép MIT](../LICENSE) — Copyright (c) 2026 sickyturtlez. Các thành phần bên thứ ba đi kèm (FFmpeg GPL v3, PySide6 LGPL v3, faster-whisper, VieNeu-TTS, sea-g2p, soundfile, Noto Sans) giữ nguyên giấy phép riêng (chi tiết tại [`packaging/THIRD_PARTY.md`](../packaging/THIRD_PARTY.md)).

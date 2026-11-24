@@ -164,5 +164,5 @@ Release history, architecture overview, and detailed update reports live in [`do
 
 ## Privacy & License
 
-- **Privacy:** Speech recognition (`faster-whisper`), Vietnamese TTS (`VieNeu-TTS v3 ONNX`), audio mixing, and subtitle rendering run **100% locally** on your PC. Only the recognized source-language text is sent to the translation provider you select. API keys live in Windows Credential Manager (or `.env`) and are never logged.
+- **Privacy:** Speech recognition (`faster-whisper`), Vietnamese TTS (`VieNeu-TTS v3 ONNX`), audio mixing, and subtitle rendering run **100% locally** on your PC. Only recognized source-language transcript text and optional user-provided context (such as video briefs and glossary entries) are sent to the translation provider you select. API keys live in Windows Credential Manager (or `.env`) and are never logged.
 - **License:** [MIT License](LICENSE) — Copyright (c) 2026 sickyturtlez. Bundled third-party components (FFmpeg GPL v3, PySide6 LGPL v3, faster-whisper, VieNeu-TTS, sea-g2p, soundfile, Noto Sans) retain their respective licenses; see [`packaging/THIRD_PARTY.md`](packaging/THIRD_PARTY.md).

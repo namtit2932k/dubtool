@@ -10,7 +10,7 @@
 - **Trạng thái giấy phép ứng dụng:** **MIT License** (`Copyright (c) 2026 sickyturtlez`) cho mã nguồn của ứng dụng DubTool; các thành phần bên thứ ba giữ nguyên giấy phép riêng (xem `THIRD_PARTY.md` và thư mục `licenses/`).
 - **Lưu ý dịch vụ & quyền riêng tư:**
   - Âm thanh, video, nhận diện tiếng nói (Whisper) và tạo giọng đọc tiếng Việt (**VieNeu-TTS v3 ONNX**) đều chạy **100% cục bộ trên máy của bạn** (không còn phụ thuộc `edge-tts` hay dịch vụ đọc trực tuyến bên thứ ba). Lần chạy đầu tiên cần Internet để tải mô hình Whisper và VieNeu-TTS (~244–269 MB) từ Hugging Face.
-  - Khi bạn chọn mô hình dịch (bao gồm chế độ xoay tua tự động miễn phí Gemini + Groq, hoặc các nhà cung cấp trả phí như OpenAI / Anthropic), **văn bản gốc (ngôn ngữ nhận diện được) của video sẽ được gửi tới nhà cung cấp đó** để dịch sang tiếng Việt.
+  - Khi bạn chọn mô hình dịch (bao gồm chế độ xoay tua tự động miễn phí Gemini + Groq, hoặc các nhà cung cấp trả phí như OpenAI / Anthropic), **văn bản lời thoại nguồn cùng ngữ cảnh tùy chọn bạn điền (Brief, Glossary) sẽ được gửi tới nhà cung cấp đó** để dịch sang tiếng Việt.
 
 ### Phần mềm bên thứ ba & Giấy phép (Third-Party Notices)
 
@@ -53,7 +53,7 @@ Bản đóng gói kèm theo các thành phần bên thứ ba sau đây (toàn v�
 - **Application License Status:** **MIT License** (`Copyright (c) 2026 sickyturtlez`) for DubTool's own application source code; bundled third-party components keep their own licenses (see `THIRD_PARTY.md` and `licenses/`).
 - **Service & Privacy Notes:**
   - Audio extraction, speech recognition (Whisper), and Vietnamese voice synthesis (**VieNeu-TTS v3 ONNX**) all run **100% locally on your machine** (no `edge-tts` or online TTS service dependency). An internet connection is needed on the first run to download local Whisper and VieNeu-TTS ONNX weights (~244–269 MB) from Hugging Face.
-  - When translating (including with the free Auto-Rotate Gemini + Groq pool, or paid providers such as OpenAI or Anthropic), **the recognized source-language transcript text of the video is sent to the selected provider**.
+  - When translating (including with the free Auto-Rotate Gemini + Groq pool, or paid providers such as OpenAI or Anthropic), **recognized source-language transcript text and optional user-provided context (video briefs and glossary entries) are sent to the selected provider**.
 
 ### Third-Party Components & Licenses
 

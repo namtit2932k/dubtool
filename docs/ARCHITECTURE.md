@@ -26,7 +26,8 @@ flowchart LR
 | Layer | Location | Responsibility |
 | --- | --- | --- |
 | **Shared Pipeline API** | `src/dubtool/api.py`, `config.py`, `job.py`, `workspace.py` | Config loading, stable job IDs, atomic JSON persistence, dependency hashes, cancellation, and stage orchestration |
-| **Pipeline Stages** | `src/dubtool/stages/s1..s8` | Idempotent stage implementations (`s1` extract, `s2` transcribe, `s3` translate, `s4` TTS, `s5` fit duration, `s6` streaming mix, `s7` subtitles & mux, `s8` readable `.docx`/`.txt` export) |
+| **Pipeline Stages** | `src/dubtool/stages/s1..s7` | Seven resumable, hash-tracked stages (`job.STAGE_ORDER`: `s1` extract, `s2` transcribe, `s3` translate, `s4` TTS, `s5` fit duration, `s6` streaming mix, `s7` subtitles & mux) |
+| **Post-Pipeline Export** | `src/dubtool/stages/s8_export_readable.py` | Post-pipeline readable `.docx`/`.txt` translation export invoked by `api.run_dub` after `s1..s7` complete (not part of `STAGE_ORDER` state tracking) |
 | **LLM Abstraction** | `src/dubtool/llm/` | Provider adapters (`auto_rotate`, `gemini`, `groq`, `openai`, `anthropic`, `ollama`), catalog (`packaging/models.yaml`), `LLMClient` retry/circuit-breaker/split logic, `KeyPool`, `quota_state`, JSON & CJK-leak validation |
 | **Offline TTS** | `src/dubtool/tts/vieneu.py` | Lazy-loaded VieNeu-TTS v3 ONNX (`v3turbo_int8` 48 kHz / `v3nano` 24 kHz), HF cache routing, audio sanity checks, deterministic silence trimming |
 | **Media & Subtitles** | `src/dubtool/audio_utils.py`, `subtitles.py`, `punctuate.py`, `dub_units.py` | FFmpeg subprocess wrapper, 30s-block `soundfile` + `numpy` streaming mixer (RF64-safe), Whisper timestamp repair, Vietnamese-safe ASS/SRT generation |
@@ -44,8 +45,11 @@ flowchart TD
     S3 --> S4["s4: Offline VieNeu-TTS v3\n(tts/*.wav)"]
     S4 --> S5["s5: Fit Duration (atempo / shorten)\n(fitted/*.wav, schedule.json)"]
     S5 --> S6["s6: Streaming 30s-Block Mix + Limiter\n(mixed audio)"]
-    S6 --> S7["s7: Burn Subtitles + Mux + Export\n(final .mp4, .srt, .docx/.txt)"]
+    S6 --> S7["s7: Burn Subtitles + Mux\n(final .mp4, .srt)"]
+    S7 --> EXP["Post-Pipeline Export (s8_export_readable.py)\n(side-by-side .docx / .txt)"]
 ```
+
+> **Note on `STAGE_ORDER`:** `job.STAGE_ORDER` tracks exactly the seven resumable stages `["s1", "s2", "s3", "s4", "s5", "s6", "s7"]`. Readable `.docx`/`.txt` generation (`s8_export_readable.py`) runs as a post-pipeline export step in `api.run_dub` once `s1..s7` finish, rather than as a stateful stage inside `STAGE_ORDER`.
 
 ### Key Persistence & Recovery Invariants
 

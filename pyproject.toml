@@ -50,6 +50,9 @@ dev = [
 tts = [
   "vieneu>=3.8,<4",
 ]
+# Convenience alias for `gui` + `dev` (intentionally excludes `tts`/`vieneu`
+# because `vieneu` should be installed via `pip install --no-deps "vieneu>=3.8,<4"`
+# to avoid pulling heavy WebUI/cloning dependencies such as gradio/librosa/numba).
 all = [
   "PySide6-Essentials>=6.6",
   "keyring>=24",
