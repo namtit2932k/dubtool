@@ -29,8 +29,8 @@ pip install --no-deps vieneu==3.8.5
 pip install -e . --no-deps
 ```
 
-- **Python 3.13 (locked primary/release environment):** Uses exact `==` versions in `packaging/requirements-lock.txt` plus `pip==26.3`. Artifact `--require-hashes` is intentionally deferred for now because `pip install --require-hashes` requires regenerating platform-specific wheel hashes across all 76 transitive packages on every single bump; exact `==` version locking + `vendor_manifest.json` SHA-256 verification covers reproducibility without adding external lock-compiler friction.
-- **Python 3.11 (CI compatibility drift job):** Intentionally installs from `pyproject.toml` ranges (`pip install -e ".[gui,dev]"`) to surface upstream dependency compatibility issues early.
+- **Python 3.13 x64 (locked primary/release environment):** `packaging/build_exe.ps1` validates that the selected interpreter (`DUBTOOL_PYTHON`, `python` on `PATH`, or `py -3.13`) is strictly **64-bit Python 3.13** before creating `venv-build`, bootstraps `pip==26.3`, installs `packaging/requirements-lock.txt` + `vieneu==3.8.5 --no-deps`, and records build-input provenance (`python`, `pip`, `lockfile_sha256`, `vendor_manifest_sha256`, `ffmpeg_version`, `ffmpeg_sha256`, `git`, `sha256`) inside `BUILD_INFO.txt`. Artifact `--require-hashes` is intentionally deferred for now because `pip install --require-hashes` requires regenerating platform-specific wheel hashes across all 76 transitive packages on every single bump; exact `==` version locking + `vendor_manifest.json` SHA-256 verification covers reproducibility without adding external lock-compiler friction.
+- **Python 3.11 (CI compatibility drift job):** Intentionally installs from `pyproject.toml` ranges (`pip install -e ".[gui,dev]"`) to surface upstream dependency compatibility issues early; on failure CI uploads `pip freeze` and JUnit XML diagnostics.
 - `tests/test_dependencies_sync.py` enforces that `pyproject.toml`,
   `packaging/build_exe.ps1`, `.github/workflows/ci.yml`,
   `packaging/vendor_manifest.json`, and `packaging/requirements-lock.txt` stay

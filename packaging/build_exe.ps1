@@ -76,16 +76,54 @@ $venvDir = Join-Path $buildRoot "venv-build"
 $reqFileUnit = Join-Path $buildRoot ".req-units.tmp"
 
 # Single source of truth for the packaged app's resolved dependencies (same
-# lockfile verified by Windows Python 3.13 CI). Changing requirements-lock.txt
-# or $NoDepsPinned invalidates venv-build via .reqhash.
+# lockfile verified by Windows Python 3.13 CI). Changing requirements-lock.txt,
+# $PipVersion, or $NoDepsPinned invalidates venv-build via .reqhash.
 $LockFile = Join-Path $root "packaging\requirements-lock.txt"
 if (-not (Test-Path $LockFile)) {
     throw "missing dependency lockfile: $LockFile"
 }
+$PipVersion = "26.3"
 
 # Installed with --no-deps so gradio/librosa/numba/scipy (WebUI/cloning only)
 # are never pulled into the build venv or packaged exe.
 $NoDepsPinned = @("vieneu==3.8.5")
+
+function Resolve-BuildPython313x64 {
+    param([string]$ExplicitPython)
+    $probe = "import platform, struct, sys; bits = struct.calcsize('P') * 8; ok = (sys.version_info[:2] == (3, 13) and bits == 64); print(f'{sys.executable}|{platform.python_version()}|{bits}-bit'); raise SystemExit(0 if ok else 1)"
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitPython)) {
+        $cmd = Get-Command $ExplicitPython -ErrorAction SilentlyContinue
+        if (-not $cmd -and -not (Test-Path -LiteralPath $ExplicitPython)) {
+            throw "DUBTOOL_PYTHON='$ExplicitPython' was not found. Provide a valid 64-bit Python 3.13 executable matching packaging/requirements-lock.txt."
+        }
+        $target = if ($cmd) { $cmd.Source } else { (Resolve-Path -LiteralPath $ExplicitPython).Path }
+        $out = & $target -c $probe 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            $detail = ($out -join " ").Trim()
+            throw "DUBTOOL_PYTHON='$target' is incompatible (got '$detail'); a 64-bit Python 3.13 interpreter is required for packaging/requirements-lock.txt."
+        }
+        return @{ Exe = $target; Args = @(); Info = ($out -join " ").Trim() }
+    }
+
+    $pathPy = Get-Command python -ErrorAction SilentlyContinue
+    if ($pathPy) {
+        $out = & $pathPy.Source -c $probe 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            return @{ Exe = $pathPy.Source; Args = @(); Info = ($out -join " ").Trim() }
+        }
+    }
+
+    $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
+    if ($pyLauncher) {
+        $out = & $pyLauncher.Source -3.13 -c $probe 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            return @{ Exe = $pyLauncher.Source; Args = @("-3.13"); Info = ($out -join " ").Trim() }
+        }
+    }
+
+    throw "No 64-bit Python 3.13 interpreter found (checked PATH 'python' and 'py -3.13'). Install Python 3.13 (64-bit) or set DUBTOOL_PYTHON."
+}
 
 try {
     # AGU10 task 3.1: the shared model cache for every sanitized run —
@@ -101,7 +139,7 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
     $reqHash = ""
     $enc = [System.Text.Encoding]::UTF8
     $lockRaw = Get-Content -Path $LockFile -Raw -Encoding UTF8
-    $pinnedNorm = (($lockRaw + "`n" + ($NoDepsPinned -join "`n")) -replace "`r`n", "`n").TrimEnd()
+    $pinnedNorm = (($lockRaw + "`npip==$PipVersion`n" + ($NoDepsPinned -join "`n")) -replace "`r`n", "`n").TrimEnd()
     $ms = New-Object System.IO.MemoryStream (, $enc.GetBytes($pinnedNorm))
     $reqHash = [BitConverter]::ToString(
         [System.Security.Cryptography.SHA256]::Create().ComputeHash($ms)
@@ -119,39 +157,12 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
         }
     }
     if (-not (Test-Path $venvDir)) {
-        # Prefer Python 3.13 (64-bit) matching packaging/requirements-lock.txt:
-        # 1) explicit $env:DUBTOOL_PYTHON override,
-        # 2) active `python` on PATH if already 3.13 (e.g. actions/setup-python in CI),
-        # 3) Windows launcher `py -3.13` (fallback `py`).
-        $created = $false
-        if (-not [string]::IsNullOrWhiteSpace($env:DUBTOOL_PYTHON)) {
-            Write-Host "creating venv-build with DUBTOOL_PYTHON=$($env:DUBTOOL_PYTHON)"
-            & $env:DUBTOOL_PYTHON -m venv $venvDir
-            if ($LASTEXITCODE -ne 0) { throw "venv creation failed with DUBTOOL_PYTHON" }
-            $created = $true
-        }
-        if (-not $created) {
-            $pathPy = Get-Command python -ErrorAction SilentlyContinue
-            if ($pathPy) {
-                & $pathPy.Source -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 13) else 1)" 2>$null
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Host "creating venv-build with PATH Python 3.13: $($pathPy.Source)"
-                    & $pathPy.Source -m venv $venvDir
-                    if ($LASTEXITCODE -ne 0) { throw "venv creation failed with $($pathPy.Source)" }
-                    $created = $true
-                }
-            }
-        }
-        if (-not $created) {
-            $pyLauncherArgs = @("-3.13")
-            & py -3.13 -c "import sys" 2>$null
-            if ($LASTEXITCODE -ne 0) { $pyLauncherArgs = @() }
-            Write-Host "creating venv-build with py launcher ($($pyLauncherArgs -join ' '))"
-            & py @pyLauncherArgs -m venv $venvDir
-            if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
-        }
+        $basePy = Resolve-BuildPython313x64 -ExplicitPython $env:DUBTOOL_PYTHON
+        $parts = $basePy.Info -split "\|"
+        Write-Host "using build Python: $($parts[0]) ($($parts[1]), $($parts[2]))"
+        & $basePy.Exe @($basePy.Args) -m venv $venvDir
+        if ($LASTEXITCODE -ne 0) { throw "venv creation failed with $($basePy.Exe)" }
         $py = Join-Path $venvDir "Scripts\python.exe"
-        $PipVersion = "26.3"
         & $py -m pip install "pip==$PipVersion" -q --cache-dir $pyCache
         if ($LASTEXITCODE -ne 0) { throw "pip==$PipVersion bootstrap failed" }
         Write-Host "installing locked runtime + build dependencies from packaging/requirements-lock.txt"
@@ -162,6 +173,13 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
         Set-Content -Path $hashFile -Value $reqHash -NoNewline -Encoding UTF8
     }
     $py = Join-Path $venvDir "Scripts\python.exe"
+    $venvPyCheck = & $py -c "import platform, struct, sys; bits = struct.calcsize('P') * 8; ok = (sys.version_info[:2] == (3, 13) and bits == 64); print(f'{platform.python_version()} ({bits}-bit)'); raise SystemExit(0 if ok else 1)"
+    if ($LASTEXITCODE -ne 0) {
+        throw "venv-build interpreter is not 64-bit Python 3.13 (got '$venvPyCheck'); delete $venvDir and retry."
+    }
+    $venvPythonDesc = ($venvPyCheck -join " ").Trim()
+    $venvPipVer = ((& $py -c "import pip; print(pip.__version__)") -join " ").Trim()
+    Write-Host "venv-build verified: Python $venvPythonDesc, pip $venvPipVer"
     # The tests import dubtool itself; the editable install is idempotent and
     # cheap when already present, so it runs on every build (a fresh or
     # reused venv) instead of only at venv creation.
@@ -193,7 +211,17 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
     $licDest = Join-Path $tmpAppDir "licenses"
     New-Item -ItemType Directory -Force -Path $licDest | Out-Null
     Copy-Item "packaging/licenses/*" -Destination $licDest -Recurse -Force
+    $manifestPath = Join-Path $root "packaging\vendor_manifest.json"
+    if (-not (Test-Path $manifestPath)) { throw "missing vendor manifest: $manifestPath" }
+    $vendorManifest = Get-Content $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $lockFileSha = (Get-FileHash $LockFile -Algorithm SHA256).Hash.ToLower()
+    $manifestSha = (Get-FileHash $manifestPath -Algorithm SHA256).Hash.ToLower()
+    $ffmpegVer = $vendorManifest.assets.ffmpeg.version
+    $bundledFfmpeg = Join-Path $tmpAppDir "_internal\vendor\ffmpeg.exe"
+    if (-not (Test-Path $bundledFfmpeg)) { throw "missing _internal\vendor\ffmpeg.exe in the build" }
+    $ffmpegSha = (Get-FileHash $bundledFfmpeg -Algorithm SHA256).Hash.ToLower()
     # AGU7 task 5 + AGU15 task 1: the build identity next to the exe with full 40-char HEAD
+    # plus build-input provenance (Python/pip/lockfile/vendor manifest/FFmpeg).
     $exePath = Join-Path $tmpAppDir "DubTool.exe"
     $sha = (Get-FileHash $exePath -Algorithm SHA256).Hash.ToLower()
     $stamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss")
@@ -204,7 +232,13 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
         "git: $git",
         "built (UTC): $stamp",
         "sha256: $sha",
-        "build id: $buildId"
+        "build id: $buildId",
+        "python: $venvPythonDesc",
+        "pip: $venvPipVer",
+        "lockfile_sha256: $lockFileSha",
+        "vendor_manifest_sha256: $manifestSha",
+        "ffmpeg_version: $ffmpegVer",
+        "ffmpeg_sha256: $ffmpegSha"
     )
     Set-Content -Path (Join-Path $tmpAppDir "BUILD_INFO.txt") -Value $buildLines -Encoding UTF8
 
@@ -225,9 +259,6 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
     )) {
         if (-not (Test-Path (Join-Path $tmpAppDir $p))) { throw "missing $p in the build" }
     }
-    $manifestPath = Join-Path $root "packaging\vendor_manifest.json"
-    if (-not (Test-Path $manifestPath)) { throw "missing vendor manifest: $manifestPath" }
-    $vendorManifest = Get-Content $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
     foreach ($assetProp in $vendorManifest.assets.PSObject.Properties) {
         $assetName = $assetProp.Name
         $assetSpec = $assetProp.Value
