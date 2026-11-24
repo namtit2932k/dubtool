@@ -269,16 +269,16 @@ def test_redact_preserves_model_names_and_masks_keys():
         "[20:01:05] [s3] Đang gọi gemini-3-flash-preview — translate chunk 1 (lần 1)\n"
         "[20:01:06] [s3] gemini-flash-lite-latest quá tải (503)\n"
         "[20:01:07] [s3] gemini-3.5-flash-lite và gemini-3.1-flash-lite OK\n"
-        "GEMINI_API_KEY=AIzaDOCFAKEVALUE1234567890ab\n"
-        "ANTHROPIC_API_KEY=sk-ant-api03-FAKEVALUE1234567890\n"
+        "GEMINI_API_KEY=AIzaDOCFAKEVALUE1234567890ab\n"  # fixture-fake-key
+        "ANTHROPIC_API_KEY=sk-ant-api03-FAKEVALUE1234567890\n"  # fixture-fake-key
     )
     out = _redact(sample)
     assert "gemini-3-flash-preview" in out
     assert "gemini-flash-lite-latest" in out
     assert "gemini-3.5-flash-lite" in out
     assert "gemini-3.1-flash-lite" in out
-    assert "AIzaDOCFAKEVALUE" not in out
-    assert "sk-ant-api03-FAKEVALUE" not in out
+    assert "AIzaDOCFAKEVALUE" not in out  # fixture-fake-key
+    assert "sk-ant-api03-FAKEVALUE" not in out  # fixture-fake-key
     assert "•••" in out
 
 
@@ -326,7 +326,7 @@ def test_gemini_provider_attaches_response_json_schema(monkeypatch):
     class _FakeClient:
         models = _FakeModels()
 
-    prov = GeminiProvider(model="gemini-3.5-flash-lite", api_keys=["AIzaFAKEKEY12345678901234567890"])
+    prov = GeminiProvider(model="gemini-3.5-flash-lite", api_keys=["AIzaFAKE1"])
     monkeypatch.setattr(prov, "client_for", lambda _k: _FakeClient())
 
     schema = translate_schema()
@@ -366,7 +366,7 @@ def test_gemini_max_tokens_and_truncated_json_trigger_split(monkeypatch):
     class _FakeClient:
         models = _FakeModels()
 
-    prov = GeminiProvider(model="gemini-3.5-flash-lite", api_keys=["AIzaFAKEKEY12345678901234567890"])
+    prov = GeminiProvider(model="gemini-3.5-flash-lite", api_keys=["AIzaFAKE1"])
     monkeypatch.setattr(prov, "client_for", lambda _k: _FakeClient())
     with pytest.raises(RequestTooLargeError):
         prov.complete("sys", "usr", json_mode=True)

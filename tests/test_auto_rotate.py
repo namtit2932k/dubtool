@@ -121,8 +121,8 @@ def test_auto_rotate_round_robins_across_gemini_and_groq():
         api_keys={
             "gemini": ["AIzaKey1", "AIzaKey2"],
             "groq": ["gsk_Key1"],
-            "openai": ["sk-paid-must-be-ignored"],
-            "anthropic": ["sk-ant-paid-must-be-ignored"],
+            "openai": ["sk-paid1"],
+            "anthropic": ["sk-ant-paid1"],
         },
         clock=clock,
         provider_factory=lambda p, m, k: _FakeInner(p, m, k, handler),

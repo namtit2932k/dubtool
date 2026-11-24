@@ -394,7 +394,7 @@ def test_settings_dialog_dedups_env_keys_and_aligns_spinboxes(monkeypatch):
     from dubtool.app.ui.settings_dialog import SettingsDialog
 
     app = QApplication.instance() or QApplication([])
-    stored = ["AIzaTESTKEY00001111", "AIzaTESTKEY00002222"]
+    stored = ["AIzaTEST1111", "AIzaTEST2222"]
     monkeypatch.setattr(secrets, "_stored_list", lambda p="gemini": list(stored) if p == "gemini" else [])
     monkeypatch.setattr(secrets, "get_keys", lambda p="gemini": list(stored) if p == "gemini" else [])
     monkeypatch.setattr(secrets, "has_key", lambda p="gemini": p in ("gemini", "auto"))
@@ -402,8 +402,8 @@ def test_settings_dialog_dedups_env_keys_and_aligns_spinboxes(monkeypatch):
         secrets,
         "env_key_sources",
         lambda p="gemini": [
-            ("GEMINI_API_KEY", secrets.mask("AIzaTESTKEY00001111")),
-            ("GEMINI_API_KEY_2", secrets.mask("AIzaTESTKEY00003333")),
+            ("GEMINI_API_KEY", secrets.mask("AIzaTEST1111")),
+            ("GEMINI_API_KEY_2", secrets.mask("AIzaTEST3333")),
         ] if p == "gemini" else [],
     )
 

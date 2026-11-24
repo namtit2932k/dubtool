@@ -223,8 +223,8 @@ def test_cross_provider_fallback_gemini_to_groq(tmp_path: Path, monkeypatch):
         job,
         cfg,
         api_keys={
-            "gemini": ["AIzaFAKE12345678901234567890"],
-            "groq": ["gsk_FAKE12345678901234567890"],
+            "gemini": ["AIzaFAKE1"],
+            "groq": ["gsk_FAKE1"],
         },
     )
     assert built == [("gemini", "gemini-3.5-flash-lite"), ("groq", "qwen/qwen3.8-27b")]
