@@ -8,9 +8,15 @@
 ## 1. Trạng thái Git & Phiên bản hiện tại
 
 - **Repository:** `namtit2932k/dubtool` (public), workspace `d:\Projects\Vibe\Project_K`, build root `D:\Projects\Vibe\Project_K_build`.
-- **Phiên bản đã phát hành gần nhất:** **`v1.0.19`** (commit `e04784a72e3a6b24428a4f292d9ea5caa4e7878f`, 2026-11-24) — Official, đã verify đầy đủ qua `scripts/release.py 19` (`DOD_REPORT.md` 9/9 PASS, `RELEASE_EVIDENCE.txt` PASS, `verify_release.py --audit` PASS, `638 passed, 2 skipped`, `DubTool-1.0.19-win64.zip` 220,831,600 B, SHA-256 `c262fdfe95fff47eaf92ebd534d021db31d5fa2c40c39689009e47b777cb769a`, `https://github.com/namtit2932k/dubtool/releases/tag/v1.0.19`).
-- **Phiên bản trước đó:** **`v1.0.18`** (commit `a9c4680aae9b1abd0fc7a4d760dee9c398864a76`, 2026-11-20) — Official.
-- **Nhánh hiện tại (`main`):** Đã phát hành chính thức **`v1.0.19` (Update 19)** bao gồm toàn bộ chuỗi nâng cấp tốc độ, Groq Cloud, Auto-Rotate miễn phí, chất lượng dịch S3, S6 streaming mixer và hoàn thiện UI Settings (báo cáo chi tiết tại `docs/reports/REPORT_UPDATE_19.md`):
+- **Phiên bản đã phát hành gần nhất:** **`v1.0.20`** (commit `6355909d28d5685604a57928695d9eb1bc0b6829`, 2026-11-24) — Official, đã verify đầy đủ qua `scripts/release.py 20` (`DOD_REPORT.md` 9/9 PASS, `RELEASE_EVIDENCE.txt` PASS, `verify_release.py --audit` PASS, `648 passed, 2 skipped`, `DubTool-1.0.20-win64.zip` 210,074,666 B, SHA-256 `e0b397690a8def1a38e71619ef98ad9e37490e460db75d01b01a78c1027a04ac`, `https://github.com/namtit2932k/dubtool/releases/tag/v1.0.20`).
+- **Các phiên bản trước đó:** **`v1.0.19`** (`e04784a7`, 2026-11-24), **`v1.0.18`** (`a9c4680a`, 2026-11-20) — Official.
+- **Nội dung chính đã phát hành trong `v1.0.20` (Update 20 — Hotfix & Hardened Build, `docs/reports/REPORT_UPDATE_20.md`):**
+  - **Sửa 3 lỗi thực tế trên `v1.0.19`:**
+    1. `src/dubtool/app/key_test.py` + `src/dubtool/app/ui/settings_dialog.py`: chuyển kiểm tra khóa Gemini sang `client.models.list(config={"page_size": 1})` miễn phí & chặn truyền `model_id` không phải Gemini (`auto-rotate`, `qwen/...`) — hết lỗi báo sai `✘ không hợp lệ` (`404`) trên key Gemini hợp lệ.
+    2. `src/dubtool/app/ui/settings_dialog.py`: lưu/đọc badge kiểm tra khóa hoàn toàn theo `(provider, row)`, gắn `tested_provider` cho kết quả async và xóa badge theo từng nhà cung cấp — hết lỗi dính nhãn `✘ không hợp lệ` từ Gemini sang Groq.
+    3. `src/dubtool/llm/parsing.py` + `src/dubtool/llm/client.py` + `src/dubtool/llm/auto_rotate.py`: thêm `find_untranslated_cjk()` + `_repair_untranslated_cjk()` chỉ sửa đích danh 1–8 câu sót CJK mà giữ nguyên toàn bộ các câu đã dịch sạch, và thêm `_in_flight` theo slot để các worker song song tách sang khóa rảnh thay vì dồn burst vào cùng 1 khóa Groq.
+  - **Đóng gói chuẩn hóa & tài liệu:** FFmpeg **8.1.2 GPL-3.0 (`essentials_build`)** + Noto Sans ghim SHA-256 (`packaging/vendor_manifest.json`, giảm ZIP ~10.7 MB so với `v1.0.19`), lockfile Python 3.13 x64 + `BUILD_INFO.txt` provenance đầy đủ, tách package `src/dubtool/app/i18n/`, thêm `docs/ARCHITECTURE.md`, nâng cấp `README.md` + `docs/README.vi.md` với `docs/images/brand/banner.svg`.
+- **Lịch sử các bản trước trên `main` (`v1.0.18`–`v1.0.19`):** bao gồm chuỗi nâng cấp tốc độ, Groq Cloud, Auto-Rotate miễn phí, chất lượng dịch S3, S6 streaming mixer và hoàn thiện UI Settings (báo cáo chi tiết tại `docs/reports/REPORT_UPDATE_19.md`):
   1. Nút Hủy dừng ngay khi S3 gặp 503 liên tục + short-circuit `punctuate` + UI `"Đang hủy…"`.
   2. Fix mất/cắt UI bên phải khi thu nhỏ cửa sổ chính (`_make_shrinkable_combo`, `minimumSize` động, kiểm tra `scroll-content-overflow-x`).
   3. Tách riêng `fallback_model` khỏi mô hình chính ở S3 (`fast_model_id` ưu tiên `config.llm_model`) và giữ nguyên lựa chọn `model_combo` sau khi đóng Cài đặt.
