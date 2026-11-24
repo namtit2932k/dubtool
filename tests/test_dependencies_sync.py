@@ -15,19 +15,17 @@ def _pkg_name(spec: str) -> str:
     return m.group(1).lower().replace("_", "-") if m else ""
 
 
-def _build_ps1_packages() -> tuple[set[str], set[str]]:
+def _build_ps1_no_deps() -> list[str]:
     text = (ROOT / "packaging" / "build_exe.ps1").read_text(encoding="utf-8", errors="ignore")
-    m = re.search(r'\$Pinned = @\(@"\n(.*?)\n"@\.TrimEnd\(\)', text, re.DOTALL)
-    assert m, "could not find $Pinned block in packaging/build_exe.ps1"
-    pinned = {
-        _pkg_name(ln)
-        for ln in m.group(1).splitlines()
-        if ln.strip() and not ln.strip().startswith("#")
-    }
+    assert "$Pinned =" not in text, (
+        "packaging/build_exe.ps1 must install from packaging/requirements-lock.txt "
+        "instead of maintaining a separate $Pinned version-range list"
+    )
+    assert 'packaging\\requirements-lock.txt' in text
+    assert "-r $LockFile" in text
     m_nd = re.search(r"\$NoDepsPinned = @\((.*?)\)", text, re.DOTALL)
     assert m_nd, "could not find $NoDepsPinned in packaging/build_exe.ps1"
-    no_deps = {_pkg_name(s) for s in re.findall(r'"([^"]+)"', m_nd.group(1))}
-    return pinned, no_deps
+    return re.findall(r'"([^"]+)"', m_nd.group(1))
 
 
 def test_pyproject_and_build_script_dependencies_stay_in_sync():
@@ -46,16 +44,20 @@ def test_pyproject_and_build_script_dependencies_stay_in_sync():
     assert "vieneu" in tts
     assert "vieneu" not in core, "vieneu must stay out of core deps so pip install -e . does not pull gradio/librosa"
 
-    pinned, no_deps = _build_ps1_packages()
-    # Every runtime/gui/dev package in build_exe.ps1 (except packaging-only pyinstaller)
-    # must exist in pyproject.toml so source installs mirror packaged builds.
-    build_expected = pinned - {"pyinstaller"}
-    declared = core | gui | dev
-    missing_in_pyproject = build_expected - declared
-    assert not missing_in_pyproject, f"Missing from pyproject.toml: {sorted(missing_in_pyproject)}"
-
+    no_deps_specs = _build_ps1_no_deps()
+    assert no_deps_specs, "$NoDepsPinned must not be empty"
+    for spec in no_deps_specs:
+        assert "==" in spec, f"build_exe.ps1 --no-deps entry must pin an exact version: {spec}"
+    no_deps = {_pkg_name(s) for s in no_deps_specs}
     # Every --no-deps package in build_exe.ps1 must appear in pyproject.toml [tts].
     assert no_deps <= tts, f"Missing from [tts] extra: {sorted(no_deps - tts)}"
+
+    # CI and release build script must install the exact same pinned vieneu version.
+    wf = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    for spec in no_deps_specs:
+        assert f"--no-deps {spec}" in wf, (
+            f"CI workflow does not match build_exe.ps1 --no-deps pin '{spec}'"
+        )
 
 
 def test_requirements_lockfile_pins_all_direct_dependencies():
@@ -76,9 +78,17 @@ def test_requirements_lockfile_pins_all_direct_dependencies():
     # vieneu must stay out of requirements-lock.txt (installed with --no-deps).
     assert "vieneu" not in locked
 
-    pinned, _no_deps = _build_ps1_packages()
-    missing = pinned - locked
-    assert not missing, f"Direct build packages missing from requirements-lock.txt: {sorted(missing)}"
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    proj = data["project"]
+    opt = proj.get("optional-dependencies", {})
+    expected = (
+        {_pkg_name(s) for s in proj.get("dependencies", [])}
+        | {_pkg_name(s) for s in opt.get("gui", [])}
+        | {_pkg_name(s) for s in opt.get("dev", [])}
+        | {"pyinstaller"}
+    )
+    missing = expected - locked
+    assert not missing, f"Direct build/runtime packages missing from requirements-lock.txt: {sorted(missing)}"
 
 
 def test_i18n_package_vi_en_key_parity():

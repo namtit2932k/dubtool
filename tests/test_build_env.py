@@ -16,20 +16,29 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 
-def _pinned_text() -> str:
-    """The pinned dependency block of packaging/build_exe.ps1."""
-    text = (ROOT / "packaging" / "build_exe.ps1").read_text(encoding="utf-8", errors="ignore")
-    m = re.search(r'\$Pinned = @\(@"\n(.*?)\n"@\.TrimEnd\(\)', text, re.DOTALL)
-    assert m, "the pinned block was not found in packaging/build_exe.ps1"
-    return m.group(1)
+def _lock_pkg_names() -> set[str]:
+    """Normalized package names from packaging/requirements-lock.txt."""
+    lock_path = ROOT / "packaging" / "requirements-lock.txt"
+    assert lock_path.is_file(), "packaging/requirements-lock.txt was not found"
+    names: set[str] = set()
+    for ln in lock_path.read_text(encoding="utf-8").splitlines():
+        s = ln.strip()
+        if not s or s.startswith("#"):
+            continue
+        base = s.split(";", 1)[0].strip()
+        name = base.split("==", 1)[0].strip().lower().replace("_", "-")
+        names.add(name)
+    return names
 
 
 def test_pinned_requirements_use_the_essentials_wheel():
-    pinned = _pinned_text()
-    reqs = [ln.strip() for ln in pinned.splitlines() if ln.strip() and not ln.strip().startswith("#")]
-    pkg_names = [r.split(">=")[0].split("<")[0].split("=")[0].strip() for r in reqs]
-    assert "PySide6-Essentials" in pkg_names, pkg_names
-    assert "PySide6" not in pkg_names, (
+    build_ps1 = (ROOT / "packaging" / "build_exe.ps1").read_text(encoding="utf-8", errors="ignore")
+    assert "requirements-lock.txt" in build_ps1, (
+        "packaging/build_exe.ps1 must install from packaging/requirements-lock.txt"
+    )
+    pkg_names = _lock_pkg_names()
+    assert "pyside6-essentials" in pkg_names, sorted(pkg_names)
+    assert "pyside6" not in pkg_names, (
         "the full PySide6 wheel adds 370+ MB of WebEngine the app never imports"
     )
 

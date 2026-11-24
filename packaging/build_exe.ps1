@@ -75,46 +75,17 @@ $pyCache = Join-Path $buildRoot "pip-cache"
 $venvDir = Join-Path $buildRoot "venv-build"
 $reqFileUnit = Join-Path $buildRoot ".req-units.tmp"
 
-# The pinned dependency set for the packaged app. Changing anything here
-# (including versions) invalidates .venv-build.
-$Pinned = @(@"
-faster-whisper>=1.0
-ctranslate2>=4.0
-onnxruntime>=1.20
-# PyAV 19 removed metadata_errors, which faster-whisper 1.2.1's decode passes;
-# the exe selftest guards this (av_decode_compat).
-av>=11,<19
-tokenizers>=0.20
-huggingface_hub>=0.20
-certifi
-sea-g2p>=0.10
-soundfile>=0.12
-google-genai>=2.33.0,<3
-openai>=1.0
-anthropic>=0.40
-pydub>=0.25
-audioop-lts
-python-dotenv>=1.0
-python-docx>=1.1
-pydantic
-pyyaml
-# AGU10 task 2: PySide6-Essentials instead of the full PySide6 wheel — the
-# app imports only QtCore/QtGui/QtWidgets/QtTest (verified by the import
-# scan, tests/test_build_env.py), none of which is an Addons module.
-PySide6-Essentials>=6.6
-keyring>=24
-colorama
-psutil
-tqdm
-pyinstaller>=6.10
-pytest>=8
-pytest-qt
-pytest-timeout
-"@.TrimEnd())
+# Single source of truth for the packaged app's resolved dependencies (same
+# lockfile verified by Windows Python 3.13 CI). Changing requirements-lock.txt
+# or $NoDepsPinned invalidates venv-build via .reqhash.
+$LockFile = Join-Path $root "packaging\requirements-lock.txt"
+if (-not (Test-Path $LockFile)) {
+    throw "missing dependency lockfile: $LockFile"
+}
 
 # Installed with --no-deps so gradio/librosa/numba/scipy (WebUI/cloning only)
 # are never pulled into the build venv or packaged exe.
-$NoDepsPinned = @("vieneu>=3.8,<4")
+$NoDepsPinned = @("vieneu==3.8.5")
 
 try {
     # AGU10 task 3.1: the shared model cache for every sanitized run —
@@ -129,7 +100,8 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
     Write-Host "== [1/6] build environment"
     $reqHash = ""
     $enc = [System.Text.Encoding]::UTF8
-    $pinnedNorm = ((($Pinned + $NoDepsPinned) -join "`n") -replace "`r`n", "`n").TrimEnd()
+    $lockRaw = Get-Content -Path $LockFile -Raw -Encoding UTF8
+    $pinnedNorm = (($lockRaw + "`n" + ($NoDepsPinned -join "`n")) -replace "`r`n", "`n").TrimEnd()
     $ms = New-Object System.IO.MemoryStream (, $enc.GetBytes($pinnedNorm))
     $reqHash = [BitConverter]::ToString(
         [System.Security.Cryptography.SHA256]::Create().ComputeHash($ms)
@@ -140,14 +112,15 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
         if ((Test-Path $hashFile) -and
             ((Get-Content $hashFile -Raw).Trim() -eq $reqHash)) {
             $reuse = $true
-            Write-Host "reusing .venv-build (pinned requirements unchanged)"
+            Write-Host "reusing venv-build (locked requirements unchanged)"
         } else {
-            Write-Host "pinned requirements changed - recreating .venv-build"
+            Write-Host "locked requirements changed - recreating venv-build"
             Remove-Item -Recurse -Force $venvDir
         }
     }
     if (-not (Test-Path $venvDir)) {
-        # Prefer Python 3.13 (64-bit) which has prebuilt wheels for onnxruntime, sea-g2p, PySide6, av.
+        # Prefer Python 3.13 (64-bit) which matches packaging/requirements-lock.txt
+        # and has prebuilt wheels for onnxruntime, sea-g2p, PySide6, av.
         $pyLauncherArgs = @("-3.13")
         & py -3.13 -c "import sys" 2>$null
         if ($LASTEXITCODE -ne 0) { $pyLauncherArgs = @() }
@@ -155,10 +128,9 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
         if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
         $py = Join-Path $venvDir "Scripts\python.exe"
         & $py -m pip install --upgrade pip -q --cache-dir $pyCache
-        Write-Host "installing pinned runtime + build dependencies"
-        $reqs = $Pinned -split "`r?`n" | Where-Object { $_ -and $_ -notmatch '^#' }   # comments are not pip requirements
-        & $py -m pip install -q @reqs --cache-dir $pyCache
-        if ($LASTEXITCODE -ne 0) { throw "dependency install failed" }
+        Write-Host "installing locked runtime + build dependencies from packaging/requirements-lock.txt"
+        & $py -m pip install -q -r $LockFile --cache-dir $pyCache
+        if ($LASTEXITCODE -ne 0) { throw "locked dependency install failed" }
         & $py -m pip install -q --no-deps @NoDepsPinned --cache-dir $pyCache
         if ($LASTEXITCODE -ne 0) { throw "no-deps dependency install failed" }
         Set-Content -Path $hashFile -Value $reqHash -NoNewline -Encoding UTF8

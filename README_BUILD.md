@@ -6,9 +6,11 @@ From the repository root:
 powershell -File packaging/build_exe.ps1
 ```
 
-This creates `.venv-build`, installs pinned dependencies, runs the offline
-test suite (skip with `-SkipTests`), builds with PyInstaller using
-`packaging/dubtool.spec`, checks the bundle structure, and writes:
+This creates `venv-build` (under `DUBTOOL_BUILD_ROOT`), installs the exact
+locked dependencies from `packaging/requirements-lock.txt` plus `vieneu==3.8.5`
+(`--no-deps`), runs the offline test suite (skip with `-SkipTests`), builds
+with PyInstaller using `packaging/dubtool.spec`, checks the bundle structure,
+and writes:
 
 - `dist/DubTool/` — the application (one-directory build)
 - `dist/DubTool-<version>-win64.zip` — the release zip
@@ -16,7 +18,8 @@ test suite (skip with `-SkipTests`), builds with PyInstaller using
 
 ### Reproducible dependency lockfile (Windows x64, Python 3.13)
 
-To recreate the exact resolved dependency versions used for the primary Windows x64 / Python 3.13 build:
+Both Windows Python 3.13 CI and `packaging/build_exe.ps1` (invoked by
+`scripts/release.py`) install from the same resolved lockfile:
 
 ```powershell
 pip install -r packaging/requirements-lock.txt
@@ -24,7 +27,10 @@ pip install --no-deps vieneu==3.8.5
 pip install -e . --no-deps
 ```
 
-`tests/test_dependencies_sync.py` enforces that `pyproject.toml`, `packaging/build_exe.ps1`, and `packaging/requirements-lock.txt` stay in sync.
+`tests/test_dependencies_sync.py` enforces that `pyproject.toml`,
+`packaging/build_exe.ps1`, `.github/workflows/ci.yml`, and
+`packaging/requirements-lock.txt` stay in sync (including the exact `vieneu`
+version).
 
 ## Version rule (AGENT_UPDATE_9.md 5.2)
 
@@ -42,9 +48,10 @@ into `packaging/update_number.txt` — nothing else needs changing.
 
 Everything goes through the spec (`packaging/dubtool.spec`):
 
-- `vendor/ffmpeg.exe`, `vendor/ffprobe.exe` and `vendor/fonts/NotoSans.ttf`
+- `vendor/ffmpeg.exe` and `vendor/fonts/NotoSans.ttf`
   (plus its OFL license) are placed into `_internal/vendor/` inside the
-  bundle; `dubtool.app.paths.bundle_root()` resolves them at runtime.
+  bundle (`ffprobe.exe` is intentionally omitted because probing runs
+  in-process via PyAV); `dubtool.app.paths.bundle_root()` resolves them at runtime.
 - `packaging/modes.yaml` (shipped mode/model list) into `_internal/packaging/`.
 - `faster_whisper`, `ctranslate2`, `onnxruntime`, `av` binaries and data
   (Silero VAD assets, model tokenizers), `vieneu` / `vieneu_utils` / `sea_g2p` /
@@ -77,8 +84,7 @@ Everything goes through the spec (`packaging/dubtool.spec`):
 
 ## FFmpeg verification
 
-You can swap the bundled FFmpeg by replacing `vendor/ffmpeg.exe` and
-`vendor/ffprobe.exe` before building. Verify after the build with
+You can swap the bundled FFmpeg by replacing `vendor/ffmpeg.exe` before building. Verify after the build with
 `DubTool.exe --selftest` (checks filters `subtitles/amix/alimiter/
 sidechaincompress`, encoder `libx264`, and the bundled font rendering
 Vietnamese). When you fetch a fresh FFmpeg build, record its download URL
