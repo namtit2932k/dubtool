@@ -127,7 +127,25 @@ def _prunable(jobs_dir: Path, *, days: int, running_job_id: str | None,
     reclaimed = 0
     if not jobs_dir.is_dir():
         return deleted, reclaimed
-    for job in [p for p in jobs_dir.iterdir() if p.is_dir() and not p.is_symlink()]:
+    for entry in jobs_dir.iterdir():
+        if entry.is_symlink():
+            # Remove stray symlink entries inside jobs_dir without ever
+            # following or modifying the target they point to.
+            if not delete:
+                deleted.append(entry)
+                continue
+            try:
+                try:
+                    entry.unlink()
+                except OSError:
+                    entry.rmdir()  # Windows directory symlink fallback
+            except OSError:
+                continue
+            deleted.append(entry)
+            continue
+        if not entry.is_dir():
+            continue
+        job = entry
         if running_job_id and job.name == running_job_id:
             continue
         try:

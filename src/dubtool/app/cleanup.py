@@ -337,17 +337,28 @@ def apply(items: list[PlanItem], root: Path, log_path: Path) -> int:
     for item in items:
         if item.action != "delete":
             continue
-        p = item.path.resolve()
-        if not (p == root or p.is_relative_to(root)):
-            log.warning("skipping outside-root path: %s", p)
-            continue
+        raw = Path(item.path)
+        if raw.is_symlink():
+            # Never dereference a symlink before checking containment — verify
+            # the symlink entry itself sits inside `root`, then remove only the
+            # link without touching its target.
+            parent_resolved = raw.parent.resolve()
+            if not (parent_resolved == root or parent_resolved.is_relative_to(root)):
+                log.warning("skipping outside-root symlink: %s", raw)
+                continue
+            p = raw
+        else:
+            p = raw.resolve()
+            if not (p == root or p.is_relative_to(root)):
+                log.warning("skipping outside-root path: %s", p)
+                continue
         size = item.size
         try:
             if p.is_symlink():
-                if p.is_dir():
-                    p.rmdir()      # remove the link only
-                else:
+                try:
                     p.unlink()
+                except OSError:
+                    p.rmdir()      # Windows directory symlink fallback
             elif p.is_file():
                 p.unlink()
             elif p.is_dir():

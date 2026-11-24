@@ -69,7 +69,8 @@ class TestProbeParity:
     def test_duration_mp3(self, tmp_path: Path):
         src = tmp_path / "tone.mp3"
         _tone(src, seconds=2.0)
-        assert audio_utils.probe_duration(src) == pytest.approx(2.0, abs=0.05)
+        # MP3 LAME encoder delay/padding varies slightly across FFmpeg 7/8 (~2.02–2.07s).
+        assert audio_utils.probe_duration(src) == pytest.approx(2.0, abs=0.10)
 
     def test_duration_mp4(self, tmp_path: Path):
         src = tmp_path / "clip.mp4"

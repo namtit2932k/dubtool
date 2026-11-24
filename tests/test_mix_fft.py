@@ -50,17 +50,13 @@ def mixed_wav(tmp_path_factory) -> np.ndarray:
     graph = audio_utils.build_mix_graph("static", -14.0, 0.0)
     out = root / "mixed.wav"
 
-    # Same wiring as the real mix, on plain WAV inputs: both audio
-    # streams are consumed by the filter graph, so no extra -map 0:a is
-    # needed (this build's WAV muxer rejects unmapped audio streams).
-    script = root / "mix_script.txt"
-    script.write_text(graph, encoding="utf-8")
+    # Pass -filter_complex inline (FFmpeg 8.0 removed -filter_complex_script).
     proc = subprocess.run(
         [
             audio_utils.ffmpeg_bin(), "-y",
             "-i", "background.wav",
             "-i", "dub.wav",
-            "-filter_complex_script", "mix_script.txt",
+            "-filter_complex", graph,
             "-map", "[out]",
             "-c:a", "pcm_s16le", "-ar", str(rate), "-ac", "1",
             str(out.name),
