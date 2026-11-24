@@ -15,10 +15,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  windows-ci:
-    name: Windows (Python 3.13)
+  test:
+    name: Windows · Python ${{ matrix.python-version }}
     runs-on: windows-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
     env:
       PYTHONIOENCODING: utf-8
       PYTHONUTF8: "1"
@@ -33,18 +37,30 @@ jobs:
           New-Item -ItemType Directory -Force -Path $buildRoot | Out-Null
           "DUBTOOL_BUILD_ROOT=$buildRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Set up Python 3.13
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python-version }}
           cache: pip
-          cache-dependency-path: pyproject.toml
+          cache-dependency-path: |
+            pyproject.toml
+            packaging/requirements-lock.txt
 
       - name: Install FFmpeg
         shell: pwsh
         run: choco install ffmpeg --no-progress
 
-      - name: Install DubTool from source (CLI + GUI + dev + VieNeu)
+      - name: Install locked dependencies (Python 3.13)
+        if: matrix.python-version == '3.13'
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r packaging/requirements-lock.txt
+          python -m pip install --no-deps vieneu==3.8.5
+          python -m pip install -e . --no-deps
+
+      - name: Install from pyproject.toml (Python 3.11 compatibility)
+        if: matrix.python-version != '3.13'
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
@@ -55,7 +71,7 @@ jobs:
         shell: pwsh
         run: |
           python scripts/preflight_gates.py
-          python scripts/check_readme_links.py
+          python scripts/check_readme_links.py --allow-missing-index
 
       - name: Run offline test suite
         shell: pwsh
@@ -72,3 +88,75 @@ jobs:
           python -m dubtool.app.main --selftest
           python -m dubtool.app.main --layout-check
           python -m dubtool.app.main --gui-smoke
+
+  package:
+    name: Windows · Python 3.13 · PyInstaller Verify
+    runs-on: windows-latest
+    needs: test
+    timeout-minutes: 30
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure isolated build root & vendor assets
+        shell: pwsh
+        run: |
+          $buildRoot = Join-Path $env:RUNNER_TEMP "dubtool-build"
+          $vendorDir = Join-Path $buildRoot "vendor"
+          $fontsDir  = Join-Path $vendorDir "fonts"
+          New-Item -ItemType Directory -Force -Path $fontsDir | Out-Null
+          "DUBTOOL_BUILD_ROOT=$buildRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: packaging/requirements-lock.txt
+
+      - name: Install FFmpeg and populate vendor directory
+        shell: pwsh
+        run: |
+          choco install ffmpeg --no-progress
+          $ffmpegPath = (Get-Command ffmpeg).Source
+          $vendorDir  = Join-Path $env:DUBTOOL_BUILD_ROOT "vendor"
+          $fontsDir   = Join-Path $vendorDir "fonts"
+          Copy-Item $ffmpegPath (Join-Path $vendorDir "ffmpeg.exe") -Force
+          $sysFont = if (Test-Path "C:\Windows\Fonts\segoeui.ttf") { "C:\Windows\Fonts\segoeui.ttf" } else { "C:\Windows\Fonts\arial.ttf" }
+          Copy-Item $sysFont (Join-Path $fontsDir "NotoSans.ttf") -Force
+
+      - name: Install locked build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r packaging/requirements-lock.txt
+          python -m pip install --no-deps vieneu==3.8.5
+          python -m pip install -e . --no-deps
+
+      - name: Build DubTool.exe via PyInstaller
+        shell: pwsh
+        run: |
+          $distDir = Join-Path $env:DUBTOOL_BUILD_ROOT "dist"
+          $workDir = Join-Path $env:DUBTOOL_BUILD_ROOT "build"
+          python -m PyInstaller packaging/dubtool.spec --noconfirm --distpath $distDir --workpath $workDir
+
+      - name: Verify packaged DubTool.exe (--version, --selftest, --layout-check, --gui-smoke)
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -c "
+          import os, subprocess, sys
+          exe = os.path.join(os.environ['DUBTOOL_BUILD_ROOT'], 'dist', 'DubTool', 'DubTool.exe')
+          assert os.path.isfile(exe), f'missing {exe}'
+          for flag in ('--version', '--selftest', '--layout-check', '--gui-smoke'):
+              print(f'=== {exe} {flag} ===', flush=True)
+              r = subprocess.run([exe, flag], capture_output=True, text=True, timeout=180)
+              if r.stdout: print(r.stdout, flush=True)
+              if r.stderr: print(r.stderr, file=sys.stderr, flush=True)
+              if r.returncode != 0:
+                  sys.exit(r.returncode)
+          "

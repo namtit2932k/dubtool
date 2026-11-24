@@ -14,6 +14,18 @@ test suite (skip with `-SkipTests`), builds with PyInstaller using
 - `dist/DubTool-<version>-win64.zip` — the release zip
 - `dist/DubTool/THIRD_PARTY.md` and `dist/DubTool/README_BUILD.md`
 
+### Reproducible dependency lockfile (Windows x64, Python 3.13)
+
+To recreate the exact resolved dependency versions used for the primary Windows x64 / Python 3.13 build:
+
+```powershell
+pip install -r packaging/requirements-lock.txt
+pip install --no-deps vieneu==3.8.5
+pip install -e . --no-deps
+```
+
+`tests/test_dependencies_sync.py` enforces that `pyproject.toml`, `packaging/build_exe.ps1`, and `packaging/requirements-lock.txt` stay in sync.
+
 ## Version rule (AGENT_UPDATE_9.md 5.2)
 
 The version is `1.0.<N>` where **N is the number of the update being

@@ -58,6 +58,29 @@ def test_pyproject_and_build_script_dependencies_stay_in_sync():
     assert no_deps <= tts, f"Missing from [tts] extra: {sorted(no_deps - tts)}"
 
 
+def test_requirements_lockfile_pins_all_direct_dependencies():
+    lock_path = ROOT / "packaging" / "requirements-lock.txt"
+    assert lock_path.is_file(), "packaging/requirements-lock.txt missing"
+    lines = [
+        ln.strip()
+        for ln in lock_path.read_text(encoding="utf-8").splitlines()
+        if ln.strip() and not ln.strip().startswith("#")
+    ]
+    assert lines, "requirements-lock.txt must not be empty"
+    locked: set[str] = set()
+    for ln in lines:
+        spec = ln.split(";", 1)[0].strip()
+        assert "==" in spec, f"Unpinned entry in requirements-lock.txt: {ln}"
+        locked.add(_pkg_name(spec))
+
+    # vieneu must stay out of requirements-lock.txt (installed with --no-deps).
+    assert "vieneu" not in locked
+
+    pinned, _no_deps = _build_ps1_packages()
+    missing = pinned - locked
+    assert not missing, f"Direct build packages missing from requirements-lock.txt: {sorted(missing)}"
+
+
 def test_i18n_package_vi_en_key_parity():
     from dubtool.app import i18n
     from dubtool.app.i18n.en import EN_STRINGS
@@ -73,9 +96,12 @@ def test_i18n_package_vi_en_key_parity():
 def test_github_ci_workflow_exists_and_uses_source_install():
     wf = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "windows-latest" in wf
+    assert '"3.11"' in wf and '"3.13"' in wf
+    assert "requirements-lock.txt" in wf
     assert '.[gui,dev]' in wf
     assert "--no-deps" in wf and "vieneu" in wf
     assert "preflight_gates.py" in wf
     assert "check_readme_links.py" in wf
+    assert "PyInstaller" in wf
     assert "--gui-smoke" in wf
 

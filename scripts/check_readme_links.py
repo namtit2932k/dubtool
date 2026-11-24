@@ -62,7 +62,7 @@ def check(root: Path, tracked: set[str] | None) -> list[str]:
     return problems
 
 
-def check_images(root: Path) -> list[str]:
+def check_images(root: Path, *, allow_missing_index: bool = False) -> list[str]:
     """Update 12 task 5 item 3: automatic image checks for every PNG the
     READMEs reference — the sidecar INDEX.txt must record the real
     windows platform, each image must be at least 600 px wide and not
@@ -84,7 +84,8 @@ def check_images(root: Path) -> list[str]:
     if not references:
         return problems  # no README images at all
     if not index_path.exists():
-        problems.append("docs/images/INDEX.txt: missing (required next to the images)")
+        if not allow_missing_index:
+            problems.append("docs/images/INDEX.txt: missing (required next to the images)")
     else:
         body = index_path.read_text(encoding="utf-8", errors="replace").lower()
         if "platform: windows" not in body:
@@ -130,10 +131,19 @@ def check_images(root: Path) -> list[str]:
     return problems
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Verify README relative links and dark-theme PNG quality.")
+    parser.add_argument(
+        "--allow-missing-index",
+        action="store_true",
+        help="Skip failing when gitignored docs/images/INDEX.txt is absent (e.g. clean CI checkouts).",
+    )
+    args = parser.parse_args(argv)
     tracked = _tracked(ROOT)
     problems = check(ROOT, tracked)
-    problems += check_images(ROOT)
+    problems += check_images(ROOT, allow_missing_index=args.allow_missing_index)
     for p in problems:
         print(p)
     print("check_readme_links:", "FAIL" if problems else "OK")
