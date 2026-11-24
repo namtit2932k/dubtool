@@ -185,6 +185,23 @@ jobs:
           $workDir = Join-Path $env:DUBTOOL_BUILD_ROOT "build"
           python -m PyInstaller packaging/dubtool.spec --noconfirm --distpath $distDir --workpath $workDir
 
+          $appDir = Join-Path $distDir "DubTool"
+          $exePath = Join-Path $appDir "DubTool.exe"
+          $update = (Get-Content "packaging/update_number.txt" -Raw).Trim()
+          $version = "1.0.$update"
+          $git = $env:GITHUB_SHA
+          $sha = (Get-FileHash $exePath -Algorithm SHA256).Hash.ToLower()
+          $stamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss")
+          $buildLines = @(
+            "update: $update",
+            "version: $version",
+            "git: $git",
+            "built (UTC): $stamp",
+            "sha256: $sha",
+            "build id: Update $update ($git)"
+          )
+          Set-Content -Path (Join-Path $appDir "BUILD_INFO.txt") -Value $buildLines -Encoding UTF8
+
       - name: Verify packaged DubTool.exe (--version, --selftest, --layout-check, --gui-smoke)
         shell: pwsh
         env:
@@ -211,3 +228,30 @@ jobs:
               if r.returncode != 0:
                   sys.exit(r.returncode)
           "
+
+      - name: Verify packaged screenshots (DubTool.exe --screenshots & test_screenshots.py)
+        shell: pwsh
+        run: |
+          python -c "
+          import os, subprocess, sys
+          build_root = os.environ['DUBTOOL_BUILD_ROOT']
+          exe = os.path.join(build_root, 'dist', 'DubTool', 'DubTool.exe')
+          shot_dir = os.path.join(build_root, 'screenshots', f\"ci_{os.environ['GITHUB_SHA'][:12]}\")
+          os.makedirs(shot_dir, exist_ok=True)
+          env = {k: v for k, v in os.environ.items() if k != 'QT_QPA_PLATFORM'}
+          print(f'=== {exe} --screenshots {shot_dir} ===', flush=True)
+          r = subprocess.run([exe, '--screenshots', shot_dir], env=env, capture_output=True, text=True, timeout=180)
+          if r.stdout: print(r.stdout, flush=True)
+          if r.stderr: print(r.stderr, file=sys.stderr, flush=True)
+          if r.returncode != 0:
+              sys.exit(r.returncode)
+          "
+          python -m pytest tests -m packaged -v --timeout=120
+
+      - name: Upload packaged screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: packaged-screenshots-diagnostic
+          path: ${{ env.DUBTOOL_BUILD_ROOT }}\screenshots
+          if-no-files-found: ignore

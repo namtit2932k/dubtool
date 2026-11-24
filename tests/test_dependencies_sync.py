@@ -114,6 +114,9 @@ def test_github_ci_workflow_exists_and_uses_source_install():
     assert "check_readme_links.py" in wf
     assert "PyInstaller" in wf
     assert "--gui-smoke" in wf
+    assert "--screenshots" in wf
+    assert "-m packaged" in wf
+    assert "upload-artifact" in wf
 
 
 def test_packaged_font_provenance_pinned_in_ci_and_build_script():
