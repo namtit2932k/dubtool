@@ -1,0 +1,81 @@
+"""Verify dependency metadata consistency between pyproject.toml and packaging/build_exe.ps1."""
+
+from __future__ import annotations
+
+import re
+import tomllib
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _pkg_name(spec: str) -> str:
+    base = spec.split(";", 1)[0].strip()
+    m = re.match(r"([A-Za-z0-9_.-]+)", base)
+    return m.group(1).lower().replace("_", "-") if m else ""
+
+
+def _build_ps1_packages() -> tuple[set[str], set[str]]:
+    text = (ROOT / "packaging" / "build_exe.ps1").read_text(encoding="utf-8", errors="ignore")
+    m = re.search(r'\$Pinned = @\(@"\n(.*?)\n"@\.TrimEnd\(\)', text, re.DOTALL)
+    assert m, "could not find $Pinned block in packaging/build_exe.ps1"
+    pinned = {
+        _pkg_name(ln)
+        for ln in m.group(1).splitlines()
+        if ln.strip() and not ln.strip().startswith("#")
+    }
+    m_nd = re.search(r"\$NoDepsPinned = @\((.*?)\)", text, re.DOTALL)
+    assert m_nd, "could not find $NoDepsPinned in packaging/build_exe.ps1"
+    no_deps = {_pkg_name(s) for s in re.findall(r'"([^"]+)"', m_nd.group(1))}
+    return pinned, no_deps
+
+
+def test_pyproject_and_build_script_dependencies_stay_in_sync():
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    proj = data["project"]
+    opt = proj.get("optional-dependencies", {})
+
+    core = {_pkg_name(s) for s in proj.get("dependencies", [])}
+    gui = {_pkg_name(s) for s in opt.get("gui", [])}
+    dev = {_pkg_name(s) for s in opt.get("dev", [])}
+    tts = {_pkg_name(s) for s in opt.get("tts", [])}
+
+    # GUI and dev extras must declare the packages required by README source install.
+    assert {"pyside6-essentials", "keyring"} <= gui
+    assert {"pytest", "pytest-qt", "pytest-timeout"} <= dev
+    assert "vieneu" in tts
+    assert "vieneu" not in core, "vieneu must stay out of core deps so pip install -e . does not pull gradio/librosa"
+
+    pinned, no_deps = _build_ps1_packages()
+    # Every runtime/gui/dev package in build_exe.ps1 (except packaging-only pyinstaller)
+    # must exist in pyproject.toml so source installs mirror packaged builds.
+    build_expected = pinned - {"pyinstaller"}
+    declared = core | gui | dev
+    missing_in_pyproject = build_expected - declared
+    assert not missing_in_pyproject, f"Missing from pyproject.toml: {sorted(missing_in_pyproject)}"
+
+    # Every --no-deps package in build_exe.ps1 must appear in pyproject.toml [tts].
+    assert no_deps <= tts, f"Missing from [tts] extra: {sorted(no_deps - tts)}"
+
+
+def test_i18n_package_vi_en_key_parity():
+    from dubtool.app import i18n
+    from dubtool.app.i18n.en import EN_STRINGS
+    from dubtool.app.i18n.vi import VI_STRINGS
+
+    assert set(VI_STRINGS) == set(EN_STRINGS)
+    assert i18n.STRINGS["vi"] is VI_STRINGS
+    assert i18n.STRINGS["en"] is EN_STRINGS
+    assert len(VI_STRINGS) >= 250
+    assert i18n.tr("app.title")
+
+
+def test_github_ci_workflow_exists_and_uses_source_install():
+    wf = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "windows-latest" in wf
+    assert '.[gui,dev]' in wf
+    assert "--no-deps" in wf and "vieneu" in wf
+    assert "preflight_gates.py" in wf
+    assert "check_readme_links.py" in wf
+    assert "--gui-smoke" in wf
+

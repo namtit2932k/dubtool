@@ -10,6 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/namtit2932k/dubtool/releases/latest"><img src="https://img.shields.io/github/v/release/namtit2932k/dubtool?label=Release&color=e05d44" alt="Latest release" /></a>
+  <a href="https://github.com/namtit2932k/dubtool/actions/workflows/ci.yml"><img src="https://github.com/namtit2932k/dubtool/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-2ea043" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64-0969da" alt="Windows 10/11 x64" />
 </p>
@@ -104,9 +105,10 @@ If the input video is already in Vietnamese, DubTool stops before translation an
 Requires **Python 3.11+** (3.13 recommended) and **FFmpeg on `PATH`**.
 
 ```bash
-pip install -e .[dev]
-copy .env.example .env      # add GEMINI_API_KEY=... and/or GROQ_API_KEY=...
-dubtool doctor              # verify FFmpeg, keys, and dependencies
+pip install -e ".[gui,dev]"          # CLI + Desktop GUI (PySide6-Essentials, keyring) + pytest
+pip install --no-deps "vieneu>=3.8,<4"  # offline VieNeu-TTS v3 ONNX (avoids WebUI/gradio extras)
+copy .env.example .env               # add GEMINI_API_KEY=... and/or GROQ_API_KEY=...
+dubtool doctor                       # verify FFmpeg, keys, and dependencies
 ```
 
 **Launch Desktop GUI from source:**
@@ -156,7 +158,7 @@ python -m dubtool.app.main --layout-check # UI geometry & overflow invariants (2
 python -m dubtool.app.main --gui-smoke    # isolated real-widget end-to-end smoke test
 ```
 
-Release history and detailed update reports live in [`docs/RELEASES.md`](docs/RELEASES.md) (latest report: [`REPORT_UPDATE_19.md`](docs/reports/REPORT_UPDATE_19.md)).
+Release history, architecture overview, and detailed update reports live in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/RELEASES.md`](docs/RELEASES.md), and [`REPORT_UPDATE_19.md`](docs/reports/REPORT_UPDATE_19.md).
 
 ---
 

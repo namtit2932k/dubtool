@@ -4,27 +4,59 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dubtool"
-description = "English -> Vietnamese video dubbing tool"
+description = "Multilingual -> Vietnamese video dubbing desktop app and CLI for Windows"
 requires-python = ">=3.11"
-# AGU9 5.2: single version source (dubtool.__version__, 1.0.<update>).
+# Single version source of truth (dubtool.__version__, 1.0.<update>).
 dynamic = ["version"]
 dependencies = [
   "faster-whisper>=1.0",
-  "av>=11,<19",  # AGU8 7.1: PyAV 19+ changes the APIs faster-whisper uses
-  "openai>=1.0",
-  "anthropic>=0.40",
-  "vieneu>=3.8,<4",
+  "ctranslate2>=4.0",
+  "av>=11,<19",  # PyAV 19+ changes decode APIs used by faster-whisper
+  "onnxruntime>=1.20",
+  "tokenizers>=0.20",
+  "huggingface_hub>=0.20",
   "sea-g2p>=0.10",
   "soundfile>=0.12",
-  "onnxruntime>=1.16",
+  "numpy>=1.26",
   "pydub>=0.25",
-  "python-docx>=1.1",  # AGU7 task 4: the customer-readable translation file
+  "audioop-lts; python_version >= '3.13'",
+  "google-genai>=2.33.0,<3",  # HttpOptions.timeout expects integer ms
+  "openai>=1.0",  # used by OpenAI and Groq Cloud providers
+  "anthropic>=0.40",
+  "python-docx>=1.1",  # customer-readable .docx translation export
   "python-dotenv>=1.0",
-  "google-genai>=2.33.0,<3",  # pinned close-range: HttpOptions.timeout is int ms (AGU7 4.1)
+  "pydantic>=2.0",
+  "pyyaml>=6.0",
+  "certifi>=2024.0",
+  "colorama>=0.4",
+  "psutil>=5.9",
+  "tqdm>=4.66",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+# Lean PySide6-Essentials (no WebEngine) + Windows Credential Manager storage.
+gui = [
+  "PySide6-Essentials>=6.6",
+  "keyring>=24",
+]
+dev = [
+  "pytest>=8",
+  "pytest-qt>=4.4",
+  "pytest-timeout>=2.2",
+]
+# Offline VieNeu-TTS v3 ONNX engine. In build_exe.ps1 and CI this is installed
+# with `pip install --no-deps "vieneu>=3.8,<4"` to avoid pulling gradio/librosa/numba
+# (WebUI/cloning extras that DubTool does not use).
+tts = [
+  "vieneu>=3.8,<4",
+]
+all = [
+  "PySide6-Essentials>=6.6",
+  "keyring>=24",
+  "pytest>=8",
+  "pytest-qt>=4.4",
+  "pytest-timeout>=2.2",
+]
 
 [project.scripts]
 dubtool = "dubtool.cli:main"
@@ -37,3 +69,9 @@ version = {attr = "dubtool.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "unit: fast isolated unit tests (no Qt widgets or packaged exe)",
+  "gui: PySide6 widget and dialog tests",
+  "integration: multi-stage pipeline and CLI/API integration tests",
+  "packaged: tests inspecting built dist/DubTool artifacts or screenshots",
+]

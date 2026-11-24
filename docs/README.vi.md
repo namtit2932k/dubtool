@@ -10,6 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/namtit2932k/dubtool/releases/latest"><img src="https://img.shields.io/github/v/release/namtit2932k/dubtool?label=Release&color=e05d44" alt="Phiên bản mới nhất" /></a>
+  <a href="https://github.com/namtit2932k/dubtool/actions/workflows/ci.yml"><img src="https://github.com/namtit2932k/dubtool/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="../LICENSE"><img src="https://img.shields.io/badge/License-MIT-2ea043" alt="Giấy phép MIT" /></a>
   <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64-0969da" alt="Windows 10/11 x64" />
 </p>
@@ -104,9 +105,10 @@ Nếu video đầu vào đã là tiếng Việt, DubTool sẽ tự dừng trư�
 Yêu cầu **Python 3.11+** (khuyên dùng 3.13) và **FFmpeg trong `PATH`**.
 
 ```bash
-pip install -e .[dev]
-copy .env.example .env      # điền GEMINI_API_KEY=... và/hoặc GROQ_API_KEY=...
-dubtool doctor              # kiểm tra FFmpeg, khóa API và thư viện
+pip install -e ".[gui,dev]"             # CLI + Giao diện Desktop (PySide6-Essentials, keyring) + pytest
+pip install --no-deps "vieneu>=3.8,<4"  # VieNeu-TTS v3 ONNX offline (không kéo thư viện WebUI/gradio thừa)
+copy .env.example .env                  # điền GEMINI_API_KEY=... và/hoặc GROQ_API_KEY=...
+dubtool doctor                          # kiểm tra FFmpeg, khóa API và thư viện
 ```
 
 **Mở giao diện desktop từ mã nguồn:**
@@ -156,7 +158,7 @@ python -m dubtool.app.main --layout-check # kiểm tra bố cục UI ở 25 kíc
 python -m dubtool.app.main --gui-smoke    # kiểm thử giao diện end-to-end trong môi trường cô lập
 ```
 
-Lịch sử phát hành và báo cáo chi tiết từng bản cập nhật xem tại [`docs/RELEASES.md`](RELEASES.md) (báo cáo mới nhất: [`REPORT_UPDATE_19.md`](reports/REPORT_UPDATE_19.md)).
+Tổng quan kiến trúc, lịch sử phát hành và báo cáo chi tiết xem tại [`docs/ARCHITECTURE.md`](ARCHITECTURE.md), [`docs/RELEASES.md`](RELEASES.md) và [`REPORT_UPDATE_19.md`](reports/REPORT_UPDATE_19.md).
 
 ---
 

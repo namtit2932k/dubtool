@@ -49,6 +49,12 @@
         - Đặt `jobs_days_spin` và `jobs_total_mb_spin` cùng `minimumWidth=140` + `Expanding` để 2 ô thẳng tắp cả mép trái lẫn mép phải trong tab *Nâng cao*.
       - Test mới tại `tests/test_s3_optimizations.py` (10 tests), `tests/test_s6_and_explorer_fixes.py` (5 tests), `tests/test_groq_provider.py` (10 tests), và `tests/test_auto_rotate.py` (13 tests).
 
+  12. **Chuẩn bị cho Update 20 (sau `v1.0.19` — đã verify offline, chưa release `v1.0.20`):**
+      - Chuẩn hóa `pyproject.toml` (đồng bộ runtime deps với `packaging/build_exe.ps1`, tách extras `gui`, `dev`, `tts`, `all`, thêm pytest markers `unit`/`gui`/`integration`/`packaged`, kiểm chứng cài thật trên `.venv` sạch Windows Python 3.13 PASS) + thêm `tests/test_dependencies_sync.py`.
+      - Thêm GitHub Actions CI (`.github/workflows/ci.yml` chạy `windows-latest` Python 3.13: `preflight_gates`, `check_readme_links`, full offline `pytest`, `--selftest`, `--layout-check`, `--gui-smoke` không cần API key) + badge CI trên `README.md` và `docs/README.vi.md`.
+      - Tách `src/dubtool/app/i18n.py` (646 dòng) thành package `src/dubtool/app/i18n/` (`__init__.py`, `vi.py`, `en.py`) giữ 100% tương thích ngược + kiểm tra đồng bộ 284 key VI/EN.
+      - Bổ sung tài liệu kiến trúc & onboarding [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (sơ đồ Mermaid module, pipeline S1→S7, hợp đồng resume, Auto-Rotate, bảo mật, phân tầng test).
+
 ---
 
 ## 2. Decision Log (Các quyết định đã chốt)
