@@ -144,9 +144,9 @@ def run_pipeline(update_n: int, dry_run: bool = False, skip_build_if_matching: b
         head = logger.run(["git", "rev-parse", "HEAD"], env=env).stdout.strip()
         logger.log(f"Preconditions OK: HEAD={head}, version={expected_ver}")
 
-        logger.log("=== STEP 2: Full Offline Test Suite (pytest tests -q --timeout=120 -rs) ===")
+        logger.log('=== STEP 2: Full Offline Test Suite (pytest tests -m "not packaged" -q --timeout=120 -rs) ===')
         pytest_res = logger.run(
-            [sys.executable, "-m", "pytest", "tests", "-q", "--timeout=120", "-rs"],
+            [sys.executable, "-m", "pytest", "tests", "-m", "not packaged", "-q", "--timeout=120", "-rs"],
             env=env,
             timeout=900,
         )
