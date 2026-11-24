@@ -186,9 +186,11 @@ jobs:
 
           $env:DUBTOOL_GIT_HEAD = $head
           $env:DUBTOOL_PYTHON = (Get-Command python).Source
-          # Offline test suite already passed in both matrix jobs (-SkipTests),
-          # while screenshots + test_screenshots.py + README link checks run live here.
-          powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $relSrc "packaging\build_exe.ps1") -SkipTests -KeepBuild
+          # Offline test suite already passed in both matrix jobs (-SkipTests).
+          # Screenshots + test_screenshots.py run live on the packaged exe; only
+          # -SkipReadmeImages skips overwriting throwaway rel_src/docs/images with
+          # GitHub runner's default light-mode theme (README assets are verified in test jobs).
+          powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $relSrc "packaging\build_exe.ps1") -SkipTests -KeepBuild -SkipReadmeImages
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify release artifacts (ZIP, SHA256SUMS, BUILD_INFO, --version, --selftest, --layout-check, --gui-smoke)

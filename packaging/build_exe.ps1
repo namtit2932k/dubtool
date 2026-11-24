@@ -14,7 +14,7 @@
 #  - the PyInstaller work dir is deleted after success unless -KeepBuild.
 #  - dist/ keeps only the newest DubTool folder and the newest zip.
 
-param([switch]$KeepBuild, [switch]$SkipTests, [switch]$ZipOnly, [switch]$SkipScreenshots)
+param([switch]$KeepBuild, [switch]$SkipTests, [switch]$ZipOnly, [switch]$SkipScreenshots, [switch]$SkipReadmeImages)
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -296,11 +296,15 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
         # 8. README images (B update 9 task 7): copy the chosen states from the
         # fresh screenshot folder into the tracked docs/images with stable
         # names, then verify every README link resolves to a tracked file.
-        Write-Host "== [7/6] README images from the fresh set"
-        & $py (Join-Path $root "scripts\update_readme_images.py") $shotDir
-        if ($LASTEXITCODE -ne 0) { throw "README image copy failed" }
-        & $py (Join-Path $root "scripts\check_readme_links.py")
-        if ($LASTEXITCODE -ne 0) { throw "README link check failed" }
+        if (-not $SkipReadmeImages) {
+            Write-Host "== [7/6] README images from the fresh set"
+            & $py (Join-Path $root "scripts\update_readme_images.py") $shotDir
+            if ($LASTEXITCODE -ne 0) { throw "README image copy failed" }
+            & $py (Join-Path $root "scripts\check_readme_links.py")
+            if ($LASTEXITCODE -ne 0) { throw "README link check failed" }
+        } else {
+            Write-Host "== [7/6] README image sync skipped (-SkipReadmeImages)"
+        }
     } else {
         Write-Host "== [7/6] screenshots skipped (-SkipScreenshots)"
     }
