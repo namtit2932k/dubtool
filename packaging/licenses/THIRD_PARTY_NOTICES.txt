@@ -17,8 +17,11 @@ Note: This document records bundled third-party components and their licenses fo
   https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/ffmpeg-8.1.2-essentials_build.zip (ZIP SHA-256: db580001caa24ac104c8cb856cd113a87b0a443f7bdf47d8c12b1d740584a2ec)
 - Bundled `ffmpeg.exe` SHA-256:
   1326dde4c84ff1f96fe6b8916c5bed29e163e9b5dccf995f6f3db069d143ec5e
-- Upstream source URL:
-  https://github.com/FFmpeg/FFmpeg/commit/38b88335f9 (https://ffmpeg.org/download.html#repositories)
+- Corresponding source & library provenance (GPL-3.0 §6):
+  - Upstream FFmpeg commit: https://github.com/FFmpeg/FFmpeg/commit/38b88335f9 (https://ffmpeg.org/download.html#repositories)
+  - Gyan.dev release & library inventory (libx264, libx265, libxvid, libvidstab, librubberband, etc.):
+    https://github.com/GyanD/codexffmpeg/releases/tag/8.1.2 and https://www.gyan.dev/ffmpeg/builds/#libraries
+  - DubTool invokes unmodified `ffmpeg.exe` as an external subprocess and ships `licenses/GPL-3.0.txt` and exact build configuration metadata alongside the binary.
 - License: GNU General Public License v3.0 or later (see `licenses/GPL-3.0.txt`).
 
 2. Noto Sans Font (bundled in _internal/vendor/fonts/NotoSans.ttf)

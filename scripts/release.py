@@ -164,6 +164,9 @@ def run_pipeline(update_n: int, dry_run: bool = False, skip_build_if_matching: b
         logger.run([sys.executable, "scripts/scan_history_secrets.py"], env=env)
 
         logger.log("=== STEP 4: Build from Clean Commit ===")
+        # Ensure pinned vendor binaries (FFmpeg + Noto Sans) exist and match SHA-256
+        # before invoking PyInstaller inside build_exe.ps1.
+        logger.run([sys.executable, "scripts/fetch_vendor.py"], env=env, timeout=300)
         dist_dir = workspace.dist_dir()
         exe_path = dist_dir / "DubTool" / "DubTool.exe"
         zip_path = dist_dir / f"DubTool-{expected_ver}-win64.zip"
