@@ -19,18 +19,22 @@ and writes:
 ### Reproducible dependency lockfile (Windows x64, Python 3.13)
 
 Both Windows Python 3.13 CI and `packaging/build_exe.ps1` (invoked by
-`scripts/release.py`) install from the same resolved lockfile:
+`scripts/release.py`) bootstrap `pip==26.3` and install from the same resolved
+lockfile:
 
 ```powershell
+python -m pip install "pip==26.3"
 pip install -r packaging/requirements-lock.txt
 pip install --no-deps vieneu==3.8.5
 pip install -e . --no-deps
 ```
 
-`tests/test_dependencies_sync.py` enforces that `pyproject.toml`,
-`packaging/build_exe.ps1`, `.github/workflows/ci.yml`, and
-`packaging/requirements-lock.txt` stay in sync (including the exact `vieneu`
-version).
+- **Python 3.13 (locked primary/release environment):** Uses exact `==` versions in `packaging/requirements-lock.txt` plus `pip==26.3`. Artifact `--require-hashes` is intentionally deferred for now because `pip install --require-hashes` requires regenerating platform-specific wheel hashes across all 76 transitive packages on every single bump; exact `==` version locking + `vendor_manifest.json` SHA-256 verification covers reproducibility without adding external lock-compiler friction.
+- **Python 3.11 (CI compatibility drift job):** Intentionally installs from `pyproject.toml` ranges (`pip install -e ".[gui,dev]"`) to surface upstream dependency compatibility issues early.
+- `tests/test_dependencies_sync.py` enforces that `pyproject.toml`,
+  `packaging/build_exe.ps1`, `.github/workflows/ci.yml`,
+  `packaging/vendor_manifest.json`, and `packaging/requirements-lock.txt` stay
+  in sync (including exact `pip` and `vieneu` versions).
 
 ## Version rule (AGENT_UPDATE_9.md 5.2)
 
@@ -81,6 +85,15 @@ Everything goes through the spec (`packaging/dubtool.spec`):
 5. A version resource generated from `src/dubtool/__init__.py:
    __version__` (see the rule above) and a generated icon
    (`packaging/icon.png`) are embedded into `DubTool.exe`.
+
+### Known PyInstaller warnings (classified — intentionally not suppressed)
+
+| Warning | Classification | Why safe / how verified |
+| --- | --- | --- |
+| `openai.lib.streaming.agents` (`ToolDispatcher` circular import) | Optional SDK submodule | DubTool uses only `openai.OpenAI` Chat Completions (OpenAI + Groq); verified offline by `--selftest` (`openai_client` & `groq_auto_rotate`). |
+| `anthropic._vendor.httpx_aiohttp` (`No module named 'aiohttp'`) | Optional async transport | DubTool uses synchronous `anthropic.Anthropic` over `httpx`; verified offline by `--selftest` (`anthropic_client`). |
+| `pycparser.lextab` / `pycparser.yacctab` | Build-time / generated parser tables | Optional pre-generated tables for `pycparser` (`cffi` dependency); `soundfile` + `cryptography` load cleanly in `--selftest` (`vieneu_tts`, `imports`). |
+| `tzdata` | Optional IANA timezone DB | Not required by DubTool on Windows (timestamps use UTC/local OS clock). |
 
 ## FFmpeg & vendor asset verification
 

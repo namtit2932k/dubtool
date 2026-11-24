@@ -307,6 +307,29 @@ def check_anthropic_client() -> dict:
         return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
 
 
+def check_groq_and_auto_rotate() -> dict:
+    """Offline import & construction smoke check for GroqProvider and AutoRotateProvider."""
+    try:
+        from dubtool.llm.auto_rotate import AutoRotateProvider
+        from dubtool.llm.groq import GroqProvider
+
+        groq = GroqProvider("qwen/qwen3.8-27b", api_keys=["test-key-not-a-real-key"], timeout_s=10.0)
+        auto = AutoRotateProvider(
+            api_keys={
+                "gemini": ["test-key-not-a-real-key"],
+                "groq": ["test-key-not-a-real-key"],
+            },
+            timeout_s=10.0,
+        )
+        ok = groq is not None and auto is not None and len(auto._slots) >= 2
+        return {
+            "ok": ok,
+            "detail": f"GroqProvider + AutoRotateProvider construct offline ({len(auto._slots)} slots)",
+        }
+    except Exception as exc:
+        return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
+
+
 def check_docx_roundtrip() -> dict:
     """AGENT_UPDATE_7.md 5.6: create a small .docx with Vietnamese text,
     read it back, and check the diacritics survive the round trip."""
@@ -417,6 +440,7 @@ CHECKS: dict[str, callable] = {
     "gemini_client": check_gemini_client,      # AGU7 4.2 (real SDK, no network)
     "openai_client": check_openai_client,      # Update 13
     "anthropic_client": check_anthropic_client,  # Update 13
+    "groq_auto_rotate": check_groq_and_auto_rotate,  # Update 19+
     "docx_roundtrip": check_docx_roundtrip,    # AGU7 5.6
 }
 

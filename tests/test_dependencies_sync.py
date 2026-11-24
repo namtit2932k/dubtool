@@ -124,6 +124,24 @@ def test_github_ci_workflow_exists_and_uses_source_install():
     assert "SHA256SUMS.txt" in wf and "BUILD_INFO.txt" in wf
     assert "--gui-smoke" in wf
     assert "upload-artifact" in wf
+    assert "schedule:" in wf
+    assert "--junitxml" in wf
+
+    build_ps1 = (ROOT / "packaging" / "build_exe.ps1").read_text(encoding="utf-8")
+    m_pip = re.search(r'\$PipVersion\s*=\s*"([^"]+)"', build_ps1)
+    assert m_pip, "packaging/build_exe.ps1 must pin $PipVersion"
+    assert f'"pip=={m_pip.group(1)}"' in wf, (
+        f"CI Python 3.13 locked job must pin the same pip=={m_pip.group(1)} as build_exe.ps1"
+    )
+
+
+def test_selftest_provider_offline_smoke_checks_pass():
+    from dubtool.app import selftest
+
+    for key in ("gemini_client", "openai_client", "anthropic_client", "groq_auto_rotate"):
+        assert key in selftest.CHECKS, f"missing provider check {key} in selftest.CHECKS"
+        res = selftest.CHECKS[key]()
+        assert res["ok"], f"selftest {key} failed: {res}"
 
 
 def test_packaged_vendor_assets_provenance_pinned_in_ci_and_build_script():

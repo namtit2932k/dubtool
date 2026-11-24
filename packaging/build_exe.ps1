@@ -151,7 +151,9 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
             if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
         }
         $py = Join-Path $venvDir "Scripts\python.exe"
-        & $py -m pip install --upgrade pip -q --cache-dir $pyCache
+        $PipVersion = "26.3"
+        & $py -m pip install "pip==$PipVersion" -q --cache-dir $pyCache
+        if ($LASTEXITCODE -ne 0) { throw "pip==$PipVersion bootstrap failed" }
         Write-Host "installing locked runtime + build dependencies from packaging/requirements-lock.txt"
         & $py -m pip install -q -r $LockFile --cache-dir $pyCache
         if ($LASTEXITCODE -ne 0) { throw "locked dependency install failed" }
