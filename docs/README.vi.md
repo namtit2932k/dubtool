@@ -156,7 +156,7 @@ python -m dubtool.app.main --layout-check # kiểm tra bố cục UI ở 25 kíc
 python -m dubtool.app.main --gui-smoke    # kiểm thử giao diện end-to-end trong môi trường cô lập
 ```
 
-Lịch sử phát hành và báo cáo chi tiết từng bản cập nhật xem tại [`docs/RELEASES.md`](RELEASES.md) và [`docs/reports/`](reports/).
+Lịch sử phát hành và báo cáo chi tiết từng bản cập nhật xem tại [`docs/RELEASES.md`](RELEASES.md) (báo cáo mới nhất: [`REPORT_UPDATE_19.md`](reports/REPORT_UPDATE_19.md)).
 
 ---
 

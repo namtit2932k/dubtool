@@ -156,7 +156,7 @@ python -m dubtool.app.main --layout-check # UI geometry & overflow invariants (2
 python -m dubtool.app.main --gui-smoke    # isolated real-widget end-to-end smoke test
 ```
 
-Release history and detailed update reports live in [`docs/RELEASES.md`](docs/RELEASES.md) and [`docs/reports/`](docs/reports/).
+Release history and detailed update reports live in [`docs/RELEASES.md`](docs/RELEASES.md) (latest report: [`REPORT_UPDATE_19.md`](docs/reports/REPORT_UPDATE_19.md)).
 
 ---
 
