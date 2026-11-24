@@ -351,3 +351,33 @@ def test_ui_shows_auto_rotate_in_main_combo_and_excludes_from_fallback(monkeypat
         assert AUTO_ROTATE_MODEL_ID not in fb_ids
     finally:
         dlg.close()
+
+
+def test_auto_rotate_concurrent_workers_spread_across_idle_slots():
+    """Regression for v1.0.19: concurrent workers must pick distinct idle slots
+    instead of firing simultaneous bursts at the same Groq key."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    barrier = threading.Barrier(2, timeout=5.0)
+    active_keys: list[str] = []
+    lock = threading.Lock()
+
+    def handler(pt, schema, max_tokens):
+        with lock:
+            active_keys.append(pt[2])
+        barrier.wait()
+        return LLMResult(text="ok")
+
+    prov = AutoRotateProvider(
+        api_keys={"groq": ["gsk_KeyA", "gsk_KeyB"]},
+        provider_factory=lambda p, m, k: _FakeInner(p, m, k, handler),
+    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f1 = pool.submit(prov.complete, "sys", "usr1")
+        f2 = pool.submit(prov.complete, "sys", "usr2")
+        assert f1.result().text == "ok"
+        assert f2.result().text == "ok"
+
+    assert set(active_keys) == {"gsk_KeyA", "gsk_KeyB"}
+    assert prov._in_flight == {}

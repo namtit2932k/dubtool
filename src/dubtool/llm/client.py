@@ -26,10 +26,11 @@ thread-safe instance/shared state on it.
 
 from __future__ import annotations
 
-import logging
 import inspect
+import json
+import logging
 import time
-from typing import Callable
+from typing import Any, Callable
 
 from dubtool.llm.base import (
     InternalLLMError,
@@ -950,15 +951,99 @@ class LLMClient:
         ) from last_error
 
     # ------------------------------------------------------------------ API
+    def _repair_untranslated_cjk(
+        self,
+        parsed_items: list[dict],
+        segments: list[dict],
+        bad: list[tuple[Any, list[str]]],
+        *,
+        glossary: dict | None = None,
+        brief: str | None = None,
+    ) -> list[dict]:
+        """Targeted repair for the few items in an otherwise clean batch that
+        leaked untranslated CJK/Kana/Hangul characters. Preserves every clean
+        item instead of discarding the entire chunk and aborting Stage 3."""
+        seg_by_id = {s["id"]: s for s in segments}
+        item_by_id = {it["id"]: it for it in parsed_items}
+        bad_ids = [bid for bid, _ in bad if bid in item_by_id]
+        if not bad_ids:
+            return parsed_items
+
+        payload = []
+        for bid, tokens in bad:
+            if bid not in item_by_id:
+                continue
+            seg = seg_by_id.get(bid, {})
+            entry: dict[str, Any] = {
+                "id": bid,
+                "source": str(seg.get("text") or ""),
+                "draft_vi": str(item_by_id[bid].get("vi") or ""),
+                "untranslated_tokens": tokens,
+            }
+            if seg.get("max_chars"):
+                entry["max_chars"] = seg["max_chars"]
+            payload.append(entry)
+
+        system = (
+            "You are a Vietnamese dubbing editor. Rewrite the given draft Vietnamese "
+            "lines so EVERY untranslated Chinese/Japanese/Korean character is replaced "
+            "with natural Vietnamese (or Sino-Vietnamese transliteration for proper names, "
+            "titles, sects, and classical idioms). Keep the exact meaning, tone, and "
+            "concise spoken length. Never output any Chinese, Japanese, or Korean "
+            'characters. Reply ONLY with JSON: {"items":[{"id":<int>,"vi":"<str>"}]}.'
+        )
+        parts: list[str] = []
+        if brief and str(brief).strip():
+            parts.append("Brief: " + str(brief).strip()[:400])
+        if isinstance(glossary, dict) and glossary:
+            parts.append("Glossary: " + json.dumps(glossary, ensure_ascii=False, separators=(",", ":")))
+        parts.append(
+            "Fix these Vietnamese lines by translating or transliterating every item in "
+            "`untranslated_tokens` into pure Vietnamese (Latin alphabet with Vietnamese "
+            "diacritics only):\n"
+            + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        )
+        user_prompt = "\n".join(parts)
+
+        def validate_repair(text: str) -> list[dict]:
+            fixed = parsing.parse_json_items(text, bad_ids)
+            parsing.check_no_untranslated_cjk(fixed, glossary=glossary)
+            return fixed
+
+        def note(exc: Exception) -> str:
+            return (
+                f"Your previous reply was invalid: {exc}. Every single Chinese/Japanese/Korean "
+                "character MUST be translated or transliterated into pure Vietnamese. "
+                'Reply ONLY with JSON: {"items":[{"id":<int>,"vi":"<str>"}]}.'
+            )
+
+        repaired = self._call_and_validate(
+            system,
+            user_prompt,
+            validate_repair,
+            note,
+            schema=self._stage_schema("translate"),
+        )
+        fixed_map = {it["id"]: it["vi"] for it in repaired}
+        merged = [
+            {**it, "vi": fixed_map[it["id"]]} if it["id"] in fixed_map else it
+            for it in parsed_items
+        ]
+        parsing.check_no_untranslated_cjk(merged, glossary=glossary)
+        return merged
+
     def translate_batch(
         self, segments: list[dict], context: list[dict], glossary: dict | None = None,
         brief: str | None = None, pronouns: dict | None = None,
         policy: str | None = None,
     ) -> list[dict]:
         ids = [s["id"] for s in segments]
+        last_parsed: list[dict] | None = None
 
         def validate(text: str) -> list[dict]:
+            nonlocal last_parsed
             items = parsing.parse_json_items(text, ids)
+            last_parsed = items
             parsing.check_no_untranslated_cjk(items, glossary=glossary)
             return items
 
@@ -968,16 +1053,40 @@ class LLMClient:
                 "and reply again with only the JSON array."
             )
 
-        return self._call_and_validate(
-            _system_of("translate"),
-            render_translate_user(
-                segments, context, glossary, brief=brief, pronouns=pronouns,
-                policy=policy, source_lang=self.source_lang,
-            ),
-            validate,
-            note,
-            schema=self._stage_schema("translate"),
-        )
+        try:
+            return self._call_and_validate(
+                _system_of("translate"),
+                render_translate_user(
+                    segments, context, glossary, brief=brief, pronouns=pronouns,
+                    policy=policy, source_lang=self.source_lang,
+                ),
+                validate,
+                note,
+                schema=self._stage_schema("translate"),
+            )
+        except LLMError as exc:
+            if last_parsed is None:
+                raise
+            bad = parsing.find_untranslated_cjk(last_parsed, glossary=glossary)
+            if not bad or len(bad) > 8 or (len(segments) > 3 and len(bad) >= len(segments)):
+                raise
+            log.warning(
+                "llm batch kept %d/%d clean item(s); running targeted CJK repair for id(s) %s",
+                len(segments) - len(bad), len(segments), [bid for bid, _ in bad],
+            )
+            try:
+                fixed = self._repair_untranslated_cjk(
+                    last_parsed, segments, bad, glossary=glossary, brief=brief,
+                )
+            except (StageCancelled, OverloadFallbackFast, SplitRequiredError, budget_mod.BudgetExhausted, RateLimitError):
+                raise
+            except LLMError:
+                raise exc
+            log.info(
+                "llm targeted CJK repair succeeded for %d item(s) without discarding batch",
+                len(bad),
+            )
+            return fixed
 
     def shorten(self, english: str, current_vi: str, max_chars: int) -> str:
         def note(exc: Exception) -> str:

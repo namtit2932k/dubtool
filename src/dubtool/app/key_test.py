@@ -78,18 +78,28 @@ def classify_request_error(exc: Exception) -> str:
     return "unknown"
 
 
+def _resolve_gemini_test_model(model: str | None) -> str:
+    """Ensure Gemini key checks never receive a non-Gemini model id such as
+    ``auto-rotate``, ``qwen/...``, ``gpt-...``, or ``claude-...``."""
+    m = (model or "").strip()
+    if not m or not m.lower().startswith("gemini"):
+        return "gemini-3.5-flash-lite"
+    return m
+
+
 def _request_ok(key: str, model: str) -> None:
-    """Raise on any failure; return quietly when the tiny request succeeds."""
+    """Raise on any failure; return quietly when the key authenticates cleanly.
+
+    Uses Gemini's free ``models.list`` endpoint (matching OpenAI/Anthropic/Groq)
+    so valid keys are never falsely flagged as invalid due to a non-Gemini
+    ``model_id`` (e.g. ``auto-rotate``) or transient ``503`` model overload.
+    """
     from dubtool.llm.gemini import build_gemini_client
 
-    _genai, types = _imports()  # noqa: F841 - documented import contract
+    _resolve_gemini_test_model(model)
+    _genai, _types = _imports()  # noqa: F841 - documented import contract
     client = build_gemini_client(key, timeout_ms=REQUEST_TIMEOUT_MS)
-    cfg = types.GenerateContentConfig(max_output_tokens=16, temperature=0.0)
-    client.models.generate_content(
-        model=model,
-        contents=["Reply with the single word OK."],
-        config=cfg,
-    )
+    next(iter(client.models.list(config={"page_size": 1})), None)
 
 
 def _imports():
@@ -101,9 +111,8 @@ def _imports():
 
 def run_key_test(key: str, model: str | None = None,
                  provider: str = "gemini") -> str:
-    """Test one key with one FREE or near-free call. Gemini makes its tiny
-    generate call; OpenAI and Anthropic use `GET /v1/models` (no tokens
-    billed). The model param only matters for Gemini."""
+    """Test one key with one FREE `models.list` call (zero tokens billed across
+    Gemini, Groq, OpenAI, and Anthropic)."""
     if not key or not key.strip():
         return "invalid"
     pid = (provider or "gemini").lower()
@@ -114,7 +123,7 @@ def run_key_test(key: str, model: str | None = None,
     if pid == "anthropic":
         return _test_anthropic(key.strip())
     try:
-        _request_ok(key.strip(), model or "gemini-3.5-flash-lite")
+        _request_ok(key.strip(), _resolve_gemini_test_model(model))
         return "ok"
     except Exception as exc:
         return classify_request_error(exc)

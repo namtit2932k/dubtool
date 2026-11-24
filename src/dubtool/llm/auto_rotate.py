@@ -214,6 +214,7 @@ class AutoRotateProvider:
         self._inner_cache: dict[tuple[str, str, str], object] = {}
         self._model_cooldowns: dict[tuple[str, str], float] = {}
         self._model_503_streak: dict[tuple[str, str], int] = {}
+        self._in_flight: dict[tuple[str, str, int], int] = {}
         self._last_wait_emit_at: float = -1e9
         self._n_gemini = len(g_keys)
         self._n_groq = len(q_keys)
@@ -280,7 +281,50 @@ class AutoRotateProvider:
                 for s in self._slots
             )
 
-    def _pick_slot(self) -> tuple[_Slot | None, float]:
+    @staticmethod
+    def _slot_key(slot: _Slot) -> tuple[str, str, int]:
+        return (slot.provider, slot.model, slot.key_pos)
+
+    def _release_slot(self, slot: _Slot) -> None:
+        key = self._slot_key(slot)
+        with self._lock:
+            cur = self._in_flight.get(key, 0)
+            if cur <= 1:
+                self._in_flight.pop(key, None)
+            else:
+                self._in_flight[key] = cur - 1
+
+    def _pick_from_tier(
+        self, tier_slots: list[_Slot], cursor_attr: str, now: float, *, reserve: bool
+    ) -> _Slot | None:
+        """Pick a ready slot from ``tier_slots`` in round-robin order, strongly
+        preferring idle slots (``in_flight == 0``) over slots already serving a
+        concurrent worker so multiple threads don't pile onto the same Groq key."""
+        n = len(tier_slots)
+        cursor = getattr(self, cursor_attr)
+        fallback: tuple[int, int, _Slot] | None = None
+        for off in range(n):
+            idx = (cursor + off) % n
+            cand = tier_slots[idx]
+            if self._slot_ready_at(cand) > now:
+                continue
+            busy = self._in_flight.get(self._slot_key(cand), 0)
+            if busy == 0:
+                setattr(self, cursor_attr, (idx + 1) % n)
+                if reserve:
+                    self._in_flight[self._slot_key(cand)] = 1
+                return cand
+            if fallback is None or busy < fallback[0]:
+                fallback = (busy, idx, cand)
+        if fallback is not None:
+            busy, idx, cand = fallback
+            setattr(self, cursor_attr, (idx + 1) % n)
+            if reserve:
+                self._in_flight[self._slot_key(cand)] = busy + 1
+            return cand
+        return None
+
+    def _pick_slot(self, *, reserve: bool = False) -> tuple[_Slot | None, float]:
         """Pick the next ready slot (Tier 1 first, then Tier 2), or return
         ``(None, wait_seconds)`` if every live slot is cooling down."""
         now = self._clock()
@@ -291,23 +335,15 @@ class AutoRotateProvider:
 
             t1 = [s for s in live if s.tier == 1]
             if t1:
-                n = len(t1)
-                for off in range(n):
-                    idx = (self._cursor_t1 + off) % n
-                    cand = t1[idx]
-                    if self._slot_ready_at(cand) <= now:
-                        self._cursor_t1 = (idx + 1) % n
-                        return cand, 0.0
+                picked = self._pick_from_tier(t1, "_cursor_t1", now, reserve=reserve)
+                if picked is not None:
+                    return picked, 0.0
 
             t2 = [s for s in live if s.tier == 2]
             if t2:
-                n = len(t2)
-                for off in range(n):
-                    idx = (self._cursor_t2 + off) % n
-                    cand = t2[idx]
-                    if self._slot_ready_at(cand) <= now:
-                        self._cursor_t2 = (idx + 1) % n
-                        return cand, 0.0
+                picked = self._pick_from_tier(t2, "_cursor_t2", now, reserve=reserve)
+                if picked is not None:
+                    return picked, 0.0
 
             earliest = min(self._slot_ready_at(s) for s in live)
             return None, max(0.2, earliest - now)
@@ -400,7 +436,7 @@ class AutoRotateProvider:
 
         while attempts < max_attempts:
             self._check_cancel()
-            slot, wait_s = self._pick_slot()
+            slot, wait_s = self._pick_slot(reserve=True)
             if slot is None:
                 if wait_s < 0:
                     raise RateLimitExhausted(
@@ -437,118 +473,121 @@ class AutoRotateProvider:
                 continue
 
             attempts += 1
-            inner = self._inner_for(slot)
-            use_schema = (
-                schema
-                if (
-                    schema is not None
-                    and getattr(inner, "structured", None) == "json_schema"
-                    and (slot.provider, slot.model) not in self._schema_degraded
-                )
-                else None
-            )
             try:
-                res = inner.complete(
-                    system, user, schema=use_schema, json_mode=json_mode, max_tokens=max_tokens
-                )
-                if slot.provider == "groq":
-                    self._sync_groq_pool_cooldown(slot, inner)
-                self._clear_model_503_streak(slot)
-                self.last_slot_label = slot.label
-                log.info("auto-rotate: succeeded via %s", slot.label)
-                return res
-            except StageCancelled:
-                raise
-            except RequestTooLargeError as exc:
-                # Groq has a 950-token output ceiling while Gemini allows 8,000
-                # tokens. If a Groq slot hit output length and a Gemini slot is
-                # ready right now, hand the chunk to Gemini instead of splitting.
-                if slot.provider == "groq" and self._has_ready_slot("gemini"):
-                    last_err = exc
-                    log.warning(
-                        "auto-rotate: %s hit output length — rotating chunk to ready Gemini slot",
-                        slot.label,
+                inner = self._inner_for(slot)
+                use_schema = (
+                    schema
+                    if (
+                        schema is not None
+                        and getattr(inner, "structured", None) == "json_schema"
+                        and (slot.provider, slot.model) not in self._schema_degraded
                     )
-                    self._mark_slot_cooldown(slot, 10.0)
-                    self.switches += 1
-                    continue
-                # Chunk-size issue, not a slot outage — let LLMClient split the chunk.
-                raise
-            except SchemaRejectedError:
-                with self._lock:
-                    self._schema_degraded.add((slot.provider, slot.model))
-                # Retry immediately on the same slot without schema.
+                    else None
+                )
                 try:
                     res = inner.complete(
-                        system, user, schema=None, json_mode=json_mode, max_tokens=max_tokens
+                        system, user, schema=use_schema, json_mode=json_mode, max_tokens=max_tokens
                     )
+                    if slot.provider == "groq":
+                        self._sync_groq_pool_cooldown(slot, inner)
+                    self._clear_model_503_streak(slot)
                     self.last_slot_label = slot.label
-                    log.info("auto-rotate: succeeded via %s (json-only)", slot.label)
+                    log.info("auto-rotate: succeeded via %s", slot.label)
                     return res
-                except Exception as exc2:
-                    last_err = exc2
-                    self._mark_slot_cooldown(slot, 15.0)
+                except StageCancelled:
+                    raise
+                except RequestTooLargeError as exc:
+                    # Groq has a 950-token output ceiling while Gemini allows 8,000
+                    # tokens. If a Groq slot hit output length and a Gemini slot is
+                    # ready right now, hand the chunk to Gemini instead of splitting.
+                    if slot.provider == "groq" and self._has_ready_slot("gemini"):
+                        last_err = exc
+                        log.warning(
+                            "auto-rotate: %s hit output length — rotating chunk to ready Gemini slot",
+                            slot.label,
+                        )
+                        self._mark_slot_cooldown(slot, 10.0)
+                        self.switches += 1
+                        continue
+                    # Chunk-size issue, not a slot outage — let LLMClient split the chunk.
+                    raise
+                except SchemaRejectedError:
+                    with self._lock:
+                        self._schema_degraded.add((slot.provider, slot.model))
+                    # Retry immediately on the same slot without schema.
+                    try:
+                        res = inner.complete(
+                            system, user, schema=None, json_mode=json_mode, max_tokens=max_tokens
+                        )
+                        self.last_slot_label = slot.label
+                        log.info("auto-rotate: succeeded via %s (json-only)", slot.label)
+                        return res
+                    except Exception as exc2:
+                        last_err = exc2
+                        self._mark_slot_cooldown(slot, 15.0)
+                        self.switches += 1
+                        continue
+                except KeyExhaustedError as exc:
+                    last_err = exc
+                    pool = getattr(inner, "pool", None)
+                    if pool is not None and callable(getattr(pool, "all_daily_exhausted", None)) and pool.all_daily_exhausted():
+                        log.warning("auto-rotate: %s already daily-exhausted — skipping for run", slot.label)
+                        self._mark_slot_daily_dead(slot)
+                    else:
+                        log.warning("auto-rotate: %s pool temporarily busy — cooling 15s, rotating", slot.label)
+                        self._mark_slot_cooldown(slot, 15.0)
                     self.switches += 1
                     continue
-            except KeyExhaustedError as exc:
-                last_err = exc
-                pool = getattr(inner, "pool", None)
-                if pool is not None and callable(getattr(pool, "all_daily_exhausted", None)) and pool.all_daily_exhausted():
-                    log.warning("auto-rotate: %s already daily-exhausted — skipping for run", slot.label)
-                    self._mark_slot_daily_dead(slot)
-                else:
-                    log.warning("auto-rotate: %s pool temporarily busy — cooling 15s, rotating", slot.label)
-                    self._mark_slot_cooldown(slot, 15.0)
-                self.switches += 1
-                continue
-            except InvalidKeyError as exc:
-                last_err = exc
-                log.warning("auto-rotate: %s invalid key — disabled for run", slot.label)
-                self._mark_key_invalid(slot)
-                self.switches += 1
-                continue
-            except RateLimitError as exc:
-                last_err = exc
-                kind = getattr(exc, "kind", None) or "minute"
-                if kind == "day":
-                    log.warning("auto-rotate: %s hit daily quota — skipping for run", slot.label)
-                    self._mark_slot_daily_dead(slot)
-                else:
-                    retry_after = float(getattr(exc, "retry_after", None) or _DEFAULT_MINUTE_429_COOLDOWN_S)
-                    cd = min(retry_after + 1.5, 90.0)
-                    log.warning("auto-rotate: %s hit 429 (minute) — cooling %.1fs, rotating", slot.label, cd)
-                    self._mark_slot_cooldown(slot, cd)
-                self.switches += 1
-                continue
-            except ServerErrorLLMError as exc:
-                last_err = exc
-                status = getattr(exc, "status", None)
-                if status == 504:
-                    cd = _MODEL_TIMEOUT_COOLDOWN_S
-                    self._mark_model_cooldown(slot, cd)
-                else:
-                    cd = self._mark_model_503(slot)
-                log.warning(
-                    "auto-rotate: %s server error (%s) — cooling model %.0fs, rotating immediately",
-                    slot.label, status or "5xx", cd,
-                )
-                self.switches += 1
-                continue
-            except (TimeoutLLMError, NetworkLLMError) as exc:
-                last_err = exc
-                log.warning(
-                    "auto-rotate: %s timeout/network — cooling %.0fs, rotating immediately",
-                    slot.label, _MODEL_TIMEOUT_COOLDOWN_S,
-                )
-                self._mark_slot_cooldown(slot, _MODEL_TIMEOUT_COOLDOWN_S)
-                self.switches += 1
-                continue
-            except LLMError as exc:
-                last_err = exc
-                log.warning("auto-rotate: %s failed (%s) — cooling 20s, rotating", slot.label, exc)
-                self._mark_slot_cooldown(slot, 20.0)
-                self.switches += 1
-                continue
+                except InvalidKeyError as exc:
+                    last_err = exc
+                    log.warning("auto-rotate: %s invalid key — disabled for run", slot.label)
+                    self._mark_key_invalid(slot)
+                    self.switches += 1
+                    continue
+                except RateLimitError as exc:
+                    last_err = exc
+                    kind = getattr(exc, "kind", None) or "minute"
+                    if kind == "day":
+                        log.warning("auto-rotate: %s hit daily quota — skipping for run", slot.label)
+                        self._mark_slot_daily_dead(slot)
+                    else:
+                        retry_after = float(getattr(exc, "retry_after", None) or _DEFAULT_MINUTE_429_COOLDOWN_S)
+                        cd = min(retry_after + 1.5, 90.0)
+                        log.warning("auto-rotate: %s hit 429 (minute) — cooling %.1fs, rotating", slot.label, cd)
+                        self._mark_slot_cooldown(slot, cd)
+                    self.switches += 1
+                    continue
+                except ServerErrorLLMError as exc:
+                    last_err = exc
+                    status = getattr(exc, "status", None)
+                    if status == 504:
+                        cd = _MODEL_TIMEOUT_COOLDOWN_S
+                        self._mark_model_cooldown(slot, cd)
+                    else:
+                        cd = self._mark_model_503(slot)
+                    log.warning(
+                        "auto-rotate: %s server error (%s) — cooling model %.0fs, rotating immediately",
+                        slot.label, status or "5xx", cd,
+                    )
+                    self.switches += 1
+                    continue
+                except (TimeoutLLMError, NetworkLLMError) as exc:
+                    last_err = exc
+                    log.warning(
+                        "auto-rotate: %s timeout/network — cooling %.0fs, rotating immediately",
+                        slot.label, _MODEL_TIMEOUT_COOLDOWN_S,
+                    )
+                    self._mark_slot_cooldown(slot, _MODEL_TIMEOUT_COOLDOWN_S)
+                    self.switches += 1
+                    continue
+                except LLMError as exc:
+                    last_err = exc
+                    log.warning("auto-rotate: %s failed (%s) — cooling 20s, rotating", slot.label, exc)
+                    self._mark_slot_cooldown(slot, 20.0)
+                    self.switches += 1
+                    continue
+            finally:
+                self._release_slot(slot)
 
         raise LLMError(
             f"auto-rotate: exhausted {attempts} rotation attempts (last error: {last_err})"

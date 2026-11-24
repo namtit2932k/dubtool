@@ -839,3 +839,95 @@ def test_settings_dialog_persists_tts_mode_and_voice(qtbot, tmp_path, monkeypatc
     loaded = settings_mod.load(settings_file)
     assert loaded["tts_model"] == "v3nano"
     assert loaded["voice"] == "Mai Anh"
+
+
+def test_gemini_key_test_with_auto_rotate_uses_models_list(monkeypatch):
+    """Regression for v1.0.19: testing a valid Gemini key while model_id is
+    'auto-rotate' (or a non-Gemini model) must use models.list and return 'ok'
+    instead of hitting 404 on 'models/auto-rotate' -> 'invalid_model'."""
+    from dubtool.app import key_test
+    from dubtool.llm import gemini as gemini_mod
+
+    list_calls: list[dict] = []
+
+    class _FakeModels:
+        def list(self, *, config=None):
+            list_calls.append({"config": config})
+            return iter([object()])
+
+        def generate_content(self, *a, **k):
+            raise AssertionError("Gemini key test should not call generate_content")
+
+    class _FakeClient:
+        models = _FakeModels()
+
+    monkeypatch.setattr(gemini_mod, "build_gemini_client", lambda key, timeout_ms=None: _FakeClient())
+
+    assert key_test.run_key_test("AIzaFAKEVALIDKEY0001", model="auto-rotate", provider="gemini") == "ok"
+    assert key_test.run_key_test("AIzaFAKEVALIDKEY0002", model="qwen/qwen3.8-27b", provider="gemini") == "ok"
+    assert len(list_calls) == 2
+    assert list_calls[0]["config"] == {"page_size": 1}
+
+    class _FakeInvalid400(Exception):
+        code = 400
+        status = "INVALID_ARGUMENT"
+        message = "API key not valid. Please pass a valid API key."
+
+    class _BadModels:
+        def list(self, *, config=None):
+            raise _FakeInvalid400()
+
+    class _BadClient:
+        models = _BadModels()
+
+    monkeypatch.setattr(gemini_mod, "build_gemini_client", lambda key, timeout_ms=None: _BadClient())
+    assert key_test.run_key_test("AIzaFAKEBADKEY0003", model="auto-rotate", provider="gemini") == "invalid"
+
+
+def test_settings_dialog_badges_do_not_leak_across_providers(qtbot, monkeypatch, tmp_path):
+    """Regression for v1.0.19: Gemini key test badges must NEVER leak onto Groq
+    when switching providers (nor when switching provider mid-test)."""
+    from dubtool.app import secrets as sec_mod
+    from dubtool.app import settings as settings_mod
+    from dubtool.app.ui import settings_dialog as sd
+
+    settings_file = tmp_path / "settings.json"
+    settings_mod.save({"model_id": "auto-rotate"}, settings_file)
+    monkeypatch.setattr(settings_mod, "path", lambda: settings_file)
+
+    stores = {
+        "gemini": ["AIzaGeminiOne1111", "AIzaGeminiTwo2222"],
+        "groq": ["gsk_GroqOne3333"],
+        "openai": [],
+        "anthropic": [],
+    }
+    monkeypatch.setattr(sec_mod, "get_keys", lambda p="gemini": list(stores.get(sec_mod.normalize_provider(p), [])))
+    monkeypatch.setattr(sec_mod, "env_key_sources", lambda p="gemini": [])
+    monkeypatch.setattr(sd, "run_key_test", lambda key, model=None, provider="gemini": "invalid")
+
+    dlg = sd.SettingsDialog()
+    qtbot.addWidget(dlg)
+
+    # _selected_model_id falls back to a real Gemini model when model_id is auto-rotate.
+    assert dlg._selected_model_id().startswith("gemini")
+
+    # Run test on Gemini row 0 -> badge is invalid for Gemini.
+    dlg.key_list.setCurrentRow(0)
+    dlg._test_selected()
+    qtbot.waitUntil(lambda: dlg._badges.get(("gemini", 0)) == "invalid", timeout=5000)
+    assert "✘" in dlg.key_list.item(0).text()
+
+    # Switch to Groq -> Groq row 0 must NOT inherit Gemini's ✘ badge.
+    groq_idx = dlg.provider_combo.findData("groq")
+    assert groq_idx >= 0
+    dlg.provider_combo.setCurrentIndex(groq_idx)
+    assert dlg._provider == "groq"
+    assert dlg.key_list.count() == 1
+    assert "✘" not in dlg.key_list.item(0).text()
+
+    # A late completion from Gemini while viewing Groq must NOT stamp Groq row 0.
+    dlg._on_test_finished(("gemini", [(0, "quota")]))
+    assert dlg._badges.get(("gemini", 0)) == "quota"
+    assert ("groq", 0) not in dlg._badges
+    assert "✘" not in dlg.key_list.item(0).text()
+    assert "⚠" not in dlg.key_list.item(0).text()

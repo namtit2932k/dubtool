@@ -394,3 +394,51 @@ def test_gemini_max_tokens_and_truncated_json_trigger_split(monkeypatch):
         )
 
 
+def test_translate_batch_targeted_cjk_repair_saves_clean_items():
+    """Regression for v1.0.19: if a 20-item chunk leaves 1-2 Hanzi words (e.g.
+    id=79(自重)) across both batch attempts, LLMClient must run a focused repair
+    on ONLY the leaked id(s) and keep the 19 clean translations intact."""
+    from dubtool.llm.client import LLMClient
+
+    segments = [
+        {"id": 60 + i, "text": f"台词 {i}", "max_chars": 40}
+        for i in range(20)
+    ]
+    segments[19] = {"id": 79, "text": "道友请自重。", "max_chars": 40}
+
+    prompts_seen: list[str] = []
+
+    class _LeakyThenFixedProvider:
+        name = "auto"
+        model = "auto-rotate"
+        structured = "none"
+        timeout_s = 30.0
+
+        def complete(self, system, user, *, schema=None, json_mode=True, max_tokens=8000):
+            prompts_seen.append(user)
+            if "untranslated_tokens" in user:
+                assert "自重" in user
+                return LLMResult(
+                    text=json.dumps({"items": [{"id": 79, "vi": "Đạo hữu xin hãy tự trọng."}]}),
+                    input_tokens=40,
+                    output_tokens=20,
+                )
+            items = [
+                {"id": 60 + i, "vi": f"Câu thoại số {i}."}
+                for i in range(19)
+            ]
+            items.append({"id": 79, "vi": "Đạo hữu xin hãy 自重."})
+            return LLMResult(text=json.dumps({"items": items}), input_tokens=100, output_tokens=100)
+
+    client = LLMClient(_LeakyThenFixedProvider(), options={})
+    out = client.translate_batch(segments, [], brief="Tiên hiệp cổ trang.")
+
+    assert len(out) == 20
+    # 2 initial batch attempts + 1 tiny targeted repair call
+    assert len(prompts_seen) == 3
+    by_id = {it["id"]: it["vi"] for it in out}
+    assert by_id[60] == "Câu thoại số 0."
+    assert by_id[78] == "Câu thoại số 18."
+    assert by_id[79] == "Đạo hữu xin hãy tự trọng."
+
+

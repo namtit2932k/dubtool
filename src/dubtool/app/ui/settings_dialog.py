@@ -428,7 +428,9 @@ class SettingsDialog(QDialog):
             saved = str((settings.load() or {}).get("model_id") or "")
         except Exception:
             saved = ""
-        return saved or "gemini-3.5-flash-lite"
+        if not saved or not saved.lower().startswith("gemini"):
+            return "gemini-3.5-flash-lite"
+        return saved
 
     def _unimported_env_rows(self) -> list[tuple[str, str]]:
         """Read-only `.env` rows for the current provider whose key is not
@@ -453,7 +455,7 @@ class SettingsDialog(QDialog):
         had_selection = self.key_list.currentRow()
         self.key_list.clear()
         for i, key in enumerate(self._keys()):
-            badge = self._badges.get((self._provider, i)) or self._badges.get(i)
+            badge = self._badges.get((self._provider, i))
             label = f"Khóa {i + 1}   ••••{(key[-4:] if len(key) >= 4 else '····')}"
             if badge == "__testing__":
                 label += f"  —  {i18n.tr('settings.testing')}"
@@ -583,7 +585,7 @@ class SettingsDialog(QDialog):
         except Exception as exc:
             self._show_store_error(exc)
             return
-        self._badges.clear()
+        self._clear_provider_badges(self._provider)
         # Select the new last key (AGENT_UPDATE_7.md 2.2).
         count = len(final) if isinstance(final, (list, tuple)) else len(self._keys())
         self._refresh_rows(select=max(0, count - 1))
@@ -632,6 +634,10 @@ class SettingsDialog(QDialog):
             return None
         return env_positions.index(row)
 
+    def _clear_provider_badges(self, provider: str) -> None:
+        for k in [k for k in self._badges if isinstance(k, tuple) and k[0] == provider]:
+            del self._badges[k]
+
     def _remove_key(self) -> None:
         row = self.key_list.currentRow()
         if not self._row_is_key(row):
@@ -650,8 +656,7 @@ class SettingsDialog(QDialog):
         except Exception as exc:
             self._show_store_error(exc)
             return
-        self._badges.pop((self._provider, row), None)
-        self._badges.pop(row, None)
+        self._clear_provider_badges(self._provider)
         # Select the nearest remaining row (AGENT_UPDATE_7.md 2.2).
         n_after = len(remaining) if isinstance(remaining, (list, tuple)) else len(self._keys())
         self._refresh_rows(select=min(row, max(0, n_after - 1)))
@@ -668,7 +673,7 @@ class SettingsDialog(QDialog):
                 secrets.move_key(row, delta)
         except Exception as exc:
             self._show_store_error(exc)
-        self._badges.clear()
+        self._clear_provider_badges(self._provider)
         self._refresh_rows(select=target)  # the moved row keeps the selection
 
     def _run_test_all(self) -> None:
@@ -690,18 +695,19 @@ class SettingsDialog(QDialog):
 
     def _start_test(self, rows: list[int]) -> None:
         keys = self._keys()
+        provider = self._provider
         self._testing_rows = set(rows)
         for row in rows:
-            self._badges[(self._provider, row)] = "__testing__"
-            self._badges[row] = "__testing__"
+            self._badges[(provider, row)] = "__testing__"
         self._refresh_rows()
-        provider = self._provider
-        self._work.fire(lambda: [
-            (row, run_key_test(keys[row], model=self._selected_model_id()
-                               if provider == "gemini" else None,
-                               provider=provider))
-            for row in rows
-        ])
+        model_for_test = self._selected_model_id() if provider == "gemini" else None
+        self._work.fire(lambda: (
+            provider,
+            [
+                (row, run_key_test(keys[row], model=model_for_test, provider=provider))
+                for row in rows
+            ],
+        ))
 
     def _on_test_finished(self, payload) -> None:
         if (
@@ -709,13 +715,23 @@ class SettingsDialog(QDialog):
             and len(payload) == 2
             and payload[0] == "__error__"
         ):
+            for k in [k for k, v in self._badges.items() if v == "__testing__"]:
+                del self._badges[k]
             self._testing_rows.clear()
             self._refresh_rows()
             self.keys_status.setText(i18n.tr("settings.error_unk"))
             return
-        for row, outcome in payload:
-            self._badges[(self._provider, row)] = outcome
-            self._badges[row] = outcome
+        if (
+            isinstance(payload, tuple)
+            and len(payload) == 2
+            and isinstance(payload[0], str)
+            and isinstance(payload[1], list)
+        ):
+            tested_provider, results = payload
+        else:
+            tested_provider, results = self._provider, payload
+        for row, outcome in results:
+            self._badges[(tested_provider, row)] = outcome
         self._testing_rows.clear()
         self._refresh_rows()
 

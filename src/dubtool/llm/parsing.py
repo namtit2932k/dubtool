@@ -14,13 +14,13 @@ from dubtool.llm.base import LLMError
 _UNTRANSLATED_CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]+")
 
 
-def check_no_untranslated_cjk(
+def find_untranslated_cjk(
     items: list[dict[str, Any]],
     glossary: dict[str, str] | None = None,
-) -> None:
-    """Raise ``LLMError`` if any translated Vietnamese item still contains
-    untranslated CJK/Kana/Hangul characters (excluding terms explicitly marked
-    ``keep original`` in ``glossary``)."""
+) -> list[tuple[Any, list[str]]]:
+    """Return ``[(id, [token, ...]), ...]`` for items whose Vietnamese text
+    still contains untranslated CJK/Kana/Hangul characters (excluding terms
+    explicitly marked ``keep original`` in ``glossary``)."""
     allowed: list[str] = []
     if isinstance(glossary, dict):
         for term, val in glossary.items():
@@ -31,18 +31,29 @@ def check_no_untranslated_cjk(
                 elif _UNTRANSLATED_CJK_RE.search(str(val or "")):
                     allowed.append(str(val).strip())
 
-    bad: list[tuple[Any, str]] = []
+    bad: list[tuple[Any, list[str]]] = []
     for item in items:
         vi = str(item.get("vi") or "")
         cleaned = vi
         for keep in allowed:
             cleaned = cleaned.replace(keep, "")
-        m = _UNTRANSLATED_CJK_RE.search(cleaned)
-        if m:
-            bad.append((item.get("id"), m.group(0)))
+        tokens = list(dict.fromkeys(_UNTRANSLATED_CJK_RE.findall(cleaned)))
+        if tokens:
+            bad.append((item.get("id"), tokens))
+    return bad
+
+
+def check_no_untranslated_cjk(
+    items: list[dict[str, Any]],
+    glossary: dict[str, str] | None = None,
+) -> None:
+    """Raise ``LLMError`` if any translated Vietnamese item still contains
+    untranslated CJK/Kana/Hangul characters (excluding terms explicitly marked
+    ``keep original`` in ``glossary``)."""
+    bad = find_untranslated_cjk(items, glossary=glossary)
     if bad:
         ids_str = ", ".join(str(i) for i, _ in bad[:6])
-        samples = ", ".join(f"id={i}({tok})" for i, tok in bad[:4])
+        samples = ", ".join(f"id={i}({toks[0]})" for i, toks in bad[:4])
         raise LLMError(
             f"untranslated source-script characters left in Vietnamese for id(s) [{ids_str}] "
             f"({samples}); translate or transliterate every character into pure Vietnamese"
