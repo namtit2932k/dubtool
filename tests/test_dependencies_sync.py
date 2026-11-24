@@ -130,3 +130,19 @@ def test_packaged_font_provenance_pinned_in_ci_and_build_script():
     )
 
 
+def test_declared_pytest_markers_are_wired():
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    declared = {
+        m.split(":", 1)[0].strip()
+        for m in data["tool"]["pytest"]["ini_options"]["markers"]
+    }
+    assert declared == {"unit", "gui", "integration", "packaged"}
+    conftest = (ROOT / "tests" / "conftest.py").read_text(encoding="utf-8")
+    shots = (ROOT / "tests" / "test_screenshots.py").read_text(encoding="utf-8")
+    assert "pytest_collection_modifyitems" in conftest
+    for marker in ("unit", "gui", "integration", "packaged"):
+        assert f'"{marker}"' in conftest or f".{marker}" in conftest
+    assert "pytestmark = pytest.mark.packaged" in shots
+
+
+

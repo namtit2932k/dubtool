@@ -78,7 +78,7 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          python -m pytest tests --ignore=tests/test_screenshots.py -q --timeout=120 -rs
+          python -m pytest tests -m "not packaged" -q --timeout=120 -rs
 
       - name: Runtime self-test, layout check & GUI smoke
         shell: pwsh

@@ -308,6 +308,7 @@ def test_secrets_has_key_auto(monkeypatch):
     assert secrets.has_key("auto") is True
 
 
+@pytest.mark.gui
 def test_ui_shows_auto_rotate_in_main_combo_and_excludes_from_fallback(monkeypatch):
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import Qt

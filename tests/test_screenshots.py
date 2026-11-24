@@ -15,6 +15,8 @@ import pytest
 
 from dubtool import workspace
 
+pytestmark = pytest.mark.packaged
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
