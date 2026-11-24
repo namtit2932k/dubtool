@@ -122,6 +122,7 @@ def test_github_ci_workflow_exists_and_uses_source_install():
         "release.py" in ln for ln in wf.splitlines() if not ln.lstrip().startswith("#")
     ), "CI workflow must never invoke scripts/release.py"
     assert "SHA256SUMS.txt" in wf and "BUILD_INFO.txt" in wf
+    assert "testzip()" in wf and "extractall" in wf
     assert "--gui-smoke" in wf
     assert "upload-artifact" in wf
     assert "schedule:" in wf

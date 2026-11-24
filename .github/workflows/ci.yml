@@ -163,13 +163,13 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $relSrc "packaging\build_exe.ps1") -SkipTests -KeepBuild -SkipReadmeImages
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Verify release artifacts (ZIP, SHA256SUMS, BUILD_INFO, --version, --selftest, --layout-check, --gui-smoke)
+      - name: Verify release artifacts (ZIP integrity & extracted exe, SHA256SUMS, BUILD_INFO, --version, --selftest, --layout-check, --gui-smoke)
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
           python -c "
-          import hashlib, os, subprocess, sys
+          import hashlib, json, os, subprocess, sys, tempfile, zipfile
           from pathlib import Path
 
           build_root = Path(os.environ['DUBTOOL_BUILD_ROOT'])
@@ -198,7 +198,7 @@ jobs:
           bid = binfo.get('build id')
           print(f'Verified BUILD_INFO.txt: {bid}', flush=True)
 
-          # 2. Verify ZIP and SHA256SUMS.txt consistency.
+          # 2. Verify ZIP hash vs SHA256SUMS.txt, CRC integrity (testzip), and required members.
           zip_name = f'DubTool-{expected_ver}-win64.zip'
           zip_path = dist_dir / zip_name
           sums_path = dist_dir / 'SHA256SUMS.txt'
@@ -209,8 +209,30 @@ jobs:
           assert sums_text == f'{zip_sha}  {zip_name}', f'SHA256SUMS mismatch: {sums_text!r} vs {zip_sha}  {zip_name}'
           print(f'Verified {zip_name} ({zip_path.stat().st_size} bytes, sha256={zip_sha})', flush=True)
 
+          required_members = (
+              'DubTool.exe',
+              'BUILD_INFO.txt',
+              '_internal/config.yaml',
+              '_internal/vendor/ffmpeg.exe',
+              '_internal/vendor/fonts/NotoSans.ttf',
+              '_internal/vendor/fonts/OFL.txt',
+              'THIRD_PARTY.md',
+              'README_BUILD.md',
+              'licenses/GPL-3.0.txt',
+              'licenses/LGPL-3.0.txt',
+              'licenses/OFL-NotoSans.txt',
+              'licenses/THIRD_PARTY_NOTICES.txt',
+          )
+          with zipfile.ZipFile(zip_path, 'r') as zf:
+              bad_member = zf.testzip()
+              assert bad_member is None, f'corrupt ZIP member: {bad_member}'
+              members = {n.replace(chr(92), '/') for n in zf.namelist()}
+              missing = [m for m in required_members if m not in members]
+              assert not missing, f'missing required ZIP members: {missing}'
+              assert '_internal/vendor/ffprobe.exe' not in members, 'ffprobe.exe must NOT be inside the release ZIP'
+              print(f'Verified ZIP CRC & structure ({len(members)} entries, no ffprobe.exe)', flush=True)
+
           # 3. Verify all bundled vendor assets (FFmpeg + NotoSans + OFL) against vendor_manifest.json.
-          import json
           manifest = json.loads(Path('packaging/vendor_manifest.json').read_text(encoding='utf-8'))
           for name, spec in manifest['assets'].items():
               p = app_dir / '_internal' / 'vendor' / spec['dest']
@@ -219,7 +241,7 @@ jobs:
               assert actual == spec['sha256'].lower(), f'bundled {name} sha mismatch: {actual}'
               print(f'Verified bundled {name}: {p.stat().st_size} bytes, sha256={actual}', flush=True)
 
-          # 4. Run packaged executable smoke gates.
+          # 4. Run full smoke suite on dist/DubTool/DubTool.exe.
           for flag in ('--version', '--selftest', '--layout-check', '--gui-smoke'):
               print(f'=== {exe} {flag} ===', flush=True)
               r = subprocess.run([str(exe), flag], capture_output=True, text=True, timeout=180)
@@ -229,6 +251,25 @@ jobs:
                   sys.exit(r.returncode)
               if flag == '--version':
                   assert expected_ver in r.stdout and expected_head in r.stdout, f'unexpected --version output: {r.stdout}'
+
+          # 5. Extract release ZIP to a clean temp directory and verify the extracted executable boots cleanly.
+          with tempfile.TemporaryDirectory(prefix='dubtool-zip-verify-') as td:
+              extract_dir = Path(td)
+              with zipfile.ZipFile(zip_path, 'r') as zf:
+                  zf.extractall(extract_dir)
+              ext_exe = extract_dir / 'DubTool.exe'
+              ext_binfo = (extract_dir / 'BUILD_INFO.txt').read_text(encoding='utf-8-sig')
+              assert expected_head in ext_binfo and expected_ver in ext_binfo
+              for flag in ('--version', '--selftest'):
+                  print(f'=== [extracted ZIP] {ext_exe.name} {flag} ===', flush=True)
+                  r = subprocess.run([str(ext_exe), flag], cwd=extract_dir, capture_output=True, text=True, timeout=180)
+                  if r.stdout: print(r.stdout, flush=True)
+                  if r.stderr: print(r.stderr, file=sys.stderr, flush=True)
+                  if r.returncode != 0:
+                      sys.exit(r.returncode)
+                  if flag == '--version':
+                      assert expected_ver in r.stdout and expected_head in r.stdout
+              print('Verified extracted release ZIP executable (--version & --selftest): PASS', flush=True)
           "
 
       - name: Upload packaged diagnostics on failure
