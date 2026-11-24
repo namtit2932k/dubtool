@@ -8,8 +8,9 @@
 ## 1. Trạng thái Git & Phiên bản hiện tại
 
 - **Repository:** `namtit2932k/dubtool` (public), workspace `d:\Projects\Vibe\Project_K`, build root `D:\Projects\Vibe\Project_K_build`.
-- **Phiên bản đã phát hành gần nhất:** **`v1.0.18`** (commit `a9c4680aae9b1abd0fc7a4d760dee9c398864a76`, 2026-11-20) — Official, đã verify đầy đủ qua `scripts/release.py 18` (`DOD_REPORT.md` 9/9 PASS, `RELEASE_EVIDENCE.txt` PASS, `verify_release.py --audit` PASS, `DubTool-1.0.18-win64.zip` 220,855,212 B, SHA-256 `387c4b58777c44b67ffd28532d50fc111dcc37f0b8aecdb3a85f3e86f3f31dc9`, `https://github.com/namtit2932k/dubtool/releases/tag/v1.0.18`).
-- **Nhánh hiện tại (`main`):** Đã phát hành chính thức **`v1.0.18` (Update 18)** bao gồm toàn bộ chuỗi sửa lỗi thực tế và cải tiến sau `v1.0.17`:
+- **Phiên bản đã phát hành gần nhất:** **`v1.0.19`** (commit `e04784a72e3a6b24428a4f292d9ea5caa4e7878f`, 2026-11-24) — Official, đã verify đầy đủ qua `scripts/release.py 19` (`DOD_REPORT.md` 9/9 PASS, `RELEASE_EVIDENCE.txt` PASS, `verify_release.py --audit` PASS, `638 passed, 2 skipped`, `DubTool-1.0.19-win64.zip` 220,831,600 B, SHA-256 `c262fdfe95fff47eaf92ebd534d021db31d5fa2c40c39689009e47b777cb769a`, `https://github.com/namtit2932k/dubtool/releases/tag/v1.0.19`).
+- **Phiên bản trước đó:** **`v1.0.18`** (commit `a9c4680aae9b1abd0fc7a4d760dee9c398864a76`, 2026-11-20) — Official.
+- **Nhánh hiện tại (`main`):** Đã phát hành chính thức **`v1.0.19` (Update 19)** bao gồm toàn bộ chuỗi nâng cấp tốc độ, Groq Cloud, Auto-Rotate miễn phí, chất lượng dịch S3, S6 streaming mixer và hoàn thiện UI Settings (báo cáo chi tiết tại `docs/reports/REPORT_UPDATE_19.md`):
   1. Nút Hủy dừng ngay khi S3 gặp 503 liên tục + short-circuit `punctuate` + UI `"Đang hủy…"`.
   2. Fix mất/cắt UI bên phải khi thu nhỏ cửa sổ chính (`_make_shrinkable_combo`, `minimumSize` động, kiểm tra `scroll-content-overflow-x`).
   3. Tách riêng `fallback_model` khỏi mô hình chính ở S3 (`fast_model_id` ưu tiên `config.llm_model`) và giữ nguyên lựa chọn `model_combo` sau khi đóng Cài đặt.
@@ -20,7 +21,7 @@
   8. Dọn gọn thư mục gốc (`REPORT_UPDATE_*.md` → `docs/reports/`, xóa rác untracked) và giảm tổng dung lượng `Project_K` + `Project_K_build` hơn **5.5 GB**.
   9. Tinh chỉnh UI/UX & Gemini catalog: căn thẳng thanh tiến trình (`setTextVisible(False)`, `counter` ẩn khi rỗng) & 2 nút `Sao chép chi tiết`/`Mở thư mục log` 50/50, thêm nút **Nghe thử giọng** offline (`voice_preview.py`) ngay dưới chọn giọng đọc ở cả màn hình chính và Cài đặt, cho phép resize & thu gọn `SettingsDialog` (tab Chung tự xuống dòng `WrapLongRows` không bị nuốt UI khi thu hẹp; tab Nâng cao bố cục lưới 2 cột gọn gàng cho giữ job tối đa & giới hạn tổng dung lượng + 2 nút đáy chia 50/50), hiển thị rõ đường dẫn mặc định thư mục job + nút `Chọn…`, bổ sung các model Gemini chạy ổn định (`gemini-3.1-flash-lite`, `gemini-3-flash-preview`, `gemini-flash-lite-latest`), giảm concurrency của `3.6-flash`/`3.8-flash` xuống 1, giữ `gemini-3.5-flash-lite` làm mô hình chính mặc định và đặt `gemini-3.1-flash-lite` làm mô hình dự phòng mặc định lần đầu.
   10. Bộ test offline **595 passed, 2 skipped (`SKIPS.md`), 0 failed**; báo cáo cập nhật tại `docs/reports/REPORT_UPDATE_18.md`.
-  11. **Tối ưu S3 (Phần A, sau `v1.0.18` — chưa release `v1.0.19`):**
+  11. **Nội dung chính đã phát hành trong `v1.0.19` (Update 19, commit `e04784a7`):**
       - Tắt bước LLM `punctuate` mặc định (`punctuate.enabled: off` trong `config.yaml` & `config.py`), giữ `repair_word_timings` + `resegment_by_sentences` chạy cục bộ 0ms → bỏ ~25–30 request tuần tự trước khi dịch.
       - Tăng cỡ chunk (`chunk_max_units: 20`, `chunk_max_chars: 1800` Latin / `900` CJK trong `_units_runner.py`), giảm `translate_concurrency` Gemini Flash-Lite từ 3 xuống 2 để tránh dồn 503.
       - Sửa triệt để bug vòng lặp tự-fallback sang cùng model đang lỗi (`tried_models`, `switch_lock`, chuỗi fallback chỉ gồm các model Flash-Lite nhanh `3.5-flash-lite` / `3.1-flash-lite` / `flash-lite-latest` — bỏ `3-flash-preview` khỏi fallback tự động; hạ concurrency động về 1 ngay khi gặp 503 qua `throttle_state` + `on_server_error`, giảm backoff `[3, 8, 20, 45]` và `overload_after: 3`).
