@@ -49,7 +49,7 @@ Pre-release `scripts/verify_release.py --audit` snapshot (live GitHub API vs loc
 - **Reproducible Packaging, CI Hardening & Pinned FFmpeg 8.1.2 GPL-3.0:**
   - Pinned FFmpeg **8.1.2 GPL-3.0 (`essentials_build`)** and **Noto Sans (`NotoSans.ttf` + `OFL.txt`)** with SHA-256 verification in `packaging/vendor_manifest.json` + `scripts/fetch_vendor.py`, updated `packaging/THIRD_PARTY.md`, `packaging/licenses/THIRD_PARTY_NOTICES.txt`, and `packaging/RELEASE_NOTES_TEMPLATE.md`.
   - Standardized `pyproject.toml` extras + `packaging/requirements-lock.txt` (`pip==26.3`), strict Python 3.13 x64 validation and full build provenance in `BUILD_INFO.txt`, plus extracted-ZIP smoke verification in GitHub Actions (`Windows · Python 3.11`, `Windows · Python 3.13`, `Windows · Python 3.13 · Release Build Verify`).
-  - Split `src/dubtool/app/i18n.py` into `src/dubtool/app/i18n/{__init__,vi,en}.py`, added `docs/ARCHITECTURE.md`, and refreshed `README.md` + `docs/README.vi.md` with custom `docs/images/brand/banner.svg`.
+  - Modularized localization into package `src/dubtool/app/i18n/` (`__init__.py`, `vi.py`, `en.py`), added `docs/ARCHITECTURE.md`, and refreshed `README.md` + `docs/README.vi.md` with custom `docs/images/brand/banner.svg`.
   - Updated `scripts/release.py` Step 2 to run `pytest tests -m "not packaged"` before Step 4/5 builds the fresh `.exe` and runs `pytest tests/test_screenshots.py`.
 
 ---
