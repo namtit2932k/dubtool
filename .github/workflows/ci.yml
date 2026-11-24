@@ -90,14 +90,6 @@ jobs:
           $junitPath = Join-Path $env:DUBTOOL_BUILD_ROOT "junit-py${{ matrix.python-version }}.xml"
           python -m pytest tests -m "not packaged" -q --timeout=120 -rs --junitxml=$junitPath
 
-      - name: Upload JUnit XML on test failure
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: junit-py${{ matrix.python-version }}
-          path: ${{ env.DUBTOOL_BUILD_ROOT }}\junit-py${{ matrix.python-version }}.xml
-          if-no-files-found: ignore
-
       - name: Runtime self-test, layout check & GUI smoke
         shell: pwsh
         env:
@@ -106,6 +98,27 @@ jobs:
           python -m dubtool.app.main --selftest
           python -m dubtool.app.main --layout-check
           python -m dubtool.app.main --gui-smoke
+
+      - name: Capture pip freeze diagnostics on failure
+        if: failure()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $freezePath = Join-Path $env:DUBTOOL_BUILD_ROOT "pip-freeze-py${{ matrix.python-version }}.txt"
+          python --version | Out-File -FilePath $freezePath -Encoding utf8
+          python -m pip --version | Out-File -FilePath $freezePath -Encoding utf8 -Append
+          python -m pip freeze | Out-File -FilePath $freezePath -Encoding utf8 -Append
+
+      - name: Upload test diagnostics (JUnit XML & pip freeze) on failure
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-diagnostics-py${{ matrix.python-version }}
+          path: |
+            ${{ env.DUBTOOL_BUILD_ROOT }}\junit-py${{ matrix.python-version }}.xml
+            ${{ env.DUBTOOL_BUILD_ROOT }}\pip-freeze-py${{ matrix.python-version }}.txt
+          if-no-files-found: ignore
 
   package:
     name: Windows · Python 3.13 · Release Build Verify
@@ -276,6 +289,7 @@ jobs:
 
       - name: Upload packaged diagnostics on failure
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: packaged-build-diagnostics

@@ -127,6 +127,7 @@ def test_github_ci_workflow_exists_and_uses_source_install():
     assert "upload-artifact" in wf
     assert "schedule:" in wf
     assert "--junitxml" in wf
+    assert "pip freeze" in wf and "continue-on-error: true" in wf
 
     build_ps1 = (ROOT / "packaging" / "build_exe.ps1").read_text(encoding="utf-8")
     m_pip = re.search(r'\$PipVersion\s*=\s*"([^"]+)"', build_ps1)
@@ -134,6 +135,74 @@ def test_github_ci_workflow_exists_and_uses_source_install():
     assert f'"pip=={m_pip.group(1)}"' in wf, (
         f"CI Python 3.13 locked job must pin the same pip=={m_pip.group(1)} as build_exe.ps1"
     )
+
+
+def test_build_script_validates_python_313_x64_and_writes_provenance():
+    build_ps1 = (ROOT / "packaging" / "build_exe.ps1").read_text(encoding="utf-8")
+    assert "Resolve-BuildPython313x64" in build_ps1
+    assert "sys.version_info[:2] == (3, 13)" in build_ps1
+    assert "struct.calcsize('P') * 8" in build_ps1
+    for field in (
+        "python:",
+        "pip:",
+        "lockfile_sha256:",
+        "vendor_manifest_sha256:",
+        "ffmpeg_version:",
+        "ffmpeg_sha256:",
+    ):
+        assert field in build_ps1, f"BUILD_INFO.txt provenance field '{field}' missing from build_exe.ps1"
+
+
+def test_vendor_manifest_schema_and_invariants_offline():
+    """Pure offline schema validation for packaging/vendor_manifest.json (no network)."""
+    import json
+    from pathlib import PurePosixPath
+
+    hex64 = re.compile(r"^[0-9a-f]{64}$")
+    manifest_path = ROOT / "packaging" / "vendor_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest.get("schema") == 1
+    assets = manifest.get("assets")
+    assert isinstance(assets, dict) and assets
+
+    seen_dests: set[str] = set()
+    for name, spec in assets.items():
+        assert isinstance(name, str) and name.strip()
+        assert "ffprobe" not in name.lower(), f"ffprobe must not be in bundled assets: {name}"
+        for req_key in ("version", "license", "url", "dest", "sha256"):
+            val = spec.get(req_key)
+            assert isinstance(val, str) and val.strip(), f"asset {name} missing non-empty '{req_key}'"
+        assert spec["url"].startswith("https://"), f"asset {name} URL must use HTTPS"
+        assert hex64.match(spec["sha256"]), f"asset {name} sha256 must be 64 lowercase hex chars"
+        assert isinstance(spec.get("size"), int) and spec["size"] > 0
+
+        dest = spec["dest"]
+        assert not dest.startswith(("/", "\\")) and ":" not in dest, f"asset {name} dest must be relative: {dest}"
+        parts = PurePosixPath(dest.replace("\\", "/")).parts
+        assert parts and ".." not in parts, f"asset {name} dest escapes vendor root: {dest}"
+        norm_dest = "/".join(parts).lower()
+        assert "ffprobe" not in norm_dest, f"ffprobe must not be a bundled asset dest: {dest}"
+        assert norm_dest not in seen_dests, f"duplicate asset dest: {dest}"
+        seen_dests.add(norm_dest)
+
+        if "archive_member" in spec or "zip_sha256" in spec:
+            assert isinstance(spec.get("archive_member"), str) and spec["archive_member"].strip()
+            assert isinstance(spec.get("zip_sha256"), str) and hex64.match(spec["zip_sha256"])
+
+    sidecars = manifest.get("test_sidecars", {})
+    assert isinstance(sidecars, dict)
+    for sc_name, sc in sidecars.items():
+        assert sc_name not in assets, f"sidecar {sc_name} must stay outside bundled assets"
+        parent = sc.get("from_asset")
+        assert parent in assets, f"sidecar {sc_name} references unknown asset {parent!r}"
+        assert "archive_member" in assets[parent], f"sidecar {sc_name} parent {parent!r} must be an archive"
+        assert isinstance(sc.get("archive_member"), str) and sc["archive_member"].strip()
+        assert isinstance(sc.get("sha256"), str) and hex64.match(sc["sha256"])
+        assert isinstance(sc.get("size"), int) and sc["size"] > 0
+        sc_dest = sc.get("dest", "")
+        assert isinstance(sc_dest, str) and sc_dest.strip()
+        assert not sc_dest.startswith(("/", "\\")) and ":" not in sc_dest
+        assert ".." not in PurePosixPath(sc_dest.replace("\\", "/")).parts
 
 
 def test_selftest_provider_offline_smoke_checks_pass():
