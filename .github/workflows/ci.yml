@@ -133,8 +133,42 @@ jobs:
           $vendorDir  = Join-Path $env:DUBTOOL_BUILD_ROOT "vendor"
           $fontsDir   = Join-Path $vendorDir "fonts"
           Copy-Item $ffmpegPath (Join-Path $vendorDir "ffmpeg.exe") -Force
-          $sysFont = if (Test-Path "C:\Windows\Fonts\segoeui.ttf") { "C:\Windows\Fonts\segoeui.ttf" } else { "C:\Windows\Fonts\arial.ttf" }
-          Copy-Item $sysFont (Join-Path $fontsDir "NotoSans.ttf") -Force
+
+          # Fetch the authentic SIL OFL-1.1 Noto Sans variable font and license
+          # from the pinned google/fonts commit and verify SHA-256 (matching
+          # packaging/THIRD_PARTY.md — never substitute a system font).
+          $fontCommit = "2984c575fdce412ee02b2baaba67672b9a9434d8"
+          $fontAssets = @(
+            @{
+              Url = "https://raw.githubusercontent.com/google/fonts/$fontCommit/ofl/notosans/NotoSans%5Bwdth,wght%5D.ttf"
+              Dest = Join-Path $fontsDir "NotoSans.ttf"
+              Sha256 = "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d"
+            },
+            @{
+              Url = "https://raw.githubusercontent.com/google/fonts/$fontCommit/ofl/notosans/OFL.txt"
+              Dest = Join-Path $fontsDir "OFL.txt"
+              Sha256 = "cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a"
+            }
+          )
+          foreach ($asset in $fontAssets) {
+            $ok = $false
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              try {
+                Invoke-WebRequest -Uri $asset.Url -OutFile $asset.Dest -UseBasicParsing -TimeoutSec 60
+                $ok = $true
+                break
+              } catch {
+                Write-Warning "Attempt $attempt failed for $($asset.Url): $_"
+                if ($attempt -lt 3) { Start-Sleep -Seconds (3 * $attempt) }
+              }
+            }
+            if (-not $ok) { throw "Failed to download required font asset: $($asset.Url)" }
+            $actual = (Get-FileHash -Path $asset.Dest -Algorithm SHA256).Hash.ToLower()
+            if ($actual -ne $asset.Sha256) {
+              throw "SHA-256 mismatch for $($asset.Dest): expected $($asset.Sha256), got $actual"
+            }
+            Write-Host "Verified $(Split-Path -Leaf $asset.Dest): $((Get-Item $asset.Dest).Length) bytes, sha256=$actual"
+          }
 
       - name: Install locked build dependencies
         shell: pwsh
@@ -157,9 +191,18 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           python -c "
-          import os, subprocess, sys
-          exe = os.path.join(os.environ['DUBTOOL_BUILD_ROOT'], 'dist', 'DubTool', 'DubTool.exe')
+          import hashlib, os, subprocess, sys
+          app_dir = os.path.join(os.environ['DUBTOOL_BUILD_ROOT'], 'dist', 'DubTool')
+          exe = os.path.join(app_dir, 'DubTool.exe')
           assert os.path.isfile(exe), f'missing {exe}'
+          font_path = os.path.join(app_dir, '_internal', 'vendor', 'fonts', 'NotoSans.ttf')
+          ofl_path = os.path.join(app_dir, '_internal', 'vendor', 'fonts', 'OFL.txt')
+          assert os.path.isfile(font_path), f'missing bundled {font_path}'
+          assert os.path.isfile(ofl_path), f'missing bundled {ofl_path}'
+          font_sha = hashlib.sha256(open(font_path, 'rb').read()).hexdigest()
+          expected_font_sha = 'bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d'
+          assert font_sha == expected_font_sha, f'bundled NotoSans.ttf sha256 mismatch: {font_sha}'
+          print(f'Verified bundled NotoSans.ttf ({os.path.getsize(font_path)} bytes, sha256={font_sha})', flush=True)
           for flag in ('--version', '--selftest', '--layout-check', '--gui-smoke'):
               print(f'=== {exe} {flag} ===', flush=True)
               r = subprocess.run([exe, flag], capture_output=True, text=True, timeout=180)

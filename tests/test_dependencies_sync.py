@@ -115,3 +115,18 @@ def test_github_ci_workflow_exists_and_uses_source_install():
     assert "PyInstaller" in wf
     assert "--gui-smoke" in wf
 
+
+def test_packaged_font_provenance_pinned_in_ci_and_build_script():
+    expected_sha = "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d"
+    third_party = (ROOT / "packaging" / "THIRD_PARTY.md").read_text(encoding="utf-8")
+    build_ps1 = (ROOT / "packaging" / "build_exe.ps1").read_text(encoding="utf-8")
+    wf = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert expected_sha in third_party
+    assert expected_sha in build_ps1
+    assert expected_sha in wf
+    assert "segoeui.ttf" not in wf and "arial.ttf" not in wf, (
+        "CI package job must bundle the authentic pinned NotoSans.ttf, not a system font substitute"
+    )
+
+

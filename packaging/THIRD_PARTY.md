@@ -27,9 +27,9 @@ folder shipped at the root of the DubTool package (`DubTool/licenses/`).
 ## Noto Sans (bundled subtitle font)
 
 - **File:** `_internal/vendor/fonts/NotoSans.ttf` (variable font, includes Vietnamese).
-- **Source:** `https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans[wdth,wght].ttf`
+- **Source:** `https://raw.githubusercontent.com/google/fonts/2984c575fdce412ee02b2baaba67672b9a9434d8/ofl/notosans/NotoSans%5Bwdth,wght%5D.ttf` (pinned commit from `google/fonts` `main`)
 - **SHA-256:** `bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d`
-- **License:** SIL Open Font License 1.1 (`licenses/OFL-NotoSans.txt` and `_internal/vendor/fonts/OFL.txt`).
+- **License:** SIL Open Font License 1.1 (`licenses/OFL-NotoSans.txt` and `_internal/vendor/fonts/OFL.txt`, SHA-256 `cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a`).
 
 ## Python runtime and packages
 

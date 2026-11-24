@@ -187,6 +187,8 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
     Write-Host "== [5/6] structure check"
     foreach ($p in @(
         "_internal\vendor\ffmpeg.exe",
+        "_internal\vendor\fonts\NotoSans.ttf",
+        "_internal\vendor\fonts\OFL.txt",
         "_internal\config.yaml",
         "DubTool.exe",
         "THIRD_PARTY.md",
@@ -196,6 +198,11 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
         "licenses\THIRD_PARTY_NOTICES.txt"
     )) {
         if (-not (Test-Path (Join-Path $tmpAppDir $p))) { throw "missing $p in the build" }
+    }
+    $expectedFontSha = "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d"
+    $actualFontSha = (Get-FileHash (Join-Path $tmpAppDir "_internal\vendor\fonts\NotoSans.ttf") -Algorithm SHA256).Hash.ToLower()
+    if ($actualFontSha -ne $expectedFontSha) {
+        throw "bundled NotoSans.ttf SHA-256 mismatch (expected $expectedFontSha, got $actualFontSha)"
     }
     if (Test-Path (Join-Path $tmpAppDir "_internal\vendor\ffprobe.exe")) {
         throw "ffprobe.exe must not be in the build (AGU9 task 8)"
