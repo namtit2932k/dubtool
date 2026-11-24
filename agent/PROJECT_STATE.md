@@ -49,9 +49,13 @@
         - Đặt `jobs_days_spin` và `jobs_total_mb_spin` cùng `minimumWidth=140` + `Expanding` để 2 ô thẳng tắp cả mép trái lẫn mép phải trong tab *Nâng cao*.
       - Test mới tại `tests/test_s3_optimizations.py` (10 tests), `tests/test_s6_and_explorer_fixes.py` (5 tests), `tests/test_groq_provider.py` (10 tests), và `tests/test_auto_rotate.py` (13 tests).
 
-  12. **Chuẩn bị cho Update 20 (sau `v1.0.19` — đã verify offline & CI, chưa release `v1.0.20`):**
+  12. **Chuẩn bị cho Update 20 (sau `v1.0.19` — đã hoàn tất Milestone 1 + 2 + 4 và CI xanh 3/3, chưa release `v1.0.20`):**
       - Chuẩn hóa `pyproject.toml` (đồng bộ runtime deps với `packaging/build_exe.ps1`, tách extras `gui`, `dev`, `tts`, `all`, giải thích rõ `all` cố tình không gộp `tts`, thêm pytest markers `unit`/`gui`/`integration`/`packaged`, kiểm chứng cài thật trên `.venv` sạch Windows Python 3.13 PASS) + thêm lockfile `packaging/requirements-lock.txt` (76 package pinned `==`, kèm hướng dẫn trong `README_BUILD.md`) + `tests/test_dependencies_sync.py`.
-      - Thêm GitHub Actions CI (`.github/workflows/ci.yml`): matrix `windows-latest` Python `3.11` (`pyproject.toml`) & `3.13` (`requirements-lock.txt`) chạy `preflight_gates`, `check_readme_links --allow-missing-index`, full offline `pytest`, `--selftest`, `--layout-check`, `--gui-smoke` + job `package` build & verify thật `DubTool.exe` qua PyInstaller (0 API key, 0 secret) + badge CI trên `README.md` và `docs/README.vi.md`.
+      - Thêm và kiểm chứng xanh 100% GitHub Actions CI (`.github/workflows/ci.yml`, Run #5 `https://github.com/namtit2932k/dubtool/actions/runs/45304850431`, commit `0795ac8`, 0 API key, 0 secret):
+        - `Windows · Python 3.11`: **PASS** (3m23s — `pyproject.toml`, `preflight_gates`, `check_readme_links --allow-missing-index`, full offline `pytest`, `--selftest`, `--layout-check`, `--gui-smoke`).
+        - `Windows · Python 3.13`: **PASS** (3m27s — `packaging/requirements-lock.txt`, đầy đủ các cổng kiểm thử trên).
+        - `Windows · Python 3.13 · PyInstaller Verify`: **PASS** (3m56s — build thật `DubTool.exe` qua `packaging/dubtool.spec` với `ffmpeg.exe` thực, chạy thật `--version`, `--selftest`, `--layout-check`, `--gui-smoke`).
+      - Sửa 3 lỗi thực tế được phát hiện nhờ runner Windows elevated + FFmpeg 8 trên CI (commit `3b701e9`): xử lý xóa symlink trỏ ra ngoài root trước `.resolve()` trong `src/dubtool/app/cleanup.py` và `src/dubtool/app/housekeeping.py`, thay `-filter_complex_script` (đã bị gỡ ở FFmpeg 8) bằng `-filter_complex` inline trong `tests/test_mix_fft.py`, và nới sai số padding LAME MP3 trong `tests/test_probe_av.py`.
       - Tách `src/dubtool/app/i18n.py` (646 dòng) thành package `src/dubtool/app/i18n/` (`__init__.py`, `vi.py`, `en.py`) giữ 100% tương thích ngược + kiểm tra đồng bộ 284 key VI/EN.
       - Bổ sung tài liệu kiến trúc & onboarding [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (khớp 100% `STAGE_ORDER = s1..s7` và `s8_export_readable.py` là post-pipeline export) + đồng bộ mô tả Privacy (gồm cả Brief/Glossary tùy chọn) trên `README.md`, `docs/README.vi.md` và `packaging/RELEASE_NOTES_TEMPLATE.md`.
 
