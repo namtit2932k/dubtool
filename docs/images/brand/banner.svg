@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" width="1200" height="320" role="img" aria-label="DubTool — Multilingual Video to Vietnamese Dubbing">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090D1A" />
+      <stop offset="50%" stop-color="#111936" />
+      <stop offset="100%" stop-color="#1A1538" />
+    </linearGradient>
+    <radialGradient id="glowLeft" cx="18%" cy="50%" r="42%">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.22" />
+      <stop offset="100%" stop-color="#38BDF8" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="glowRight" cx="82%" cy="50%" r="42%">
+      <stop offset="0%" stop-color="#34D399" stop-opacity="0.22" />
+      <stop offset="100%" stop-color="#34D399" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="glowCenter" cx="50%" cy="46%" r="36%">
+      <stop offset="0%" stop-color="#6366F1" stop-opacity="0.24" />
+      <stop offset="100%" stop-color="#6366F1" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="waveGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.15" />
+      <stop offset="35%" stop-color="#818CF8" stop-opacity="0.75" />
+      <stop offset="65%" stop-color="#34D399" stop-opacity="0.80" />
+      <stop offset="100%" stop-color="#34D399" stop-opacity="0.15" />
+    </linearGradient>
+    <linearGradient id="barLeft" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#6366F1" stop-opacity="0.35" />
+    </linearGradient>
+    <linearGradient id="barRight" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#6EE7B7" stop-opacity="0.90" />
+      <stop offset="100%" stop-color="#10B981" stop-opacity="0.35" />
+    </linearGradient>
+    <linearGradient id="accentLine" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="50%" stop-color="#818CF8" />
+      <stop offset="100%" stop-color="#34D399" />
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded dark card base -->
+  <rect x="2" y="2" width="1196" height="316" rx="22" fill="url(#bg)" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="1.5" />
+  <rect x="2" y="2" width="1196" height="316" rx="22" fill="url(#glowLeft)" />
+  <rect x="2" y="2" width="1196" height="316" rx="22" fill="url(#glowRight)" />
+  <rect x="2" y="2" width="1196" height="316" rx="22" fill="url(#glowCenter)" />
+
+  <!-- Subtle acoustic sine waves -->
+  <path d="M 24 196 C 170 116, 300 264, 460 176 C 610 92, 740 248, 900 162 C 1020 98, 1110 180, 1176 148"
+        fill="none" stroke="url(#waveGrad)" stroke-width="2" opacity="0.45" />
+  <path d="M 24 134 C 190 214, 330 78, 510 164 C 660 236, 790 88, 960 172 C 1060 218, 1120 142, 1176 168"
+        fill="none" stroke="url(#waveGrad)" stroke-width="1.5" opacity="0.30" />
+
+  <!-- Left waveform equalizer (source audio) -->
+  <g fill="url(#barLeft)" opacity="0.72">
+    <rect x="76"  y="142" width="7" height="36"  rx="3.5" />
+    <rect x="94"  y="122" width="7" height="76"  rx="3.5" />
+    <rect x="112" y="100" width="7" height="120" rx="3.5" />
+    <rect x="130" y="118" width="7" height="84"  rx="3.5" />
+    <rect x="148" y="88"  width="7" height="144" rx="3.5" />
+    <rect x="166" y="108" width="7" height="104" rx="3.5" />
+    <rect x="184" y="128" width="7" height="64"  rx="3.5" />
+    <rect x="202" y="114" width="7" height="92"  rx="3.5" />
+    <rect x="220" y="136" width="7" height="48"  rx="3.5" />
+    <rect x="238" y="146" width="7" height="28"  rx="3.5" />
+  </g>
+
+  <!-- Right waveform equalizer (Vietnamese dub output) -->
+  <g fill="url(#barRight)" opacity="0.78">
+    <rect x="955"  y="146" width="7" height="28"  rx="3.5" />
+    <rect x="973"  y="134" width="7" height="52"  rx="3.5" />
+    <rect x="991"  y="112" width="7" height="96"  rx="3.5" />
+    <rect x="1009" y="126" width="7" height="68"  rx="3.5" />
+    <rect x="1027" y="92"  width="7" height="136" rx="3.5" />
+    <rect x="1045" y="108" width="7" height="104" rx="3.5" />
+    <rect x="1063" y="84"  width="7" height="152" rx="3.5" />
+    <rect x="1081" y="116" width="7" height="88"  rx="3.5" />
+    <rect x="1099" y="128" width="7" height="64"  rx="3.5" />
+    <rect x="1117" y="142" width="7" height="36"  rx="3.5" />
+  </g>
+
+  <!-- Geometric turtle-shell emblem (echoes DubTool's brand mark) -->
+  <g transform="translate(600, 86)">
+    <!-- Outer hexagon -->
+    <polygon points="0,-42 36,-21 36,21 0,42 -36,21 -36,-21"
+             fill="#0F172A" fill-opacity="0.78" stroke="#FFFFFF" stroke-width="2.6" stroke-linejoin="round" />
+    <!-- Mint-emerald right shell facets matching DubTool logo -->
+    <polygon points="0,-36 30,-18 18,-10 0,-21" fill="#6EE7B7" fill-opacity="0.92" />
+    <polygon points="30,-18 30,18 18,10 18,-10" fill="#34D399" fill-opacity="0.92" />
+    <polygon points="30,18 0,36 0,21 18,10" fill="#6EE7B7" fill-opacity="0.92" />
+    <!-- Inner subtle hexagon + play mark -->
+    <polygon points="0,-21 18,-10 18,10 0,21 -18,10 -18,-10"
+             fill="none" stroke="#FFFFFF" stroke-opacity="0.88" stroke-width="2" stroke-linejoin="round" />
+    <polygon points="-5,-9 10,0 -5,9" fill="#FFFFFF" />
+  </g>
+
+  <!-- Brand title -->
+  <text x="600" y="194"
+        text-anchor="middle"
+        font-family="Segoe UI, Helvetica Neue, Arial, sans-serif"
+        font-size="56"
+        font-weight="700"
+        letter-spacing="1.2"
+        fill="#F8FAFC">DubTool</text>
+
+  <!-- Short tagline -->
+  <text x="600" y="236"
+        text-anchor="middle"
+        font-family="Segoe UI, Helvetica Neue, Arial, sans-serif"
+        font-size="20"
+        font-weight="400"
+        letter-spacing="0.3"
+        fill="#CBD5E1">Multilingual Video Dubbing to Vietnamese · Windows Desktop App</text>
+
+  <!-- Accent divider pill -->
+  <rect x="520" y="262" width="160" height="4" rx="2" fill="url(#accentLine)" opacity="0.9" />
+</svg>

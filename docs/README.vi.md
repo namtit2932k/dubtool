@@ -1,11 +1,5 @@
 <p align="center">
-  <img src="images/logo.png" width="120" alt="DubTool" />
-</p>
-
-<h1 align="center">DubTool</h1>
-
-<p align="center">
-  <strong>Ứng dụng desktop portable cho Windows giúp lồng tiếng video đa ngôn ngữ sang tiếng Việt — nhận diện giọng nói cục bộ, xoay tua tự động nhiều API Key AI, tạo giọng tiếng Việt offline và gắn phụ đề đồng bộ.</strong>
+  <img src="images/brand/banner.svg" width="100%" alt="DubTool — Lồng tiếng video đa ngôn ngữ sang tiếng Việt" />
 </p>
 
 <p align="center">
@@ -20,87 +14,103 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/namtit2932k/dubtool/releases/latest"><img src="https://img.shields.io/badge/%E2%86%93%20T%E1%BA%A2I%20V%E1%BB%80-WINDOWS%2010%2F11%20X64-2ea043?style=for-the-badge&labelColor=555555" alt="Tải về cho Windows 10/11 x64" /></a>
+  <a href="https://github.com/namtit2932k/dubtool/releases/latest"><img src="https://img.shields.io/badge/%E2%86%93%20T%E1%BA%A2I%20V%E1%BB%80-WINDOWS%2010%2F11%20X64-2ea043?style=for-the-badge&labelColor=1e293b" alt="Tải về cho Windows 10/11 x64" /></a>
 </p>
 
 ---
 
-## Tổng quan
+## 🎬 Tổng quan
 
 **DubTool** chuyển video ngoại ngữ thành video lồng tiếng Việt kèm phụ đề đồng bộ. Ứng dụng kết hợp nhận diện tiếng nói cục bộ, dịch AI theo ngữ cảnh, tổng hợp giọng đọc tiếng Việt offline, tự động căn khớp thời lượng âm thanh và pipeline xử lý có thể tiếp tục bất cứ lúc nào — tất cả trong một ứng dụng Windows portable (Python + PySide6, đóng gói thành `.exe` độc lập kèm CLI đầy đủ).
 
-- **Đầu vào:** Bất kỳ video ngoại ngữ nào (từ clip ngắn đến bài giảng, hướng dẫn hay phim dài nhiều giờ). Tệp video gốc **không bao giờ** bị sửa hay ghi đè.
-- **Đầu ra:**
-  - Video **`.mp4`** lồng tiếng Việt với âm thanh gốc được hạ nền hợp lý.
-  - Phụ đề tiếng Việt **`.srt`** và/hoặc phụ đề gắn cứng vào video (tùy chọn bật/tắt).
-  - Bản dịch song ngữ dễ đọc **`.docx` / `.txt`** xuất kèm cạnh video.
+- **Đầu vào:** Video ngoại ngữ từ clip ngắn đến bài giảng, hướng dẫn hay phim dài nhiều giờ — tệp video gốc **không bao giờ** bị sửa hay ghi đè.
+- **Đầu ra:** Video **`.mp4`** lồng tiếng Việt với nền gốc đã hạ âm lượng, phụ đề tiếng Việt **`.srt`** và/hoặc phụ đề gắn cứng vào video (tùy chọn bật/tắt), cùng tệp bản dịch song ngữ dễ đọc **`.docx` / `.txt`**.
 - **Bảo vệ video tiếng Việt:** Nếu video đầu vào đã là tiếng Việt, DubTool tự dừng trước bước dịch và đề xuất xuất phụ đề `.srt` cùng bản chép lời mà không gọi API dịch.
 
 > ⚖️ Chỉ lồng tiếng video bạn sở hữu hoặc có quyền chỉnh sửa. Khi tải và sử dụng DubTool, bạn đồng ý với [Giấy phép MIT](../LICENSE) và các [thông báo bên thứ ba](../packaging/THIRD_PARTY.md).
 
 ---
 
-## Ảnh chụp màn hình
+## 🖥️ Ảnh chụp màn hình
 
-| Cửa sổ chính (Sẵn sàng) | Chọn & tự động nhận diện ngôn ngữ |
-| :---: | :---: |
-| ![Giao diện chính — sẵn sàng chọn ngôn ngữ và mô hình](images/ready.png) | ![Chọn ngôn ngữ video — Tự động, ngôn ngữ phổ biến và Khác…](images/lang_dropdown_open.png) |
+*Nhấn vào từng ảnh để xem ở độ phân giải đầy đủ.*
 
-| Tiến trình & độ tin cậy ngôn ngữ | Đang chạy & nút Hủy tức thì |
-| :---: | :---: |
-| ![Đang chạy — hiển thị ngôn ngữ nhận diện và độ tin cậy](images/details_detected_language.png) | ![Đang chạy — thanh tiến trình, nút hủy và nhật ký trực tiếp](images/running.png) |
+### Giao diện chính
 
-| Hoàn tất & mở nhanh đầu ra | Quản lý khóa API an toàn |
+| Sẵn sàng lồng tiếng (Chọn ngôn ngữ & mô hình) | Tự động nhận diện & chọn ngôn ngữ nguồn |
 | :---: | :---: |
-| ![Hoàn tất — mở thư mục xuất, phát video hoặc mở bản dịch](images/finished.png) | ![Cài đặt — lưu khóa API an toàn trong Windows Credential Manager](images/settings_api_keys.png) |
+| [![Giao diện chính sẵn sàng lồng tiếng](images/ready.png)](images/ready.png)<br><sub>Kéo thả video, chọn mô hình hoặc Auto-Rotate và tùy chỉnh phụ đề</sub> | [![Danh sách chọn ngôn ngữ nguồn](images/lang_dropdown_open.png)](images/lang_dropdown_open.png)<br><sub>Tự động nhận diện ngôn ngữ nói, danh sách phổ biến và Khác…</sub> |
+
+### Tiến trình & Nhật ký trực tiếp
+
+| Ngôn ngữ nhận diện & độ tin cậy | Thanh tiến trình & nút Hủy tức thì |
+| :---: | :---: |
+| [![Chi tiết ngôn ngữ nhận diện](images/details_detected_language.png)](images/details_detected_language.png)<br><sub>Hiển thị ngôn ngữ phát hiện, độ tin cậy và chi tiết từng giai đoạn</sub> | [![Đang chạy và nhật ký trực tiếp](images/running.png)](images/running.png)<br><sub>Thanh tiến trình, nút hủy an toàn và nhật ký hoạt động trực tiếp</sub> |
+
+### Kết quả & Cài đặt
+
+| Thao tác nhanh sau khi hoàn tất | Quản lý khóa API an toàn |
+| :---: | :---: |
+| [![Thao tác đầu ra sau khi hoàn tất](images/finished.png)](images/finished.png)<br><sub>Mở thư mục xuất, phát video lồng tiếng hoặc mở bản dịch dễ đọc</sub> | [![Cài đặt khóa API](images/settings_api_keys.png)](images/settings_api_keys.png)<br><sub>Lưu khóa mã hóa trong Windows Credential Manager kèm nút kiểm tra khóa</sub> |
 
 ---
 
-## Cách hoạt động
+## ⚙️ Cách hoạt động
 
 ```mermaid
 flowchart LR
-  A["Nhập Video"] --> B["Nhận diện lời thoại (ASR cục bộ)"]
-  B --> C["Dịch sang tiếng Việt (AI / LLM cục bộ)"]
-  C --> D["Tạo giọng đọc Việt (TTS offline)"]
+  A["Nhập Video"] --> B["ASR cục bộ"]
+  B --> C["Dịch AI hoặc LLM cục bộ"]
+  C --> D["TTS tiếng Việt offline"]
   D --> E["Khớp thời lượng"]
   E --> F["Trộn âm thanh"]
-  F --> G["Xuất (.mp4 / .srt / .docx)"]
+  F --> G["Xuất đầu ra"]
 ```
 
-1. **Nhập Video** — Tự động nhận diện ngôn ngữ nói hoặc dùng ngôn ngữ bạn chọn thủ công.
-2. **Nhận diện & Dịch** — Chuyển giọng nói thành văn bản ngay trên máy, sau đó dịch theo câu hoàn chỉnh kèm ngữ cảnh, mô tả ngắn (Brief) và từ điển thuật ngữ (Glossary).
-3. **Tạo giọng, Khớp thời lượng & Xuất** — Tạo giọng tiếng Việt offline, căn khớp từng câu theo mốc thoại thực tế, hạ nền âm thanh gốc kèm limiter chống rè rồi xuất video, phụ đề và tệp bản dịch dễ đọc.
+1. **Nhập & Nhận diện:** Tự động nhận diện ngôn ngữ nói (hoặc dùng ngôn ngữ chọn tay) và chép lời thoại cục bộ bằng `faster-whisper`.
+2. **Dịch & Tạo giọng:** Dịch theo câu hoàn chỉnh sang tiếng Việt tự nhiên kèm ngữ cảnh tùy chọn, rồi tạo giọng đọc tiếng Việt offline ngay trên CPU.
+3. **Khớp thời lượng, Trộn & Xuất:** Căn khớp từng câu theo mốc thoại thực tế, hạ nền âm thanh gốc kèm bộ chống rè `alimiter` rồi xuất video `.mp4`, `.srt` tùy chọn và bản dịch `.docx`/`.txt`.
 
 ---
 
-## Điểm nổi bật của DubTool
+## ✨ Điểm nổi bật
 
-### Dịch thông minh & Xoay tua API Key miễn phí (Auto-Rotate)
-- **Chế độ mặc định `auto-rotate`:** Tự động xoay vòng toàn bộ khóa API miễn phí **Gemini** và **Groq** bạn đã lưu trên nhiều luồng song song. Khi một khóa hoặc mô hình gặp quá tải tạm thời (`503`) hay chạm giới hạn (`429`), DubTool đưa slot đó vào cooldown và chuyển ngay sang khóa/nhà cung cấp sẵn sàng khác mà không phải chờ hết cooldown.
-- **Tách biệt hoàn toàn gói miễn phí và trả phí:** Khóa **OpenAI** / **Anthropic** trả phí **không bao giờ** bị tự động sử dụng trong chế độ Auto-Rotate; khi bạn chủ động chọn mô hình trả phí, ứng dụng sẽ hỏi xác nhận trước lần chạy đầu.
-- **Kiểm soát ngữ cảnh & chất lượng dịch:** Hỗ trợ **Mô tả ngắn (Brief)** định hướng thể loại/xưng hô, **Từ điển thuật ngữ (Glossary)**, đồng nhất đại từ xưng hô giữa các cụm dịch, và tự phát hiện/dịch lại nếu còn sót ký tự Hán/Kana/Hangul trong bản dịch tiếng Việt.
-
-### Nhận diện giọng nói cục bộ & TTS tiếng Việt offline
-- **ASR cục bộ (`faster-whisper`):** Chạy hoàn toàn trên máy tính với lọc khoảng lặng VAD, sửa trôi timestamp từ & tách khoảng lặng nội bộ, hỗ trợ bấm **Hủy** dừng ngay giữa chừng.
-- **TTS tiếng Việt offline (`VieNeu-TTS v3 ONNX`):** Chạy trên CPU với chế độ tiêu chuẩn `v3turbo_int8` (48 kHz, 25 giọng, mặc định *Trúc Ly*) hoặc chế độ tiết kiệm RAM `v3nano` (24 kHz, 11 giọng), tích hợp sẵn nút **Nghe thử giọng**. Mô hình chỉ cần tải 1 lần đầu (~244–269 MB) và hoạt động offline cho các lần sau.
-
-### Thiết kế cho video dài nhiều giờ
-- **Checkpoint từng bước và từng cụm dịch:** Mọi stage (`s1`–`s7`) và từng cụm dịch đều được lưu checkpoint trên đĩa — bạn có thể hủy giữa chừng và bấm chạy tiếp mà không mất phần đã làm.
-- **Tái sử dụng kết quả thông minh:** Khi đổi mô hình dịch, ứng dụng tự động giữ lại kết quả tách âm (`s1`) và nhận diện giọng nói (`s2`) đã có.
-- **Trộn âm thanh streaming theo khối:** Dựng track lồng tiếng bằng `soundfile` + `numpy` theo từng khối 30 giây, giữ mức RAM ổn định, không tạo tệp WAV im lặng trung gian nhiều GB và tự động bật RF64 cho track dung lượng lớn (>3.8 GB).
-
-### Đầu ra âm thanh & phụ đề chính xác
-- **Căn khớp thời lượng từng câu:** Tự điều chỉnh tốc độ nhẹ (`atempo`) hoặc rút gọn câu dài bằng LLM rồi tạo lại giọng để mỗi câu khớp gọn khung thoại mà không đè lên câu kế tiếp.
-- **Hòa âm cân bằng & phụ đề đồng bộ:** Hạ âm nền gốc (mặc định `−14 dB`) kèm bộ giới hạn `alimiter` chống méo tiếng, tạo `.srt` bám sát mốc phát thực tế, tùy chọn gắn phụ đề cứng qua `libass` + phông Noto Sans đóng gói sẵn, và xuất kèm tệp `.docx` / `.txt` dễ đọc.
-
-### Quyền riêng tư & Quản lý khóa API an toàn
-- **Phân tách rõ cục bộ và đám mây:** Nhận diện giọng nói, tạo giọng tiếng Việt (sau lần tải mô hình đầu tiên), trộn âm thanh và gắn phụ đề đều chạy cục bộ trên máy bạn. Khi dùng nhà cung cấp dịch đám mây, ứng dụng cần kết nối Internet và chỉ gửi văn bản lời thoại nguồn cùng ngữ cảnh tùy chọn bạn nhập (Brief / Glossary) tới nhà cung cấp đã chọn. Bạn có thể chọn **Ollama** nếu muốn dịch 100% cục bộ.
-- **Lưu khóa mã hóa:** Trên ứng dụng desktop, khóa API được lưu trong **Windows Credential Manager** (hoặc `.env` cho CLI), hiển thị che ký tự trên giao diện, tự lọc khỏi log/chẩn đoán và không bao giờ ghi ra `settings.json` hay thư mục job.
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>🌐 Dịch thông minh &amp; Auto-Rotate</h3>
+      <p><strong>Duy trì tiến độ dịch video dài bằng các khóa API miễn phí.</strong> Chế độ mặc định <code>auto-rotate</code> xoay vòng toàn bộ khóa miễn phí <strong>Gemini</strong> và <strong>Groq</strong> trên nhiều luồng song song, tự chuyển ngay sang khóa/hãng sẵn sàng khác khi gặp <code>503</code>/<code>429</code> mà không chờ hết cooldown. Khóa trả phí <strong>OpenAI</strong>/<strong>Anthropic</strong> không bao giờ bị tự dùng. Hỗ trợ <strong>Brief</strong>, <strong>Glossary</strong>, đồng nhất xưng hô và chặn sót chữ CJK.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>🔒 ASR cục bộ &amp; TTS tiếng Việt offline</h3>
+      <p><strong>Xử lý giọng nói ngay trên máy, không phụ thuộc giới hạn API TTS.</strong> <code>faster-whisper</code> nhận diện giọng nói cục bộ có lọc VAD, sửa trôi timestamp và hủy giữa chừng. <strong>VieNeu-TTS v3 ONNX</strong> tạo giọng tiếng Việt tự nhiên trên CPU (<code>v3turbo_int8</code> 48 kHz / 25 giọng hoặc <code>v3nano</code> 24 kHz / 11 giọng tiết kiệm RAM) kèm nút <strong>Nghe thử giọng</strong> — hoạt động offline sau lần tải mô hình đầu tiên (~244–269 MB).</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>🚀 Thiết kế cho video dài</h3>
+      <p><strong>Hủy an toàn và tiếp tục video nhiều giờ mà không phải chạy lại từ đầu.</strong> Mọi giai đoạn (<code>s1</code>–<code>s7</code>) và từng cụm dịch đều có checkpoint trên đĩa; đổi mô hình dịch sẽ tự tái sử dụng kết quả <code>s1</code>/<code>s2</code> đã có. Bộ trộn streaming khối 30 giây bằng <code>soundfile</code> + <code>numpy</code> giữ RAM ổn định và tự bật RF64 cho tệp lớn (&gt;3.8 GB).</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>🎧 Đầu ra âm thanh &amp; phụ đề chính xác</h3>
+      <p><strong>Âm thanh cân bằng và phụ đề bám sát mốc phát thực tế.</strong> Tự căn khớp thời lượng từng câu bằng giãn tốc nhẹ <code>atempo</code> hoặc rút gọn LLM + đọc lại để câu không đè nhau. Hạ âm nền gốc (mặc định <code>−14 dB</code>) kèm <code>alimiter</code>, xuất <code>.srt</code> đồng bộ, tùy chọn gắn phụ đề cứng bằng <code>libass</code> + Noto Sans và xuất tệp <code>.docx</code>/<code>.txt</code>.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>🛡️ Quyền riêng tư &amp; Quản lý khóa an toàn</h3>
+      <p><strong>Phân tách rõ bước xử lý cục bộ và phần dịch văn bản đám mây.</strong> ASR, TTS (sau lần tải mô hình đầu), trộn âm và gắn phụ đề chạy trên máy; dịch đám mây chỉ gửi văn bản lời thoại nguồn cùng Brief/Glossary tùy chọn tới nhà cung cấp bạn chọn. Chọn <strong>Ollama</strong> để dịch cục bộ hoàn toàn. Khóa API lưu trong <strong>Windows Credential Manager</strong> và được lọc khỏi log.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>🧪 Kiểm chứng kỹ thuật tự động</h3>
+      <p><strong>Được kiểm thử như một ứng dụng desktop hoàn chỉnh.</strong> Windows CI kiểm tra trên Python 3.11 &amp; 3.13 với bộ test offline tự động (không cần API key thật), self-test runtime, kiểm tra hình học giao diện, GUI smoke cô lập và kiểm thử tệp thực thi đóng gói từ git archive sạch.</p>
+    </td>
+  </tr>
+</table>
 
 ---
 
-## Kiến trúc Pipeline
+## 🧩 Kiến trúc Pipeline
 
 DubTool vận hành theo **7 giai đoạn có thể tiếp tục** (`s1`–`s7`), theo sau là bước xuất tài liệu dễ đọc (`s8_export_readable.py`):
 
@@ -119,7 +129,7 @@ Xem chi tiết ranh giới module, cơ chế resume và xử lý lỗi LLM tại
 
 ---
 
-## Cài đặt & Sử dụng nhanh
+## 📦 Cài đặt & Sử dụng nhanh
 
 ### Cách 1: Bản Portable cho Windows (Khuyên dùng)
 
@@ -164,7 +174,7 @@ dubtool retts <job_id> --ids 3,7,12
 
 ---
 
-## Nhà cung cấp dịch
+## 🌐 Nhà cung cấp dịch
 
 | Nhà cung cấp | Gói / Chế độ | Cấu hình | Vai trò |
 | --- | --- | --- | --- |
@@ -177,22 +187,20 @@ dubtool retts <job_id> --ids 3,7,12
 
 Danh sách đầy đủ các mô hình được hỗ trợ nằm trong [`packaging/models.yaml`](../packaging/models.yaml), và cấu hình pipeline mặc định nằm trong [`config.yaml`](../config.yaml).
 
-> **Mẹo cho video dài nhiều giờ:** Thêm nhiều khóa Gemini miễn phí (từ các Google Cloud project khác nhau) kết hợp khóa Groq miễn phí trong chế độ **Auto-Rotate** giúp giữ tiến độ ổn định khi một hãng tạm chạm giới hạn phút/ngày.
-
 ---
 
-## Kiểm thử & Độ tin cậy kỹ thuật
+## 🧪 Kiểm thử & Độ tin cậy kỹ thuật
 
-DubTool được duy trì như một ứng dụng Windows hoàn chỉnh với hệ thống kiểm thử và kiểm chứng đóng gói tự động trên GitHub Actions (`.github/workflows/ci.yml`):
+DubTool sử dụng hệ thống kiểm chứng tự động bằng GitHub Actions trên Windows (`.github/workflows/ci.yml`):
 
-- **CI Windows đa phiên bản Python:** Kiểm thử trên **Python 3.11** (tương thích theo `pyproject.toml`) và **Python 3.13** (môi trường lockfile chuẩn qua [`packaging/requirements-lock.txt`](../packaging/requirements-lock.txt)).
-- **600+ bài kiểm thử tự động offline:** Bộ test offline cùng các cổng kiểm tra runtime `--selftest`, hình học giao diện `--layout-check` và `--gui-smoke` cô lập — tất cả chạy không cần API key thật.
-- **Kiểm chứng bản đóng gói release:** Job CI riêng build `DubTool.exe` từ `git archive` sạch bằng chính script phát hành ([`packaging/build_exe.ps1`](../packaging/build_exe.ps1)), xác minh SHA-256 tài nguyên đóng gói ([`packaging/vendor_manifest.json`](../packaging/vendor_manifest.json)), kiểm tra toàn vẹn/checksum tệp ZIP phát hành cùng `BUILD_INFO.txt`, rồi chạy kiểm thử khởi động, self-test, layout và GUI smoke trực tiếp từ tệp `.exe` giải nén ra từ ZIP.
+- **Ma trận đa phiên bản Python:** Kiểm thử trên **Windows Python 3.11** (tương thích theo `pyproject.toml`) và **Windows Python 3.13** (môi trường lockfile chuẩn qua [`packaging/requirements-lock.txt`](../packaging/requirements-lock.txt)).
+- **Cổng kiểm thử offline:** Chạy bộ test offline tự động, `--selftest` runtime, `--layout-check` hình học giao diện và `--gui-smoke` cô lập mà không cần API key thật.
+- **Kiểm chứng bản đóng gói release:** Build `DubTool.exe` từ `git archive` sạch bằng [`packaging/build_exe.ps1`](../packaging/build_exe.ps1), xác minh SHA-256 tài nguyên đóng gói ([`packaging/vendor_manifest.json`](../packaging/vendor_manifest.json)), kiểm tra CRC/SHA-256 tệp ZIP cùng `BUILD_INFO.txt`, rồi chạy các cổng kiểm thử trực tiếp từ tệp `.exe` giải nén từ ZIP.
 
 Chạy kiểm thử cục bộ:
 
 ```bash
-python -m pytest tests -m "not packaged" -q   # bộ test offline (không cần API key)
+python -m pytest tests -m "not packaged" -q   # bộ test offline tự động (không cần API key)
 python -m dubtool.app.main --selftest         # kiểm tra FFmpeg, Qt, VieNeu và SDK nhà cung cấp
 python -m dubtool.app.main --layout-check     # kiểm tra bố cục giao diện ở 25 kích thước × trạng thái
 python -m dubtool.app.main --gui-smoke        # kiểm thử giao diện end-to-end trong môi trường cô lập
@@ -202,7 +210,7 @@ Tài liệu khác: [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) · [`docs/RELEASES.
 
 ---
 
-## Quyền riêng tư & Giấy phép
+## 🛡️ Quyền riêng tư & Giấy phép
 
 - **Quyền riêng tư:** Nhận diện giọng nói (`faster-whisper`), tạo giọng tiếng Việt (`VieNeu-TTS v3 ONNX`, sau lần tải mô hình đầu tiên), trộn âm thanh và gắn phụ đề đều chạy cục bộ trên máy bạn. Khi sử dụng nhà cung cấp dịch đám mây, chỉ văn bản lời thoại nguồn cùng ngữ cảnh tùy chọn bạn cung cấp (Brief và Glossary) được gửi tới nhà cung cấp bạn chọn. Để dịch hoàn toàn cục bộ, hãy chọn **Ollama**. Khóa API lưu trong Windows Credential Manager (hoặc `.env`) và không bao giờ ghi ra log.
 - **Giấy phép:** [Giấy phép MIT](../LICENSE) — Copyright (c) 2026 sickyturtlez. Các thành phần bên thứ ba đi kèm (FFmpeg GPL v3, PySide6 LGPL v3, faster-whisper, VieNeu-TTS, sea-g2p, soundfile, Noto Sans) giữ nguyên giấy phép riêng (chi tiết tại [`packaging/THIRD_PARTY.md`](../packaging/THIRD_PARTY.md)).
