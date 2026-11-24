@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "assets": {
+    "ffmpeg": {
+      "version": "8.1.2-essentials_build",
+      "license": "GPL-3.0",
+      "upstream_source": "https://github.com/FFmpeg/FFmpeg/commit/38b88335f9",
+      "url": "https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/ffmpeg-8.1.2-essentials_build.zip",
+      "zip_sha256": "db580001caa24ac104c8cb856cd113a87b0a443f7bdf47d8c12b1d740584a2ec",
+      "archive_member": "ffmpeg-8.1.2-essentials_build/bin/ffmpeg.exe",
+      "dest": "ffmpeg.exe",
+      "sha256": "1326dde4c84ff1f96fe6b8916c5bed29e163e9b5dccf995f6f3db069d143ec5e",
+      "size": 101897728
+    },
+    "noto_sans_ttf": {
+      "version": "google/fonts@2984c575fdce412ee02b2baaba67672b9a9434d8",
+      "license": "OFL-1.1",
+      "url": "https://raw.githubusercontent.com/google/fonts/2984c575fdce412ee02b2baaba67672b9a9434d8/ofl/notosans/NotoSans%5Bwdth,wght%5D.ttf",
+      "dest": "fonts/NotoSans.ttf",
+      "sha256": "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d",
+      "size": 2049096
+    },
+    "noto_sans_ofl": {
+      "version": "google/fonts@2984c575fdce412ee02b2baaba67672b9a9434d8",
+      "license": "OFL-1.1",
+      "url": "https://raw.githubusercontent.com/google/fonts/2984c575fdce412ee02b2baaba67672b9a9434d8/ofl/notosans/OFL.txt",
+      "dest": "fonts/OFL.txt",
+      "sha256": "cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a",
+      "size": 4396
+    }
+  }
+}

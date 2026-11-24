@@ -223,10 +223,19 @@ $env:DUBTOOL_MODELS_DIR = $modelsCache
     )) {
         if (-not (Test-Path (Join-Path $tmpAppDir $p))) { throw "missing $p in the build" }
     }
-    $expectedFontSha = "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d"
-    $actualFontSha = (Get-FileHash (Join-Path $tmpAppDir "_internal\vendor\fonts\NotoSans.ttf") -Algorithm SHA256).Hash.ToLower()
-    if ($actualFontSha -ne $expectedFontSha) {
-        throw "bundled NotoSans.ttf SHA-256 mismatch (expected $expectedFontSha, got $actualFontSha)"
+    $manifestPath = Join-Path $root "packaging\vendor_manifest.json"
+    if (-not (Test-Path $manifestPath)) { throw "missing vendor manifest: $manifestPath" }
+    $vendorManifest = Get-Content $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($assetProp in $vendorManifest.assets.PSObject.Properties) {
+        $assetName = $assetProp.Name
+        $assetSpec = $assetProp.Value
+        $bundledRel = Join-Path "_internal\vendor" ($assetSpec.dest -replace "/", "\")
+        $bundledPath = Join-Path $tmpAppDir $bundledRel
+        if (-not (Test-Path $bundledPath)) { throw "missing $bundledRel in the build ($assetName)" }
+        $actualSha = (Get-FileHash $bundledPath -Algorithm SHA256).Hash.ToLower()
+        if ($actualSha -ne $assetSpec.sha256.ToLower()) {
+            throw "bundled $bundledRel SHA-256 mismatch for $assetName (expected $($assetSpec.sha256), got $actualSha)"
+        }
     }
     if (Test-Path (Join-Path $tmpAppDir "_internal\vendor\ffprobe.exe")) {
         throw "ffprobe.exe must not be in the build (AGU9 task 8)"

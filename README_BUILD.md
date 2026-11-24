@@ -82,15 +82,23 @@ Everything goes through the spec (`packaging/dubtool.spec`):
    __version__` (see the rule above) and a generated icon
    (`packaging/icon.png`) are embedded into `DubTool.exe`.
 
-## FFmpeg verification
+## FFmpeg & vendor asset verification
 
-You can swap the bundled FFmpeg by replacing `vendor/ffmpeg.exe` before building. Verify after the build with
-`DubTool.exe --selftest` (checks filters `subtitles/amix/alimiter/
-sidechaincompress`, encoder `libx264`, and the bundled font rendering
-Vietnamese). When you fetch a fresh FFmpeg build, record its download URL
-and the checksum in `packaging/THIRD_PARTY.md` — the build that produced
-1.0.0 used a locally installed build and its upstream origin was not
-re-verified.
+External vendor binaries (`ffmpeg.exe`, `fonts/NotoSans.ttf`, `fonts/OFL.txt`)
+are pinned by URL and SHA-256 in `packaging/vendor_manifest.json`. Populate or
+verify `<DUBTOOL_BUILD_ROOT>/vendor/` on a clean machine with:
+
+```powershell
+python scripts/fetch_vendor.py
+```
+
+Both `packaging/build_exe.ps1` and GitHub Actions CI verify the bundled SHA-256
+of every vendor asset against `packaging/vendor_manifest.json`. To upgrade
+FFmpeg deliberately, update `packaging/vendor_manifest.json`,
+`packaging/THIRD_PARTY.md`, and `packaging/licenses/THIRD_PARTY_NOTICES.txt`
+together, re-run `python scripts/fetch_vendor.py`, and verify with
+`DubTool.exe --selftest` (checks filters `subtitles/amix/alimiter/sidechaincompress`,
+encoder `libx264`, and bundled Vietnamese font rendering).
 
 ## SmartScreen
 

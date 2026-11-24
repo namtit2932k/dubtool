@@ -46,9 +46,11 @@ jobs:
             pyproject.toml
             packaging/requirements-lock.txt
 
-      - name: Install FFmpeg
+      - name: Fetch pinned FFmpeg (SHA-256 verified)
         shell: pwsh
-        run: choco install ffmpeg --no-progress
+        run: |
+          python scripts/fetch_vendor.py --only ffmpeg
+          Join-Path $env:DUBTOOL_BUILD_ROOT "vendor" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install locked dependencies (Python 3.13)
         if: matrix.python-version == '3.13'
@@ -115,58 +117,10 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install FFmpeg and populate vendor directory
+      - name: Fetch pinned vendor assets (FFmpeg + NotoSans, SHA-256 verified)
         shell: pwsh
         run: |
-          choco install ffmpeg --no-progress
-          # Resolve the real Chocolatey ffmpeg.exe binary (not the 5 KB shim in bin/).
-          $ffmpegPath = $null
-          if (Test-Path "C:\ProgramData\chocolatey\lib\ffmpeg") {
-            $ffmpegPath = Get-ChildItem "C:\ProgramData\chocolatey\lib\ffmpeg" -Recurse -Filter "ffmpeg.exe" |
-              Sort-Object Length -Descending |
-              Select-Object -First 1 -ExpandProperty FullName
-          }
-          if (-not $ffmpegPath) { $ffmpegPath = (Get-Command ffmpeg).Source }
-          Write-Host "Using real ffmpeg binary: $ffmpegPath ($((Get-Item $ffmpegPath).Length) bytes)"
-          $vendorDir  = Join-Path $env:DUBTOOL_BUILD_ROOT "vendor"
-          $fontsDir   = Join-Path $vendorDir "fonts"
-          Copy-Item $ffmpegPath (Join-Path $vendorDir "ffmpeg.exe") -Force
-
-          # Fetch the authentic SIL OFL-1.1 Noto Sans variable font and license
-          # from the pinned google/fonts commit and verify SHA-256 (matching
-          # packaging/THIRD_PARTY.md — never substitute a system font).
-          $fontCommit = "2984c575fdce412ee02b2baaba67672b9a9434d8"
-          $fontAssets = @(
-            @{
-              Url = "https://raw.githubusercontent.com/google/fonts/$fontCommit/ofl/notosans/NotoSans%5Bwdth,wght%5D.ttf"
-              Dest = Join-Path $fontsDir "NotoSans.ttf"
-              Sha256 = "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d"
-            },
-            @{
-              Url = "https://raw.githubusercontent.com/google/fonts/$fontCommit/ofl/notosans/OFL.txt"
-              Dest = Join-Path $fontsDir "OFL.txt"
-              Sha256 = "cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a"
-            }
-          )
-          foreach ($asset in $fontAssets) {
-            $ok = $false
-            for ($attempt = 1; $attempt -le 3; $attempt++) {
-              try {
-                Invoke-WebRequest -Uri $asset.Url -OutFile $asset.Dest -UseBasicParsing -TimeoutSec 60
-                $ok = $true
-                break
-              } catch {
-                Write-Warning "Attempt $attempt failed for $($asset.Url): $_"
-                if ($attempt -lt 3) { Start-Sleep -Seconds (3 * $attempt) }
-              }
-            }
-            if (-not $ok) { throw "Failed to download required font asset: $($asset.Url)" }
-            $actual = (Get-FileHash -Path $asset.Dest -Algorithm SHA256).Hash.ToLower()
-            if ($actual -ne $asset.Sha256) {
-              throw "SHA-256 mismatch for $($asset.Dest): expected $($asset.Sha256), got $actual"
-            }
-            Write-Host "Verified $(Split-Path -Leaf $asset.Dest): $((Get-Item $asset.Dest).Length) bytes, sha256=$actual"
-          }
+          python scripts/fetch_vendor.py
 
       - name: Build release package via packaging/build_exe.ps1 from clean git archive
         shell: pwsh
@@ -239,12 +193,15 @@ jobs:
           assert sums_text == f'{zip_sha}  {zip_name}', f'SHA256SUMS mismatch: {sums_text!r} vs {zip_sha}  {zip_name}'
           print(f'Verified {zip_name} ({zip_path.stat().st_size} bytes, sha256={zip_sha})', flush=True)
 
-          # 3. Verify bundled authentic NotoSans.ttf and OFL.txt.
-          font_path = app_dir / '_internal' / 'vendor' / 'fonts' / 'NotoSans.ttf'
-          ofl_path = app_dir / '_internal' / 'vendor' / 'fonts' / 'OFL.txt'
-          assert font_path.is_file() and ofl_path.is_file()
-          font_sha = hashlib.sha256(font_path.read_bytes()).hexdigest()
-          assert font_sha == 'bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d', f'font sha mismatch: {font_sha}'
+          # 3. Verify all bundled vendor assets (FFmpeg + NotoSans + OFL) against vendor_manifest.json.
+          import json
+          manifest = json.loads(Path('packaging/vendor_manifest.json').read_text(encoding='utf-8'))
+          for name, spec in manifest['assets'].items():
+              p = app_dir / '_internal' / 'vendor' / spec['dest']
+              assert p.is_file(), f'missing bundled vendor asset {name}: {p}'
+              actual = hashlib.sha256(p.read_bytes()).hexdigest()
+              assert actual == spec['sha256'].lower(), f'bundled {name} sha mismatch: {actual}'
+              print(f'Verified bundled {name}: {p.stat().st_size} bytes, sha256={actual}', flush=True)
 
           # 4. Run packaged executable smoke gates.
           for flag in ('--version', '--selftest', '--layout-check', '--gui-smoke'):

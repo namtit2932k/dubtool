@@ -126,15 +126,31 @@ def test_github_ci_workflow_exists_and_uses_source_install():
     assert "upload-artifact" in wf
 
 
-def test_packaged_font_provenance_pinned_in_ci_and_build_script():
-    expected_sha = "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d"
+def test_packaged_vendor_assets_provenance_pinned_in_ci_and_build_script():
+    import json
+
+    manifest_path = ROOT / "packaging" / "vendor_manifest.json"
+    assert manifest_path.is_file(), "packaging/vendor_manifest.json missing"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assets = manifest["assets"]
+    assert {"ffmpeg", "noto_sans_ttf", "noto_sans_ofl"} <= set(assets)
+
     third_party = (ROOT / "packaging" / "THIRD_PARTY.md").read_text(encoding="utf-8")
+    notices = (ROOT / "packaging" / "licenses" / "THIRD_PARTY_NOTICES.txt").read_text(encoding="utf-8")
     build_ps1 = (ROOT / "packaging" / "build_exe.ps1").read_text(encoding="utf-8")
     wf = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
-    assert expected_sha in third_party
-    assert expected_sha in build_ps1
-    assert expected_sha in wf
+    for key in ("ffmpeg", "noto_sans_ttf"):
+        sha = assets[key]["sha256"].lower()
+        assert len(sha) == 64
+        assert sha in third_party, f"{key} sha256 missing from packaging/THIRD_PARTY.md"
+        assert sha in notices, f"{key} sha256 missing from packaging/licenses/THIRD_PARTY_NOTICES.txt"
+
+    assert "vendor_manifest.json" in build_ps1
+    assert "scripts/fetch_vendor.py" in wf
+    assert "choco install ffmpeg" not in wf, (
+        "CI must fetch the pinned SHA-256 verified FFmpeg via scripts/fetch_vendor.py, not floating choco install"
+    )
     assert "segoeui.ttf" not in wf and "arial.ttf" not in wf, (
         "CI package job must bundle the authentic pinned NotoSans.ttf, not a system font substitute"
     )
