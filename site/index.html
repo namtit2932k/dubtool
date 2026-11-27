@@ -98,7 +98,19 @@
   .ui-pipe__steps .ui-pipe__step { padding-inline: 10px; }
   .ui-pipe__steps .ui-pipe__name { gap: 5px; }
 
-  /* Compact EN / VI switcher inside nav bar */
+  /* Unified secondary button contrast (>= 1.6:1 off dark ground) */
+  html[data-buttons="pill"] .btn--secondary {
+    background: #1d3520;
+    border-color: rgb(255 255 255 / .24);
+    color: var(--ink);
+  }
+  html[data-buttons="pill"] .btn--secondary:hover {
+    background: #254328;
+    border-color: rgb(255 255 255 / .38);
+  }
+  .nav__gh-ico { width: 16px; height: 16px; flex: none; }
+
+  /* Compact EN / VI switcher & GitHub button inside nav bar */
   .lang-switch {
     display: inline-flex; align-items: center; gap: 2px; flex: none;
     padding: 3px; border-radius: 999px;
@@ -114,7 +126,7 @@
   .lang-switch__btn.is-active { background: var(--accent); color: var(--p-accent-ink); }
   @media (min-width: 1024px) {
     .lang-switch { margin-left: auto; }
-    .nav__bar > .nav__actions { margin-left: var(--s-3); }
+    .nav__bar > .nav__actions { display: flex; align-items: center; gap: var(--s-2); margin-left: var(--s-3); }
   }
   @media (max-width: 1023px) {
     .lang-switch { margin-left: auto; }
@@ -123,15 +135,19 @@
   }
   @media (max-width: 639px) {
     .nav:not(.is-open) .nav__actions { display: none; }
-    .lang-switch__btn { padding: 0 10px; min-width: 36px; height: 34px; font-size: 13px; }
+    .lang-switch { padding: 0; border-color: var(--line-strong); }
+    .lang-switch__btn { padding: 0 10px; min-width: 44px; height: 44px; font-size: 13px; }
   }
 
-  /* Keep dealt CSS ground sections locked to layout-v4 screen heights and top alignment */
+  /* Keep dealt CSS ground sections locked to layout-v4 screen heights */
   main > section.section:is(.bg-mist, .bg-band) {
     --g-screen: calc(var(--h, 1) * 100svh);
     align-content: start;
     padding-top: var(--padt);
     padding-bottom: calc(var(--padb) + var(--bar));
+  }
+  main > section.section#faq.bg-band {
+    align-content: center;
   }
   main > section.section.bg-band.bg-bleed:last-of-type {
     padding-bottom: calc(var(--padb) + var(--bar)) !important;
@@ -139,6 +155,10 @@
   @media (max-width: 639px) {
     main > section.section:is(.bg-mist, .bg-band) {
       --g-screen: calc(var(--hm, var(--h, 1)) * 100lvh);
+    }
+    main > section.section#faq.bg-band {
+      --g-screen: 0px;
+      align-content: start;
     }
   }
 
@@ -161,23 +181,47 @@
     .ly-piece--main .d-row:nth-of-type(n+2) { display: none; }
   }
 
-  /* 4-step beginner user guide section */
-  .guide-grid { margin-top: var(--s-6); }
-  .guide-card { display: grid; align-content: start; gap: var(--s-3); padding: var(--s-6); }
-  .guide-card__top { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); }
-  .guide-card__step { font: 500 13px/1.2 var(--font-mono); color: var(--accent); }
-  .guide-card h3 { margin: 0; font: 500 var(--t-card)/1.3 var(--font-display); color: var(--ink); }
-  .guide-card p { margin: 0; font: 400 var(--t-body)/1.5 var(--font-text); color: color-mix(in oklab, var(--ink) 88%, transparent); }
-  .guide-tip {
-    margin-top: var(--s-5); padding: var(--s-4) var(--s-5);
-    border-radius: var(--r-md); background: var(--p-surface);
-    border: 1px solid var(--line); display: flex; align-items: baseline; gap: var(--s-4); flex-wrap: wrap;
+  /* 4-step beginner user guide (split layout with numbered steps + real setup panel) */
+  .guide-split { align-items: stretch; }
+  .guide-steps { list-style: none; margin: var(--s-5) 0 0; padding: 0; display: grid; gap: var(--s-4); }
+  .guide-step { display: grid; gap: 4px; }
+  .guide-step h3 { margin: 0; display: flex; align-items: baseline; gap: 10px; font: 500 var(--t-card)/1.3 var(--font-text); color: var(--ink); }
+  .guide-step__n { font: 500 13px/1 var(--font-mono); color: var(--accent); flex: none; }
+  .guide-step p { margin: 0; font: 400 var(--t-body)/1.45 var(--font-text); color: color-mix(in oklab, var(--ink) 86%, transparent); }
+  .guide-tip { margin: var(--s-5) 0 0; font: 400 var(--t-small)/1.5 var(--font-text); color: color-mix(in oklab, var(--ink) 86%, transparent); }
+  .guide-tip strong { font-weight: 600; color: var(--accent); }
+  .guide-visual {
+    position: relative; border-radius: var(--r-lg); padding: var(--s-6);
+    display: grid; align-content: space-between; gap: var(--s-5); min-height: 480px;
+    background:
+      radial-gradient(80% 70% at 18% 8%, #edf4e7, transparent 68%),
+      radial-gradient(65% 65% at 92% 96%, #bdd2b8, transparent 70%),
+      #d6e2cf;
+    color: #162418;
   }
-  .guide-tip strong { font: 500 var(--t-body)/1.4 var(--font-display); color: var(--accent); }
-  .guide-tip span { font: 400 var(--t-body)/1.5 var(--font-text); color: color-mix(in oklab, var(--ink) 88%, transparent); }
+  .guide-icons-bar { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .guide-mock {
+    background: #ffffff; color: #161b17; border-radius: 14px; padding: var(--s-5);
+    box-shadow: 0 18px 40px -20px rgb(15 31 16 / .32), 0 0 0 1px rgb(15 31 16 / .08);
+    display: grid; gap: var(--s-4);
+  }
+  .guide-mock__head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); font-size: 13px; color: #526055; border-bottom: 1px solid rgb(15 31 16 / .08); padding-bottom: 12px; }
+  .guide-mock__head b { color: #0f1f10; font-weight: 600; font-size: 14px; }
+  .guide-mock__pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: #e6f5ea; color: #166534; font: 500 12px/1 var(--font-text); }
+  .guide-mock__rows { display: grid; gap: 10px; }
+  .guide-mock__row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; background: #f6f8f5; border: 1px solid rgb(15 31 16 / .07); }
+  .guide-mock__row b { display: block; font-size: 14px; font-weight: 500; color: #101b12; line-height: 1.3; }
+  .guide-mock__row small { display: block; font-size: 13px; color: #4a594d; line-height: 1.3; }
+  .guide-mock__ok { font: 500 12px/1 var(--font-mono); color: #166534; background: #dff3e4; padding: 5px 9px; border-radius: 999px; white-space: nowrap; }
+  .guide-visual__foot { font: 500 14px/1.45 var(--font-text); color: #162418; margin: 0; }
+  @media (max-width: 1023px) {
+    .guide-visual { min-height: 360px; margin-top: var(--s-5); }
+  }
   @media (max-width: 639px) {
-    .guide-card { padding: var(--s-5); gap: var(--s-2); }
-    .guide-tip { padding: var(--s-4); gap: var(--s-2); }
+    .guide-visual { padding: var(--s-4); min-height: 300px; }
+    .guide-mock { padding: var(--s-4); }
+    .guide-mock__row { grid-template-columns: 32px minmax(0, 1fr); }
+    .guide-mock__ok { display: none; }
   }
 
   /* App-frame recipe */
@@ -210,7 +254,7 @@
   }
   @media (max-width: 1279px) { #features .panel { --p-h: 236px; } }
   @media (min-width: 640px) and (max-width: 1023px) {
-    #features .panel { --p-h: 204px; }
+    #features .panel { --p-h: 410px; }
     #features { --h: 2; }
   }
   @media (max-width: 639px) {
@@ -258,7 +302,6 @@
   .mode-card__k { font: 500 var(--t-label)/1.3 var(--font-text); color: color-mix(in oklab, var(--ink) 84%, transparent); }
   .mode-card__v { font: 400 var(--t-body)/1.45 var(--font-text); color: var(--ink); }
   @media (max-width: 1279px) { .mode-card .panel { height: 156px; min-height: 156px; --p-h: 156px; } }
-  @media (min-width: 640px) and (max-width: 1023px) { #providers { --h: 2; } }
   @media (max-width: 639px) {
     .mode-card { gap: var(--s-3); }
     .mode-card .panel { height: 156px; min-height: 156px; --p-h: 156px; padding: var(--s-4); }
@@ -267,12 +310,67 @@
 
   /* Nav mega card panel */
   .menu-card .panel { --p-h: 152px; }
-  .close--word .close__word { font-size: clamp(64px, 14vw, 184px); line-height: 1.04; padding-top: 6px; }
+
+  /* Rich deep emerald gradient ground for FAQ (high contrast, cohesive with dark palette) */
+  #faq.bg-band.bg-tint {
+    --bg: #0c1f14;
+    --surface: #132c1d;
+    --ink: #f5fbf6;
+    --muted: #b6cab9;
+    --accent: #c6f19d;
+    --accent-ink: #0f1f10;
+    --action: #c6f19d;
+    --action-ink: #0f1f10;
+    --line: rgb(198 241 157 / .15);
+    --line-strong: rgb(198 241 157 / .32);
+    background-color: #0c1f14;
+    background-image:
+      radial-gradient(62% 84% at 8% 10%, rgb(52 211 153 / .20), transparent 68%),
+      radial-gradient(56% 76% at 94% 14%, rgb(198 241 157 / .15), transparent 70%),
+      radial-gradient(64% 80% at 84% 96%, rgb(16 185 129 / .16), transparent 72%),
+      linear-gradient(180deg, #0d2115 0%, #102819 52%, #0b1b11 100%);
+    background-blend-mode: normal;
+  }
+  #faq .faq__item p { color: color-mix(in oklab, var(--ink) 86%, transparent); }
+
+  /* Closing CTA + footer (close--type with wide pill action and subtle emerald aurora glow) */
+  footer.closing {
+    position: relative;
+    isolation: isolate;
+    background-color: #0b180d;
+    background-image:
+      radial-gradient(72% 48% at 50% 0%, rgb(198 241 157 / .16), transparent 68%),
+      radial-gradient(52% 42% at 88% 22%, rgb(52 211 153 / .14), transparent 70%),
+      linear-gradient(180deg, #0d1f11 0%, #09150b 100%);
+  }
+  footer.closing > .wrap { row-gap: var(--s-7); }
+  .closing__cta.close--type { gap: var(--s-5); justify-content: start; }
+  .closing__head { display: grid; gap: var(--s-3); max-width: 720px; }
+  .closing__eyebrow { font: 500 13px/1.3 var(--font-mono); color: var(--accent); margin: 0; }
+  .closing__cta.close--type h2 { max-width: 24ch; }
+  .closing__cta.close--type .t-lead { color: color-mix(in oklab, var(--ink) 84%, transparent); max-width: 56ch; }
+  .closing__cta.close--type > .btn--xl.btn--wide {
+    margin-top: var(--s-2);
+    height: clamp(64px, 2.2vw + 48px, 80px);
+    padding-inline: var(--s-7);
+    font-size: clamp(19px, 0.9vw + 14px, 26px);
+    box-shadow: 0 16px 40px -16px rgb(198 241 157 / .45);
+  }
+  .closing__cta.close--type > .btn--xl.btn--wide .m-arrow { width: 18px; height: 18px; }
+  .closing__subrow {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+    gap: var(--s-3) var(--s-6); font-size: var(--t-small); color: color-mix(in oklab, var(--ink) 78%, transparent);
+  }
+  .closing__links { padding-top: var(--s-6); }
+  @media (max-width: 639px) {
+    .closing__cta.close--type > .btn--xl.btn--wide { height: 44px; padding-inline: var(--s-5); font-size: var(--t-body); }
+    .closing__links { padding-top: var(--s-5); }
+  }
 </style>
 </head>
 <body>
 <!-- type: software
-     deal: hero collage, nav nav-mega, close close-word, footer footer-columns, rhythm space, buttons pill, mark client-svg, ground sage, palette forest-pale-lime, type instrument, effect painterly-landscape + gradient-mesh, css grounds statement:bg-mist faq:bg-band(bleed)
+     deal: hero collage, nav nav-mega, close close-type, footer footer-columns, rhythm space, buttons pill, mark client-svg, ground sage, palette forest-pale-lime, type instrument, effect painterly-landscape + gradient-mesh, css grounds statement:bg-mist faq:bg-band(tint)
      moments: liquid-type (#statement) -->
 
 <header class="nav">
@@ -334,6 +432,10 @@
       <button class="lang-switch__btn" type="button" data-lang-btn="vi" aria-pressed="false">VI</button>
     </div>
     <div class="nav__actions">
+      <a class="btn btn--secondary nav__github" href="https://github.com/namtit2932k/dubtool" target="_blank" rel="noopener">
+        <svg class="nav__gh-ico" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        <span data-i18n="nav.github">GitHub</span>
+      </a>
       <a class="btn btn--primary" href="https://github.com/namtit2932k/dubtool/releases/download/v1.0.23/DubTool-1.0.23-win64.zip" download data-download-zip><span data-i18n="cta.download">Download DubTool</span><svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
     </div>
     <button class="nav__toggle" type="button" aria-expanded="false" aria-label="Menu">
@@ -392,59 +494,67 @@
     </div></div>
   </section>
 
-  <section class="section" id="guide" style="--hm: 2" aria-labelledby="guide-h">
+  <section class="section" id="guide" aria-labelledby="guide-h">
     <div class="wrap">
-      <div class="grid">
-        <div class="span-6">
+      <div class="grid guide-split">
+        <div class="span-5">
           <h2 id="guide-h" data-i18n="guide.h2">How to use DubTool in 4 simple steps</h2>
+          <p class="t-lead" style="margin-top:var(--s-4)" data-i18n="guide.sub">No programming or extra installs. Set up once in about two minutes.</p>
+          <ol class="guide-steps">
+            <li class="guide-step">
+              <h3><span class="guide-step__n">01</span><span data-i18n="guide.s1.h">Unzip and open DubTool</span></h3>
+              <p data-i18n="guide.s1.p">Extract the Windows zip and double-click DubTool.exe. Everything is built in.</p>
+            </li>
+            <li class="guide-step">
+              <h3><span class="guide-step__n">02</span><span data-i18n="guide.s2.h">Paste a free translation key</span></h3>
+              <p data-i18n="guide.s2.p">Open Settings → API Keys, paste a Google or Groq key, and click Test all.</p>
+            </li>
+            <li class="guide-step">
+              <h3><span class="guide-step__n">03</span><span data-i18n="guide.s3.h">Drop your video and pick a voice</span></h3>
+              <p data-i18n="guide.s3.p">Choose an output folder, leave Auto-detect on, and preview any local voice.</p>
+            </li>
+            <li class="guide-step">
+              <h3><span class="guide-step__n">04</span><span data-i18n="guide.s4.h">Click Generate for video &amp; Word script</span></h3>
+              <p data-i18n="guide.s4.p">Your original stays untouched; you get a new Vietnamese MP4 and Word table.</p>
+            </li>
+          </ol>
+          <p class="guide-tip"><strong data-i18n="guide.tip.title">Already in Vietnamese?</strong> <span data-i18n="guide.tip.text">DubTool detects it automatically, stops before using any key, and offers clean subtitles instead.</span></p>
         </div>
-        <div class="span-6 start-7 stack-4">
-          <p class="t-lead" data-i18n="guide.sub">No programming, no command line, and no extra software to install. Set it up once in about two minutes.</p>
-          <p><a class="link" href="https://github.com/namtit2932k/dubtool#readme" data-i18n="guide.link">Read full setup guide on GitHub</a></p>
+
+        <div class="span-6 start-7">
+          <div class="guide-visual" data-visual role="img" aria-label="DubTool quick setup panel showing verified free Gemini and Groq keys, local voice preview, and safe output defaults">
+            <div class="guide-icons-bar" aria-hidden="true">
+              <span class="ic-tile"><img class="ic" data-icon="video" src="assets/icons/video.svg" alt="" width="24" height="24" loading="lazy"></span>
+              <span class="ic-tile"><img class="ic" data-icon="gemini" src="assets/icons/gemini.svg" alt="" width="24" height="24" loading="lazy"></span>
+              <span class="ic-tile"><img class="ic" data-icon="hugging-face" src="assets/icons/hugging-face.svg" alt="" width="24" height="24" loading="lazy"></span>
+              <span class="ic-tile"><img class="ic" data-icon="docx" src="assets/icons/docx.svg" alt="" width="24" height="24" loading="lazy"></span>
+            </div>
+            <div class="guide-mock" aria-hidden="true">
+              <div class="guide-mock__head">
+                <b data-i18n="guide.mock.h">DubTool · First-time setup</b>
+                <span class="guide-mock__pill" data-i18n="guide.mock.ok">Ready to dub</span>
+              </div>
+              <div class="guide-mock__rows">
+                <div class="guide-mock__row">
+                  <span class="ic-tile ic-tile--32"><img class="ic" data-icon="gemini" src="assets/icons/gemini.svg" alt="" width="18" height="18" loading="lazy"></span>
+                  <div><b data-i18n="guide.mock.r1.t">Free Gemini + Groq keys</b><small data-i18n="guide.mock.r1.s">Settings → API Keys → Test all</small></div>
+                  <span class="guide-mock__ok" data-i18n="guide.mock.r1.ok">Verified</span>
+                </div>
+                <div class="guide-mock__row">
+                  <span class="ic-tile ic-tile--32"><img class="ic" data-icon="hugging-face" src="assets/icons/hugging-face.svg" alt="" width="18" height="18" loading="lazy"></span>
+                  <div><b data-i18n="guide.mock.r2.t">Built-in Vietnamese voice</b><small data-i18n="guide.mock.r2.s">Trúc Ly · Preview voice offline</small></div>
+                  <span class="guide-mock__ok" data-i18n="guide.mock.r2.ok">On PC</span>
+                </div>
+                <div class="guide-mock__row">
+                  <span class="ic-tile ic-tile--32"><img class="ic" data-icon="docx" src="assets/icons/docx.svg" alt="" width="18" height="18" loading="lazy"></span>
+                  <div><b data-i18n="guide.mock.r3.t">Safe output folder</b><small data-i18n="guide.mock.r3.s">Saves MP4 + SRT + Word (.docx)</small></div>
+                  <span class="guide-mock__ok" data-i18n="guide.mock.r3.ok">Protected</span>
+                </div>
+              </div>
+            </div>
+            <p class="guide-visual__foot" data-i18n="guide.mock.foot">One-time 2-minute setup · Everything runs from a single Windows folder</p>
+          </div>
         </div>
-      </div>
-
-      <div class="grid guide-grid">
-        <article class="card guide-card span-6 m-nolift">
-          <div class="guide-card__top">
-            <span class="guide-card__step" data-i18n="guide.s1.k">Step 1 · Download</span>
-            <span class="ic-tile"><img class="ic" data-icon="video" src="assets/icons/video.svg" alt="" width="24" height="24" loading="lazy"></span>
-          </div>
-          <h3 data-i18n="guide.s1.h">Unzip and open DubTool</h3>
-          <p data-i18n="guide.s1.p">Download the Windows zip from GitHub Releases, right-click Extract All, and double-click DubTool.exe. Everything needed is already inside.</p>
-        </article>
-
-        <article class="card guide-card span-6 m-nolift">
-          <div class="guide-card__top">
-            <span class="guide-card__step" data-i18n="guide.s2.k">Step 2 · One-time setup</span>
-            <span class="ic-tile"><img class="ic" data-icon="gemini" src="assets/icons/gemini.svg" alt="" width="24" height="24" loading="lazy"></span>
-          </div>
-          <h3 data-i18n="guide.s2.h">Paste a free translation key</h3>
-          <p data-i18n="guide.s2.p">Open Settings → API Keys, paste a free key from Google AI Studio or Groq, and click Test all to see a green check.</p>
-        </article>
-
-        <article class="card guide-card span-6 m-nolift">
-          <div class="guide-card__top">
-            <span class="guide-card__step" data-i18n="guide.s3.k">Step 3 · Pick video</span>
-            <span class="ic-tile"><img class="ic" data-icon="hugging-face" src="assets/icons/hugging-face.svg" alt="" width="24" height="24" loading="lazy"></span>
-          </div>
-          <h3 data-i18n="guide.s3.h">Drop your video and pick a voice</h3>
-          <p data-i18n="guide.s3.p">Drag your video into the box, choose an output folder, leave language on Auto-detect, and click Preview voice to listen first.</p>
-        </article>
-
-        <article class="card guide-card span-6 m-nolift">
-          <div class="guide-card__top">
-            <span class="guide-card__step" data-i18n="guide.s4.k">Step 4 · Click Generate</span>
-            <span class="ic-tile"><img class="ic" data-icon="docx" src="assets/icons/docx.svg" alt="" width="24" height="24" loading="lazy"></span>
-          </div>
-          <h3 data-i18n="guide.s4.h">Get your dubbed video and script</h3>
-          <p data-i18n="guide.s4.p">Click Generate and wait. Your original file stays safe, and your folder gets a new Vietnamese MP4 plus a Word translation table.</p>
-        </article>
-      </div>
-
-      <div class="guide-tip">
-        <strong data-i18n="guide.tip.title">Beginner tip: already in Vietnamese?</strong>
-        <span data-i18n="guide.tip.text">If you drop a Vietnamese video by mistake, DubTool detects it automatically, stops before using any translation key, and lets you export clean subtitles instead.</span>
       </div>
     </div>
   </section>
@@ -516,7 +626,7 @@
             <ol class="ui-pipe__steps">
               <li class="ui-pipe__step is-done" data-step="extract"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="logos:ffmpeg-icon" src="assets/icons/ffmpeg-icon.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p1">Audio</span></span><code class="ui-pipe__cmd" data-i18n="ws.pipe.c1">read original sound</code><span class="ui-pipe__time" data-time>7s</span><span class="ui-pipe__bar"><i></i></span></li>
               <li class="ui-pipe__step is-done" data-step="asr"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="python" src="assets/icons/python.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p2">Listen</span></span><code class="ui-pipe__cmd" data-i18n="ws.pipe.c2">detected Chinese</code><span class="ui-pipe__time" data-time>15m</span><span class="ui-pipe__bar"><i></i></span></li>
-              <li class="ui-pipe__step is-run" data-step="translate" style="--k:0.7"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="gemini" src="assets/icons/gemini.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p3">Translate</span></span><code class="ui-pipe__cmd" data-i18n="ws.pipe.c3">1,543 sentences</code><span class="ui-pipe__time" data-time="3m">2m</span><span class="ui-pipe__bar"><i></i></span></li>
+              <li class="ui-pipe__step is-run" data-step="translate" style="--k:0.7"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="gemini" src="assets/icons/gemini.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p3">Lines</span></span><code class="ui-pipe__cmd" data-i18n="ws.pipe.c3">1,543 sentences</code><span class="ui-pipe__time" data-time="3m">2m</span><span class="ui-pipe__bar"><i></i></span></li>
               <li class="ui-pipe__step" data-step="tts"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="hugging-face" src="assets/icons/hugging-face.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p4">Voice</span></span><code class="ui-pipe__cmd" data-i18n="ws.pipe.c4">Trúc Ly (local)</code><span class="ui-pipe__time" data-time="17m" data-wait="Next" data-i18n="ws.pipe.wait" data-i18n-attrs="data-wait:ws.pipe.wait">Next</span><span class="ui-pipe__bar"><i></i></span></li>
               <li class="ui-pipe__step" data-step="burn"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="logos:ffmpeg-icon" src="assets/icons/ffmpeg-icon.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p5">Save</span></span><code class="ui-pipe__cmd" data-i18n="ws.pipe.c5">MP4 + SRT + Word</code><span class="ui-pipe__time" data-time="25m" data-wait="Next" data-i18n="ws.pipe.wait" data-i18n-attrs="data-wait:ws.pipe.wait">Next</span><span class="ui-pipe__bar"><i></i></span></li>
             </ol>
@@ -545,7 +655,7 @@
           <article class="card card--row span-6">
             <h3 data-i18n="feat.c1.h">Free translation that keeps going</h3>
             <p data-i18n="feat.c1.p">Add multiple free Gemini or Groq keys. If one hits its limit, DubTool switches automatically.</p>
-            <div class="panel panel--flush" data-fx="gradient-mesh" data-fx-seed="11" data-fx-palette='{"bg":"#cdd6c6","surface":"#dce3d6","ink":"#262d24","accent":"#6c8e63"}' data-fx-params='{"speed":0,"drift":0,"calmY":0.95}'>
+            <div class="panel panel--flush" data-fx="gradient-mesh" data-fx-seed="11" data-fx-palette='{"bg":"#dce5d5","surface":"#ebf1e6","ink":"#262d24","accent":"#6c8e63"}' data-fx-params='{"speed":0,"drift":0,"calmY":0.95}'>
               <div class="stage stage--fade-b">
                 <div class="at-rise fit" style="--fit-max:390px;--ax:max(24px, 50% - 195px);--ay:calc(100% - 190px);--ay-sm:calc(100% - 140px)" data-ui-loop>
                   <div class="ui ui-notify" data-ui="notify" data-times="now|1m|3m" data-i18n-attrs="data-times:feat.n.times">
@@ -753,7 +863,7 @@
             </div>
             <p class="mode-card__caption" data-i18n="prov.c2.m">Optional · Use your own account</p>
           </div>
-          <h3 data-i18n="prov.c2.h">Paid accounts: OpenAI &amp; Claude</h3>
+          <h3 data-i18n="prov.c2.h">Paid translators: OpenAI &amp; Claude</h3>
           <ul class="mode-card__list">
             <li><span class="mode-card__k" data-i18n="prov.k1">Cost</span><span class="mode-card__v" data-i18n="prov.c2.v1">Standard pay-as-you-go AI usage</span></li>
             <li><span class="mode-card__k" data-i18n="prov.k2">What leaves your PC</span><span class="mode-card__v" data-i18n="prov.c2.v2">Only the spoken text to translate</span></li>
@@ -781,7 +891,7 @@
     </div>
   </section>
 
-  <section class="section bg-band bg-bleed" id="faq" aria-labelledby="faq-h">
+  <section class="section bg-band bg-tint bg-bleed" id="faq" aria-labelledby="faq-h">
     <div class="wrap">
       <div class="grid">
         <div class="span-5 stack-4">
@@ -796,7 +906,7 @@
               <p data-i18n="faq.a1">Yes. DubTool is free, open-source software (MIT license) with no video length limit and no logos stamped on your exported video.</p>
             </div>
             <div class="faq__item">
-              <h3 data-i18n="faq.q2">Do I need a gaming PC or graphics card?</h3>
+              <h3 data-i18n="faq.q2">Does DubTool need a gaming PC or graphics card?</h3>
               <p data-i18n="faq.a2">No. DubTool runs directly on a normal Windows CPU. If your PC has less memory, switch to the lightweight Nano voice mode in Settings.</p>
             </div>
             <div class="faq__item">
@@ -820,15 +930,20 @@
 
 <footer class="footer closing" id="contact" aria-labelledby="close-h">
   <div class="wrap">
-    <div class="closing__cta close--word">
-      <div class="section-head--split">
-        <div>
-          <h2 id="close-h" data-i18n="close.h2">Download DubTool for Windows</h2>
-          <p class="t-lead" data-i18n="close.lead">Free and open source (MIT) for Windows 10 and 11 (64-bit).</p>
-        </div>
-        <a class="btn btn--primary" href="https://github.com/namtit2932k/dubtool/releases/download/v1.0.23/DubTool-1.0.23-win64.zip" download data-download-zip><span data-i18n="cta.download">Download DubTool</span><svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
+    <div class="closing__cta close--type">
+      <div class="closing__head">
+        <p class="closing__eyebrow" data-i18n="close.meta">v1.0.23 · Windows 10 &amp; 11 (64-bit) · Free &amp; Open Source</p>
+        <h2 id="close-h" data-i18n="close.h2">Download DubTool for Windows</h2>
+        <p class="t-lead" data-i18n="close.lead">Unzip one file, paste a free key, and start dubbing foreign videos into natural Vietnamese.</p>
       </div>
-      <p class="close__word" aria-hidden="true">DubTool</p>
+      <a class="btn btn--primary btn--xl btn--wide" href="https://github.com/namtit2932k/dubtool/releases/download/v1.0.23/DubTool-1.0.23-win64.zip" download data-download-zip>
+        <span data-i18n="cta.download">Download DubTool</span>
+        <svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg>
+      </a>
+      <div class="closing__subrow">
+        <span data-i18n="close.note">MIT License · No watermarks · Original video stays untouched</span>
+        <a class="link" href="https://github.com/namtit2932k/dubtool" target="_blank" rel="noopener" data-i18n="close.github">View project on GitHub</a>
+      </div>
     </div>
     <div class="closing__links">
       <div class="grid">
@@ -858,7 +973,7 @@
           <h3 data-i18n="foot.c2">Features</h3>
           <ul>
             <li><a href="#features" data-i18n="foot.c2.1">Free translation</a></li>
-            <li><a href="#features" data-i18n="foot.c2.2">Built-in voices</a></li>
+            <li><a href="#features" data-i18n="foot.c2.2">Local voices</a></li>
           </ul>
         </div>
         <div class="span-2 footer__col">
