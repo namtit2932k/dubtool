@@ -164,27 +164,24 @@
     }
   }
 
-  /* Navbar links + active section pill highlight */
-  @media (min-width: 1024px) {
-    .nav__links { gap: 4px; }
-    .nav__links .nav__link {
-      position: relative; height: 36px; padding: 0 14px; border-radius: 999px;
-      color: color-mix(in oklab, var(--ink) 78%, transparent);
-      transition: color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
-    }
-    .nav__links .nav__link:hover {
-      color: var(--ink);
-      background: rgb(255 255 255 / .06);
-    }
-    .nav__links .nav__link.is-active {
-      color: var(--accent);
-      background: rgb(198 241 157 / .14);
-      box-shadow: inset 0 0 0 1px rgb(198 241 157 / .28);
-      font-weight: 500;
-    }
+  /* Active section highlight using built-in underline + accent text color */
+  .nav__links .nav__link.is-active,
+  .nav__links .nav__link[aria-current="location"] {
+    color: var(--accent);
+  }
+  .nav__links .nav__link.is-active::after,
+  .nav__links .nav__link[aria-current="location"]::after {
+    content: ""; position: absolute; left: var(--s-3); right: var(--s-3); bottom: -2px;
+    height: 2px; border-radius: 2px; background: currentColor;
+  }
+  .nav__links .nav__link.is-active::before { transform: scaleX(0); }
+  @media (min-width: 1024px) and (max-width: 1279px) {
+    .nav__links .nav__link.is-active::after,
+    .nav__links .nav__link[aria-current="location"]::after { left: var(--s-2); right: var(--s-2); }
   }
   @media (max-width: 1023px) {
-    .nav__links .nav__link.is-active { color: var(--accent); font-weight: 600; }
+    .nav.is-open .nav__link.is-active::after,
+    .nav.is-open .nav__link[aria-current="location"]::after { left: 0; right: auto; width: 24px; bottom: 10px; }
   }
 
   /* Floating bottom-right section up/down navigator */
