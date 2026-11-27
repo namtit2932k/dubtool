@@ -164,8 +164,28 @@
     }
   }
 
-  /* Active section link indicator in header */
-  .nav__link.is-active { color: var(--accent); }
+  /* Navbar links + active section pill highlight */
+  @media (min-width: 1024px) {
+    .nav__links { gap: 4px; }
+    .nav__links .nav__link {
+      position: relative; height: 36px; padding: 0 14px; border-radius: 999px;
+      color: color-mix(in oklab, var(--ink) 78%, transparent);
+      transition: color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+    }
+    .nav__links .nav__link:hover {
+      color: var(--ink);
+      background: rgb(255 255 255 / .06);
+    }
+    .nav__links .nav__link.is-active {
+      color: var(--accent);
+      background: rgb(198 241 157 / .14);
+      box-shadow: inset 0 0 0 1px rgb(198 241 157 / .28);
+      font-weight: 500;
+    }
+  }
+  @media (max-width: 1023px) {
+    .nav__links .nav__link.is-active { color: var(--accent); font-weight: 600; }
+  }
 
   /* Floating bottom-right section up/down navigator */
   .sec-nav {
@@ -419,41 +439,9 @@
       DubTool
     </a>
     <nav class="nav__links" aria-label="Main navigation">
-      <div class="nav__item">
-        <a class="nav__link" href="#guide"><span data-i18n="nav.guide">Guide</span> <svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
-        <div class="nav__menu">
-          <div class="wrap grid">
-            <div class="menu-col span-3">
-              <p class="t-label" data-i18n="nav.menu.start">Get started</p>
-              <a href="#guide"><b data-i18n="nav.menu.s1.t">4-step setup guide</b><span data-i18n="nav.menu.s1.d">From download to your first video</span></a>
-              <a href="#statement"><b data-i18n="nav.menu.s2.t">Real speed results</b><span data-i18n="nav.menu.s2.d">2.5h Full HD film tested on a normal PC</span></a>
-              <a href="#features"><b data-i18n="nav.menu.s3.t">Built-in voices</b><span data-i18n="nav.menu.s3.d">Listen offline before you dub</span></a>
-            </div>
-            <div class="menu-col span-3">
-              <p class="t-label" data-i18n="nav.menu.more">Options &amp; help</p>
-              <a href="#providers"><b data-i18n="nav.menu.m1.t">Free translation keys</b><span data-i18n="nav.menu.m1.d">Use Google Gemini or Groq for free</span></a>
-              <a href="#providers"><b data-i18n="nav.menu.m2.t">100% offline mode</b><span data-i18n="nav.menu.m2.d">Keep private videos on your PC</span></a>
-              <a href="#faq"><b data-i18n="nav.menu.m3.t">Common questions</b><span data-i18n="nav.menu.m3.d">PC requirements, privacy, Mac support</span></a>
-            </div>
-            <a class="menu-card span-3 start-10" href="https://github.com/namtit2932k/dubtool/releases/download/v1.0.23/DubTool-1.0.23-win64.zip" download data-download-zip>
-              <div class="panel">
-                <div class="stage stage--fade-br">
-                  <div class="at-corner" style="--ax:20px;--ay:20px">
-                    <div class="ui ui-notify" data-ui="notify" data-ui-still>
-                      <ul class="ui-notify__list">
-                        <li class="ui-note"><span class="ui-note__ico"><svg class="ui-icon" viewBox="0 0 16 16"><path d="m3.5 8.4 2.8 2.8 6.2-6.4"/></svg></span><span class="ui-note__text"><span class="ui-note__title"><span data-i18n="nav.card.note.t">DubTool v1.0.23</span><time data-i18n="nav.card.note.time">latest</time></span><span class="ui-note__body" data-i18n="nav.card.note.b">Clearer voice mix &amp; cleaner sentence translation</span></span></li>
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <span class="t-card" data-i18n="nav.card.title">Latest Windows build</span>
-              <span class="t-small muted" data-i18n="nav.card.sub">Single zip file, unzip and open directly</span>
-            </a>
-          </div>
-        </div>
-      </div>
+      <div class="nav__item"><a class="nav__link" href="#guide" data-i18n="nav.guide">Guide</a></div>
       <div class="nav__item"><a class="nav__link" href="#features" data-i18n="nav.features">Features</a></div>
+      <div class="nav__item"><a class="nav__link" href="#statement" data-i18n="nav.speed">Speed</a></div>
       <div class="nav__item"><a class="nav__link" href="#providers" data-i18n="nav.modes">Translators</a></div>
       <div class="nav__item"><a class="nav__link" href="#faq" data-i18n="nav.faq">FAQ</a></div>
     </nav>

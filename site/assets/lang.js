@@ -8,26 +8,8 @@ const STRINGS = {
     "meta.desc": "Turn foreign-language videos into natural Vietnamese-dubbed videos with clean subtitles on Windows. No coding needed, free and open source.",
     "skip": "Skip to content",
     "nav.guide": "Guide",
-    "nav.menu.start": "Get started",
-    "nav.menu.s1.t": "4-step setup guide",
-    "nav.menu.s1.d": "From download to your first video",
-    "nav.menu.s2.t": "Real speed results",
-    "nav.menu.s2.d": "2.5h Full HD film tested on a normal PC",
-    "nav.menu.s3.t": "Built-in voices",
-    "nav.menu.s3.d": "Listen offline before you dub",
-    "nav.menu.more": "Options & help",
-    "nav.menu.m1.t": "Free translation keys",
-    "nav.menu.m1.d": "Use Google Gemini or Groq for free",
-    "nav.menu.m2.t": "100% offline mode",
-    "nav.menu.m2.d": "Keep private videos on your PC",
-    "nav.menu.m3.t": "Common questions",
-    "nav.menu.m3.d": "PC requirements, privacy, Mac support",
-    "nav.card.title": "Latest Windows build",
-    "nav.card.sub": "Single zip file, unzip and open directly",
-    "nav.card.note.t": "DubTool v1.0.23",
-    "nav.card.note.time": "latest",
-    "nav.card.note.b": "Clearer voice mix & cleaner sentence translation",
     "nav.features": "Features",
+    "nav.speed": "Speed",
     "nav.modes": "Translators",
     "nav.faq": "FAQ",
     "nav.github": "GitHub",
@@ -267,26 +249,8 @@ const STRINGS = {
     "meta.desc": "Chuyển video tiếng Trung, Anh, Nhật, Hàn sang video lồng tiếng Việt tự nhiên kèm phụ đề rõ nét trên Windows. Dễ dùng, không cần biết kỹ thuật.",
     "skip": "Chuyển tới nội dung",
     "nav.guide": "Hướng dẫn",
-    "nav.menu.start": "Bắt đầu nhanh",
-    "nav.menu.s1.t": "Hướng dẫn 4 bước",
-    "nav.menu.s1.d": "Từ lúc tải về đến khi ra video đầu tiên",
-    "nav.menu.s2.t": "Tốc độ thực tế",
-    "nav.menu.s2.d": "Chạy thử phim Full HD 2.5 giờ trên máy thường",
-    "nav.menu.s3.t": "Giọng đọc có sẵn",
-    "nav.menu.s3.d": "Nghe thử ngay không cần mạng",
-    "nav.menu.more": "Tùy chọn & hỗ trợ",
-    "nav.menu.m1.t": "Dịch miễn phí",
-    "nav.menu.m1.d": "Dùng khóa miễn phí Google hoặc Groq",
-    "nav.menu.m2.t": "Chế độ không cần mạng",
-    "nav.menu.m2.d": "Giữ kín 100% video trên máy",
-    "nav.menu.m3.t": "Câu hỏi thường gặp",
-    "nav.menu.m3.d": "Cấu hình máy, bảo mật, hỗ trợ Mac",
-    "nav.card.title": "Bản Windows mới nhất",
-    "nav.card.sub": "Một tệp zip duy nhất, giải nén là chạy",
-    "nav.card.note.t": "DubTool v1.0.23",
-    "nav.card.note.time": "mới",
-    "nav.card.note.b": "Giọng đọc rõ hơn & câu dịch liền mạch hơn",
     "nav.features": "Tính năng",
+    "nav.speed": "Tốc độ",
     "nav.modes": "Cách dịch",
     "nav.faq": "Hỏi đáp",
     "nav.github": "GitHub",
@@ -658,7 +622,10 @@ function initSectionNav() {
     nextBtn.disabled = idx >= sections.length - 1;
     const activeId = sections[idx]?.id ? `#${sections[idx].id}` : "";
     navLinks.forEach((a) => {
-      a.classList.toggle("is-active", !!activeId && a.getAttribute("href") === activeId);
+      const on = !!activeId && a.getAttribute("href") === activeId;
+      a.classList.toggle("is-active", on);
+      if (on) a.setAttribute("aria-current", "location");
+      else a.removeAttribute("aria-current");
     });
   };
 
@@ -670,11 +637,18 @@ function initSectionNav() {
   prevBtn.addEventListener("click", () => goIndex(currentIndex() - 1));
   nextBtn.addEventListener("click", () => goIndex(currentIndex() + 1));
 
-  // Smooth scroll for in-page anchor links as well
+  // Smooth scroll for in-page anchor links & close mobile nav sheet if open
+  const headerNav = document.querySelector("header.nav");
+  const navToggle = document.querySelector(".nav__toggle");
   document.querySelectorAll('a[href^="#"]').forEach((a) => {
     const href = a.getAttribute("href");
     if (!href || href === "#") return;
     a.addEventListener("click", (e) => {
+      if (headerNav && headerNav.classList.contains("is-open")) {
+        headerNav.classList.remove("is-open");
+        document.body.classList.remove("nav-locked");
+        if (navToggle) navToggle.setAttribute("aria-expanded", "false");
+      }
       if (href === "#top") {
         e.preventDefault();
         smoothScrollTo(0);
