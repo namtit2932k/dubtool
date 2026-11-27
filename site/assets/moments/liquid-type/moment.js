@@ -19,7 +19,7 @@ export default function (root, opts, lib) {
   const type = root.matches('h1, h2, .mo-lt__type') ? root : root.querySelector('.mo-lt__type, h1, h2');
   if (!type) return {};
   root.classList.add('mo-lt');
-  if (lib.reduced() || lib.coarse() || typeof SVGFEDisplacementMapElement === 'undefined') return {};
+  if (lib.reduced() || typeof SVGFEDisplacementMapElement === 'undefined') return {};
   const strength = lib.clamp(+opts.strength || 1, 0.3, 1.6), reach = lib.clamp(+opts.radius || 0.3, 0.1, 0.6);
   const ns = 'http://www.w3.org/2000/svg';
   const id = `mo-lt-${++uid}`;
@@ -29,13 +29,15 @@ export default function (root, opts, lib) {
   svg.innerHTML = `<filter id="${id}" x="-5%" y="-20%" width="110%" height="140%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency="0.006 0.013" numOctaves="1" seed="7" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="0" xChannelSelector="R" yChannelSelector="G"/></filter>`;
   document.body.append(svg);
   const turb = svg.querySelector('feTurbulence'), disp = svg.querySelector('feDisplacementMap');
-  let energy = 0, raf = 0, on = false, lastX = 0, lastY = 0, hasLast = false, t0 = 0, px = 0.5, w = 1, h = 1;
+  let energy = 0, raf = 0, on = false, lastX = 0, lastY = 0, hasLast = false, t0 = 0, px = 0.5, w = 1, h = 1, visible = false;
   const apply = () => {
-    const sc = Math.min(44, energy) * strength;
-    if (sc < 0.6) { if (on) { type.style.filter = ''; on = false; } return false; }
+    const ambient = visible ? (1.8 + Math.sin(t0 / 900) * 1.1) : 0;
+    const sc = Math.min(44, Math.max(energy, ambient)) * strength;
+    if (sc < 0.4) { if (on) { type.style.filter = ''; on = false; } return false; }
     disp.setAttribute('scale', sc.toFixed(1));
-    // the map drifts a little with the pointer's place and the clock, so the ripple flows rather than sits
-    const dx = 0.006 + (px - 0.5) * 0.002, dy = 0.013 + Math.sin(t0 / 700) * 0.003;
+    // gentle autonomous liquid drift while visible + extra ripple under the pointer
+    const dx = 0.006 + (px - 0.5) * 0.002 + Math.cos(t0 / 1600) * 0.0012;
+    const dy = 0.013 + Math.sin(t0 / 850) * 0.003;
     turb.setAttribute('baseFrequency', `${dx.toFixed(4)} ${dy.toFixed(4)}`);
     if (!on) { type.style.filter = `url(#${id})`; on = true; }
     return true;
@@ -44,9 +46,19 @@ export default function (root, opts, lib) {
     raf = 0;
     t0 = now;
     energy *= 0.93;
-    if (apply()) raf = requestAnimationFrame(tick);
-    else energy = 0;
+    if (energy < 0.05) energy = 0;
+    if (apply() && (visible || energy > 0)) raf = requestAnimationFrame(tick);
+    else if (!visible) { if (on) { type.style.filter = ''; on = false; } }
   };
+  const start = () => { if (!raf) raf = requestAnimationFrame(tick); };
+  const io = typeof IntersectionObserver === 'function' ? new IntersectionObserver(es => {
+    visible = es[es.length - 1].isIntersecting && !document.hidden;
+    if (visible) start();
+  }, { rootMargin: '120px 0px' }) : null;
+  if (io) io.observe(type);
+  else { visible = true; start(); }
+  const onVis = () => { if (!document.hidden && visible) start(); };
+  document.addEventListener('visibilitychange', onVis);
   const move = e => {
     const r = type.getBoundingClientRect();
     w = r.width; h = r.height;
@@ -56,14 +68,13 @@ export default function (root, opts, lib) {
     px = lib.clamp(x / w);
     if (hasLast) {
       const v = Math.hypot(e.clientX - lastX, e.clientY - lastY);
-      // the nearer the pointer to the middle of the line's height, the stronger the push; a fast pass pushes more
       energy = Math.min(44, energy + Math.min(9, v * 0.3) * (0.5 + reach));
     }
     lastX = e.clientX; lastY = e.clientY; hasLast = true;
-    if (!raf) raf = requestAnimationFrame(tick);
+    start();
   };
   const leave = () => { hasLast = false; };
   root.addEventListener('pointermove', move, { passive: true });
   root.addEventListener('pointerleave', leave);
-  return { destroy() { root.removeEventListener('pointermove', move); root.removeEventListener('pointerleave', leave); if (raf) cancelAnimationFrame(raf); type.style.filter = ''; svg.remove(); } };
+  return { destroy() { if (io) io.disconnect(); document.removeEventListener('visibilitychange', onVis); root.removeEventListener('pointermove', move); root.removeEventListener('pointerleave', leave); if (raf) cancelAnimationFrame(raf); type.style.filter = ''; svg.remove(); } };
 }

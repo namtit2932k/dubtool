@@ -1070,7 +1070,7 @@ class Diagram {
     this.relayout = () => { if (this.rq) return; this.rq = requestAnimationFrame(() => { this.rq = 0; if (this.el.isConnected) this.build(); }); };
     this.ro = new ResizeObserver(() => this.queue());
     this.ro.observe(el);
-    this.io = new IntersectionObserver(es => { this.visible = es[es.length - 1].isIntersecting; this.sync(); }, { threshold: 0.12 });
+    this.io = new IntersectionObserver(es => { this.visible = es[es.length - 1].isIntersecting; this.sync(); }, { rootMargin: '180px 0px', threshold: 0.01 });
     this.io.observe(el);
     this.onVis = () => this.sync();
     document.addEventListener('visibilitychange', this.onVis);
@@ -1130,8 +1130,8 @@ class Diagram {
     const host = this.el.closest('.card') || this.el.closest('.frame, .panel') || this.el;
     this.onEnter = ev => {
       if (ev.pointerType === 'touch' || reducedMQ.matches || phoneMQ.matches || kindOther() || (this.spec.motion || {}).pulse === 'none' || this.spec.hoverPlay === false) return;
-      // a looping diagram starts its cycle again from the first beat
-      if (!this.heldByPage) return this.restart();
+      // a looping diagram keeps running continuously without stuttering on pointer enter
+      if (!this.heldByPage) return;
       if (!this.hoverPlay) { this.hoverPlay = true; this.t = this.stillT; }
       this.stopAt = null;
       this.el.classList.remove('is-still');

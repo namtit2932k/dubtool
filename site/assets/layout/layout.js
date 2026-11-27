@@ -206,16 +206,16 @@ function steps(box) {
   // house rule: the loops inside cards a little faster, and repeating. The first picture is the
   // finished one (a shot or a first look never meets an empty card); then it plays and holds again.
   const every = parseInt(box.dataset.lySteps, 10) || 700;
-  const hold = parseInt(box.dataset.lyHold, 10) || 1800;
+  const hold = parseInt(box.dataset.lyHold, 10) || 900;
   const set = n => items.forEach((s, k) => s.classList.toggle('is-off', k >= n));
   const done = () => set(items.length);
   done();
-  if (reduced() || phone() || other()) return;
+  if (reduced() || other()) return;
   ui.loop(box, async api => {
     await api.wait(hold);
     set(0);
     for (let n = 1; n <= items.length; n++) { await api.wait(n === 1 ? 380 : every); set(n); }
-  }, { still: done, rest: 1200 });
+  }, { still: done, rest: 150 });
 }
 
 /* ---------------------------------------------------------------- hotspots */

@@ -135,7 +135,7 @@ export function plan(root = document) {
   if (!doc.querySelector || !doc.querySelector('[data-ui-loop]')) return;
   const kind = doc.querySelector('meta[name="site-kind"]');
   const other = (doc.documentElement && doc.documentElement.dataset.type === 'place') || (!!kind && kind.content.trim().toLowerCase() === 'other');
-  const phone = other || (typeof matchMedia === 'function' && matchMedia('(max-width: 639px)').matches);
+  const phone = other;
   for (const el of root.querySelectorAll('[data-ui-load], [data-ui]')) {
     if (el.parentElement && el.parentElement.closest('[data-ui-load]')) continue;   // inside a loaded one
     if (phone || !el.closest(LOOPS)) el.setAttribute('data-ui-still', '');
@@ -290,7 +290,7 @@ function hostListen(host, rec) {
     hosted.set(host, set);
     const enter = pointer => {
       const live = [...set].filter(r => r.running());
-      if (live.length) { live.forEach(r => r.restart()); return; }
+      if (live.length) return;
       const top = [...set].sort((a, b) => (a.root.compareDocumentPosition(b.root) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)).pop();
       if (top) (pointer ? top.hover(true) : top.restart());
     };
@@ -326,7 +326,7 @@ function hostListen(host, rec) {
     no button (the page runs its own). Page loops use this as well:
     ui.loop(el, async api => { ... }, { still: () => showFinished(el) })
 */
-export function loop(root, cycle, { still, rest = 600, rootMargin = '0px', cycles, pause = true } = {}) {
+export function loop(root, cycle, { still, rest = 150, rootMargin = '180px 0px', cycles, pause = true } = {}) {
   const show = () => { if (still) still(); tidy(root); };
   const setHeld = on => root.classList.toggle('is-ui-held', on);
   if (reduced()) {
