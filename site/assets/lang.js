@@ -258,7 +258,9 @@ const STRINGS = {
     "foot.c4.1": "GitHub repository",
     "foot.c4.2": "Vietnamese README",
     "foot.lic": "MIT License",
-    "foot.tm": "Product names and logos are trademarks of their respective owners."
+    "foot.tm": "Product names and logos are trademarks of their respective owners.",
+    "secnav.prev": "Previous section",
+    "secnav.next": "Next section"
   },
   vi: {
     "meta.title": "DubTool: Phần mềm miễn phí lồng tiếng Việt cho video trên Windows",
@@ -515,7 +517,9 @@ const STRINGS = {
     "foot.c4.1": "Kho mã nguồn GitHub",
     "foot.c4.2": "Tài liệu tiếng Việt",
     "foot.lic": "Giấy phép MIT",
-    "foot.tm": "Tên sản phẩm và biểu trưng thuộc quyền sở hữu của chủ sở hữu tương ứng."
+    "foot.tm": "Tên sản phẩm và biểu trưng thuộc quyền sở hữu của chủ sở hữu tương ứng.",
+    "secnav.prev": "Mục trước",
+    "secnav.next": "Mục tiếp theo"
   }
 };
 
@@ -583,6 +587,119 @@ function initLang() {
     window.dispatchEvent(new CustomEvent("dubtool:lang", { detail: { lang: document.documentElement.lang || initial } }));
   }, 120);
   syncLatestReleaseZip();
+  initSectionNav();
+}
+
+/* Smooth eased section-by-section navigation (up/down floating buttons + header active link). */
+function initSectionNav() {
+  const sections = [...document.querySelectorAll("main > section, footer.closing")];
+  const prevBtn = document.querySelector("[data-sec-prev]");
+  const nextBtn = document.querySelector("[data-sec-next]");
+  const posEl = document.querySelector("[data-sec-pos]");
+  if (!sections.length || !prevBtn || !nextBtn || !posEl) return;
+
+  const navLinks = [...document.querySelectorAll(".nav__links a.nav__link[href^='#']")];
+  const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let animRaf = 0;
+
+  const cancelAnim = () => {
+    if (animRaf) { cancelAnimationFrame(animRaf); animRaf = 0; }
+  };
+  window.addEventListener("wheel", cancelAnim, { passive: true });
+  window.addEventListener("touchstart", cancelAnim, { passive: true });
+
+  const smoothScrollTo = (targetY, duration = 640) => {
+    cancelAnim();
+    const maxY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    const to = Math.max(0, Math.min(maxY, Math.round(targetY)));
+    if (reduced || duration <= 0) {
+      window.scrollTo(0, to);
+      return;
+    }
+    const from = window.scrollY;
+    const delta = to - from;
+    if (Math.abs(delta) < 2) return;
+    const t0 = performance.now();
+    const easeInOutCubic = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+    const step = (now) => {
+      const p = Math.min(1, (now - t0) / duration);
+      window.scrollTo(0, from + delta * easeInOutCubic(p));
+      if (p < 1) {
+        animRaf = requestAnimationFrame(step);
+      } else {
+        animRaf = 0;
+        syncState();
+      }
+    };
+    animRaf = requestAnimationFrame(step);
+  };
+
+  const sectionTop = (el) => {
+    const y = el.getBoundingClientRect().top + window.scrollY;
+    return Math.max(0, Math.round(y));
+  };
+
+  const currentIndex = () => {
+    const mid = window.scrollY + window.innerHeight * 0.36;
+    let idx = 0;
+    for (let i = 0; i < sections.length; i++) {
+      if (sectionTop(sections[i]) <= mid + 8) idx = i;
+    }
+    if (window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 24) {
+      idx = sections.length - 1;
+    }
+    return idx;
+  };
+
+  const syncState = () => {
+    const idx = currentIndex();
+    posEl.textContent = `${idx + 1} / ${sections.length}`;
+    prevBtn.disabled = idx <= 0;
+    nextBtn.disabled = idx >= sections.length - 1;
+    const activeId = sections[idx]?.id ? `#${sections[idx].id}` : "";
+    navLinks.forEach((a) => {
+      a.classList.toggle("is-active", !!activeId && a.getAttribute("href") === activeId);
+    });
+  };
+
+  const goIndex = (idx) => {
+    const clamped = Math.max(0, Math.min(sections.length - 1, idx));
+    smoothScrollTo(sectionTop(sections[clamped]));
+  };
+
+  prevBtn.addEventListener("click", () => goIndex(currentIndex() - 1));
+  nextBtn.addEventListener("click", () => goIndex(currentIndex() + 1));
+
+  // Smooth scroll for in-page anchor links as well
+  document.querySelectorAll('a[href^="#"]').forEach((a) => {
+    const href = a.getAttribute("href");
+    if (!href || href === "#") return;
+    a.addEventListener("click", (e) => {
+      if (href === "#top") {
+        e.preventDefault();
+        smoothScrollTo(0);
+        return;
+      }
+      const target = document.querySelector(href);
+      if (target) {
+        e.preventDefault();
+        smoothScrollTo(sectionTop(target));
+      }
+    });
+  });
+
+  let scrollTick = false;
+  const onScroll = () => {
+    if (scrollTick) return;
+    scrollTick = true;
+    requestAnimationFrame(() => {
+      scrollTick = false;
+      syncState();
+    });
+  };
+  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", syncState, { passive: true });
+  syncState();
 }
 
 /* Keep direct-download zip links pointed at the latest GitHub Release asset automatically. */

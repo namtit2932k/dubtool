@@ -143,18 +143,25 @@
     .lang-switch__btn { padding: 0 10px; min-width: 44px; height: 44px; font-size: 13px; }
   }
 
-  /* Keep dealt CSS ground sections locked to layout-v4 screen heights */
+  /* Keep dealt CSS ground sections locked to layout-v4 screen heights & vertically balanced on tall displays */
   main > section.section:is(.bg-mist, .bg-band) {
     --g-screen: calc(var(--h, 1) * 100svh);
-    align-content: start;
+    align-content: center;
     padding-top: var(--padt);
     padding-bottom: calc(var(--padb) + var(--bar));
   }
-  main > section.section#faq.bg-band {
+  main > section.section:not(.g2):not(.hero) {
+    display: grid;
     align-content: center;
   }
   main > section.section.bg-band.bg-bleed:last-of-type {
     padding-bottom: calc(var(--padb) + var(--bar)) !important;
+  }
+  @media (max-width: 1023px) {
+    main > section.section:not(.g2):not(.hero),
+    main > section.section:is(.bg-mist, .bg-band) {
+      align-content: start;
+    }
   }
   @media (max-width: 639px) {
     main > section.section:is(.bg-mist, .bg-band) {
@@ -166,12 +173,51 @@
     }
   }
 
-  /* Hero collage visual */
+  /* Active section link indicator in header */
+  .nav__link.is-active { color: var(--accent); }
+
+  /* Floating bottom-right section up/down navigator */
+  .sec-nav {
+    position: fixed; right: 24px; bottom: 24px; z-index: 40;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 5px; border-radius: 999px;
+    background: rgb(13 28 15 / .84);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    border: 1px solid rgb(198 241 157 / .22);
+    box-shadow: 0 12px 32px -10px rgb(0 0 0 / .6);
+  }
+  .sec-nav__btn {
+    display: inline-grid; place-items: center;
+    width: 38px; height: 38px; border-radius: 999px; border: 0;
+    background: transparent; color: var(--ink); cursor: pointer;
+    transition: background-color 160ms ease, color 160ms ease, transform 160ms ease, opacity 160ms ease;
+  }
+  .sec-nav__btn:hover:not(:disabled) { background: rgb(198 241 157 / .18); color: var(--accent); }
+  .sec-nav__btn:active:not(:disabled) { transform: scale(.92); }
+  .sec-nav__btn:disabled { opacity: .28; cursor: default; }
+  .sec-nav__pos {
+    font: 500 11px/1 var(--font-mono); color: color-mix(in oklab, var(--ink) 72%, transparent);
+    padding: 3px 2px; font-variant-numeric: tabular-nums; user-select: none;
+  }
+  @media (max-width: 639px) {
+    .sec-nav { right: 14px; bottom: 14px; padding: 4px; gap: 2px; }
+    .sec-nav__btn { width: 44px; height: 44px; }
+    .sec-nav__pos { font-size: 11px; }
+  }
+
+  /* Hero collage visual: keep balanced height on tall monitors & overlap Ready card over app window */
   .hero__art { background:
       radial-gradient(70% 60% at 18% 12%, color-mix(in oklab, var(--ground-surface) 80%, white), transparent 70%),
       radial-gradient(60% 50% at 90% 100%, color-mix(in oklab, var(--ground-bg) 80%, var(--ground-accent)), transparent 70%),
       var(--ground-bg); }
   .hero__art > .ly-piece--note { left: var(--s-6); bottom: var(--s-6); width: 300px; z-index: 2; }
+  @media (min-width: 1024px) {
+    .hero--collage .hero__grid { align-items: center; }
+    .hero--collage .hero__text { align-self: center; }
+    .hero__art { height: min(100%, 660px); max-height: 660px; align-self: center; }
+    .hero__art > .ly-piece--main { top: 34px; }
+    .hero__art > .ly-piece--note { left: var(--s-6); top: 472px; bottom: auto; width: 300px; z-index: 2; }
+  }
   .hero__art .d-card__row { align-items: center; margin-bottom: 8px; }
   .hero__art .d-card__row h5 { margin: 0; line-height: 22px; }
   .hero__art .d-card__row .d-chip { margin: 0; flex: none; }
@@ -182,7 +228,7 @@
   .hero__proof { font-size: var(--t-small); color: color-mix(in oklab, var(--ink) 86%, transparent); }
   .ly-piece--main .d-row { grid-template-columns: 36px minmax(0, 1fr) 56px 80px; }
   .ly-piece--main .d-main { padding-right: calc(var(--ly-cut-room) + 12px); }
-  @media (max-width: 1023px) { .hero__art > .ly-piece--note { left: var(--s-4); bottom: var(--s-4); width: 270px; } }
+  @media (max-width: 1023px) { .hero__art > .ly-piece--note { left: var(--s-4); top: auto; bottom: var(--s-4); width: 270px; } }
   @media (max-width: 639px) {
     .ly-piece--main .d-row { grid-template-columns: 36px minmax(0, 1fr) 80px; }
     .ly-piece--main .d-row:nth-of-type(n+2) { display: none; }
@@ -1008,6 +1054,16 @@
     </div>
   </div>
 </footer>
+
+<nav class="sec-nav" aria-label="Section navigation">
+  <button class="sec-nav__btn" type="button" data-sec-prev aria-label="Previous section" title="Previous section" data-i18n-attrs="aria-label:secnav.prev,title:secnav.prev">
+    <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10l4-4 4 4"/></svg>
+  </button>
+  <span class="sec-nav__pos" data-sec-pos aria-live="polite">1 / 8</span>
+  <button class="sec-nav__btn" type="button" data-sec-next aria-label="Next section" title="Next section" data-i18n-attrs="aria-label:secnav.next,title:secnav.next">
+    <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+  </button>
+</nav>
 
 <script type="module" src="assets/system.js"></script>
 <script type="module" src="assets/motion/motion.js"></script>
