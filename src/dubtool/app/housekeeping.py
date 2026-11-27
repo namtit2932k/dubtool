@@ -116,6 +116,46 @@ def prune_jobs(jobs_dir: Path, *, days: int, running_job_id: str | None = None,
                      now=now, all_jobs=all_jobs, delete=True)
 
 
+_JOB_MARKERS = (
+    "state.json",
+    "pipeline.log",
+    "transcript.json",
+    "translated.json",
+    "dub_units.json",
+    "units.json",
+    "words.json",
+    "schedule.json",
+    "quality_report.json",
+)
+
+
+def _is_link_or_junction(path: Path) -> bool:
+    """True for symlinks AND Windows NTFS directory junctions (which
+    ``Path.is_symlink()`` returns False for on Python 3.12+)."""
+    is_junc = getattr(os.path, "isjunction", None)
+    try:
+        return path.is_symlink() or (bool(is_junc(path)) if callable(is_junc) else False)
+    except OSError:
+        return False
+
+
+def _is_dubtool_job_dir(job: Path) -> bool:
+    """True only when ``job`` contains at least one DubTool job artifact so
+    pruning can never wipe unrelated user subfolders."""
+    return any((job / m).exists() for m in _JOB_MARKERS)
+
+
+def _safe_jobs_root(jobs_dir: Path) -> bool:
+    """Refuse to prune protected OS/user/project directories."""
+    from dubtool import workspace
+
+    try:
+        workspace.assert_not_protected_dir(jobs_dir, action="housekeeping")
+        return True
+    except Exception:
+        return False
+
+
 def _prunable(jobs_dir: Path, *, days: int, running_job_id: str | None,
               now: float | None, all_jobs: bool,
               delete: bool) -> tuple[list[Path], int]:
@@ -125,11 +165,11 @@ def _prunable(jobs_dir: Path, *, days: int, running_job_id: str | None,
     resume_cutoff = now - RESUME_KEEP_DAYS * 86400
     deleted: list[Path] = []
     reclaimed = 0
-    if not jobs_dir.is_dir():
+    if not jobs_dir.is_dir() or not _safe_jobs_root(jobs_dir):
         return deleted, reclaimed
     for entry in jobs_dir.iterdir():
-        if entry.is_symlink():
-            # Remove stray symlink entries inside jobs_dir without ever
+        if _is_link_or_junction(entry):
+            # Remove stray symlink/junction entries inside jobs_dir without ever
             # following or modifying the target they point to.
             if not delete:
                 deleted.append(entry)
@@ -138,7 +178,7 @@ def _prunable(jobs_dir: Path, *, days: int, running_job_id: str | None,
                 try:
                     entry.unlink()
                 except OSError:
-                    entry.rmdir()  # Windows directory symlink fallback
+                    entry.rmdir()  # Windows directory symlink / junction fallback
             except OSError:
                 continue
             deleted.append(entry)
@@ -146,6 +186,8 @@ def _prunable(jobs_dir: Path, *, days: int, running_job_id: str | None,
         if not entry.is_dir():
             continue
         job = entry
+        if not _is_dubtool_job_dir(job):
+            continue
         if running_job_id and job.name == running_job_id:
             continue
         try:
@@ -177,9 +219,11 @@ def _job_finished(job: Path) -> bool:
     """True for a completed run: no state.json (folder already cleaned by
     the 'Xóa hết' retention level -> only the log remains) or every stage
     finished. Anything else may be resumable."""
+    if not _is_dubtool_job_dir(job):
+        return False
     state = job / "state.json"
     if not state.exists():
-        return True  # everything-including-state deleted after success
+        return True  # everything-including-state deleted after success; marker remains
     try:
         st = json.loads(state.read_text(encoding="utf-8"))
     except Exception:
@@ -200,6 +244,8 @@ def trim_to_budget(jobs_dir: Path, *, max_total_mb: int,
     (unfinished) job younger than the 3-day window — a finished job's age
     is irrelevant; an unfinished job is only dropped after 3 days.
     Dry-run with trim_plan(). Returns (deleted, reclaimed bytes)."""
+    if not _safe_jobs_root(jobs_dir):
+        return [], 0
     deleted, reclaimed = trim_plan(
         jobs_dir, max_total_mb=max_total_mb, running_job_id=running_job_id, now=now
     )
@@ -219,11 +265,14 @@ def trim_plan(jobs_dir: Path, *, max_total_mb: int,
     now = time.time() if now is None else now
     resume_cutoff = now - RESUME_KEEP_DAYS * 86400
     cap = max(0, int(max_total_mb)) * 1024 * 1024
-    if not jobs_dir.is_dir():
+    if not jobs_dir.is_dir() or not _safe_jobs_root(jobs_dir):
         return [], 0
     candidates: list[tuple[float, Path, int]] = []
     total = 0
-    for job in [p for p in jobs_dir.iterdir() if p.is_dir() and not p.is_symlink()]:
+    for job in [
+        p for p in jobs_dir.iterdir()
+        if p.is_dir() and not _is_link_or_junction(p) and _is_dubtool_job_dir(p)
+    ]:
         if running_job_id and job.name == running_job_id:
             continue
         if _job_running(job):
@@ -253,15 +302,27 @@ def trim_plan(jobs_dir: Path, *, max_total_mb: int,
 
 
 def _rmtree_nofollow(dirpath: Path) -> None:
+    from dubtool import workspace
+
+    workspace.assert_not_protected_dir(dirpath, action="housekeeping._rmtree_nofollow")
+    if _is_link_or_junction(dirpath):
+        try:
+            dirpath.unlink()
+        except OSError:
+            dirpath.rmdir()
+        return
     for entry in os.scandir(dirpath):
         try:
             p = Path(entry.path)
-            if entry.is_symlink():
-                if entry.is_dir():
-                    p.rmdir()
+            if _is_link_or_junction(p):
+                if entry.is_dir(follow_symlinks=False) or p.is_dir():
+                    try:
+                        p.rmdir()
+                    except OSError:
+                        p.unlink()
                 else:
                     p.unlink()
-            elif entry.is_dir():
+            elif entry.is_dir(follow_symlinks=False):
                 _rmtree_nofollow(p)
             else:
                 p.unlink()

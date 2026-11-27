@@ -102,14 +102,20 @@ def run(job, config, force: bool = False, cancel=None) -> None:
         float(mix.get("dub_gain_db", 0)),
         mix.get("duck") or {},
     )
-    audio_utils.mix_original_with_dub(
-        working_dir=job.dir,
-        background=src_video,
-        dub=job.vi_audio_path,
-        out=out,
-        graph=graph,
-        cancel=cancel,
-    )
+    part = out.with_name(out.stem + ".part" + out.suffix)
+    part.unlink(missing_ok=True)
+    try:
+        audio_utils.mix_original_with_dub(
+            working_dir=job.dir,
+            background=src_video,
+            dub=job.vi_audio_path,
+            out=part,
+            graph=graph,
+            cancel=cancel,
+        )
+        part.replace(out)
+    finally:
+        part.unlink(missing_ok=True)
     log.info(
         "s6: wrote %s (%d clips over %.1fs, mode=%s, orig=%sdB, dub=%sdB)",
         out.name, len(clips), video_duration,

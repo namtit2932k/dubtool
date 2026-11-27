@@ -314,16 +314,54 @@ def _filter_glossary(glossary: dict | None, texts: list[str]) -> dict | None:
 
 
 def _words_in_range(words: list[dict], start: float, end: float) -> list[dict]:
-    """The word entries whose midpoint falls inside [start, end]."""
-    out: list[dict] = []
-    for w in words or []:
+    """The word entries whose midpoint falls inside [start, end].
+
+    Uses binary search when ``words`` is monotonically ordered (Whisper output)
+    to avoid O(N*W) linear scans on 3-hour transcripts."""
+    if not words:
+        return []
+    lo_bound = start - 0.05
+    hi_bound = end + 0.05
+    # Fast binary search for the typical sorted Whisper words list.
+    lo, hi = 0, len(words)
+    while lo < hi:
+        mid_i = (lo + hi) // 2
+        w = words[mid_i]
+        try:
+            ws = float(w.get("start", 0.0))
+            we = float(w.get("end", ws))
+        except (TypeError, ValueError):
+            lo = 0
+            break
+        if (ws + we) / 2.0 < lo_bound:
+            lo = mid_i + 1
+        else:
+            hi = mid_i
+    else:
+        # Verify monotonic start around lo; scan only the local window.
+        out: list[dict] = []
+        for idx in range(lo, len(words)):
+            w = words[idx]
+            try:
+                ws = float(w.get("start", 0.0))
+                we = float(w.get("end", ws))
+            except (TypeError, ValueError):
+                continue
+            mid = (ws + we) / 2.0
+            if mid >= hi_bound:
+                break
+            if lo_bound <= mid < hi_bound:
+                out.append(w)
+        return out
+    out = []
+    for w in words:
         try:
             ws = float(w.get("start", 0.0))
             we = float(w.get("end", ws))
         except (TypeError, ValueError):
             continue
         mid = (ws + we) / 2.0
-        if start - 0.05 <= mid < end + 0.05:
+        if lo_bound <= mid < hi_bound:
             out.append(w)
     return out
 
@@ -435,27 +473,32 @@ def _completeness_pass(job, entries, config, client, cancel) -> list[dict]:
          "max_chars": max(1, int(f.get("max_chars") or 1))}
         for f in flags
     ]
+    upd: list[dict] = []
+    batch_size = 15
     try:
-        if cancel is not None and cancel.is_set():
-            raise StageCancelled("s3: cancelled during the completeness pass")
-        ids = [i["id"] for i in items]
-        user = complete_mod.render_retranslate_batch(items)
+        for start in range(0, len(items), batch_size):
+            if cancel is not None and cancel.is_set():
+                raise StageCancelled("s3: cancelled during the completeness pass")
+            chunk = items[start : start + batch_size]
+            ids = [i["id"] for i in chunk]
+            user = complete_mod.render_retranslate_batch(chunk)
 
-        def _validate(raw):
-            return llm_parsing.parse_json_array(raw, ids)
+            def _validate(raw, _ids=ids):
+                return llm_parsing.parse_json_items(raw, _ids)
 
-        def _note(exc):
-            return ("Your previous reply was invalid: %s. Follow the format "
-                    "exactly and reply again with only the JSON array." % exc)
+            def _note(exc):
+                return ("Your previous reply was invalid: %s. Follow the format "
+                        "exactly and reply again with only the JSON array." % exc)
 
-        upd = client._call_and_validate(
-            complete_mod.RETRANSLATE_SYSTEM, user, _validate, _note,
-        )
+            upd.extend(
+                client._call_and_validate(
+                    complete_mod.RETRANSLATE_SYSTEM, user, _validate, _note,
+                )
+            )
     except StageCancelled:
         raise
     except Exception as exc:  # best effort: keep the old text, still report
         log.warning("s3: completeness re-translation failed (%s) — the flagged units are kept", exc)
-        upd = []
     ok_ids: set[int] = set()
     for r in upd:
         entry = by_id.get(r.get("id"))
@@ -1373,10 +1416,44 @@ def run(
     write_json(job.translated_path, entries)
 
     # AGU8 6.2: truncation/shrink guard — one re-translation batch, then the
-    # quality report for what is still flagged.
+    # quality report for what is still flagged. Always persist updates back to
+    # both translated.json and dub_units.json so repaired lines and `uncertain`
+    # flags actually reach Stage 4-8.
+    before_vi = {e["id"]: (e.get("vi"), bool(e.get("uncertain"))) for e in entries}
     uncertain = _completeness_pass(job, entries, config, final_client, cancel)
-    if uncertain:
+    changed_after_pass = any(
+        (e.get("vi"), bool(e.get("uncertain"))) != before_vi.get(e["id"])
+        for e in entries
+    )
+    if uncertain or changed_after_pass:
         write_json(job.translated_path, entries)
+        if unit_mode == "sentence" and units and job.dub_units_path.exists():
+            from dubtool.dub_units import write_dub_units
+            from dubtool.stages.s8_export_readable import _join_deduped
+
+            try:
+                dub_units_list = read_json(job.dub_units_path)
+                if isinstance(dub_units_list, list):
+                    seg_by_id = {e["id"]: e for e in entries}
+                    u_by_id = {int(u["unit_id"]): u for u in units}
+                    for du in dub_units_list:
+                        uid = int(du.get("unit_id", du.get("id", -1)))
+                        u = u_by_id.get(uid)
+                        if not u:
+                            continue
+                        sids = u.get("seg_ids") or []
+                        if any((seg_by_id.get(sid) or {}).get("vi") != (before_vi.get(sid) or (None, None))[0] for sid in sids):
+                            segs = [(seg_by_id.get(sid) or {}).get("vi") or "" for sid in sids]
+                            rejoined = _join_deduped([t for t in segs if t.strip()])
+                            if rejoined:
+                                du["vi"] = rejoined
+                        if any((seg_by_id.get(sid) or {}).get("uncertain") for sid in sids):
+                            du["uncertain"] = True
+                        else:
+                            du.pop("uncertain", None)
+                    write_dub_units(job, dub_units_list)
+            except Exception as exc:
+                log.warning("s3: failed to sync completeness updates to dub_units.json: %s", exc)
 
     cli_provider = getattr(final_client, "provider", None)
     provider_name = getattr(cli_provider, "name", "?")

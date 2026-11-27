@@ -186,9 +186,20 @@ class _WorkResult(QObject):
     def fire(self, fn) -> None:
         def worker() -> None:
             try:
-                self.finished.emit(fn())
+                payload = fn()
             except Exception as exc:  # error is the result, never a crash
-                self.finished.emit(("__error__", exc))
+                payload = ("__error__", exc)
+            try:
+                import shiboken6
+
+                if not shiboken6.isValid(self):
+                    return
+            except Exception:
+                pass
+            try:
+                self.finished.emit(payload)
+            except RuntimeError:
+                pass  # dialog was closed while worker ran
 
         threading.Thread(target=worker, daemon=True, name="dubtool-settings").start()
 
@@ -207,6 +218,8 @@ class _AddKeysDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(i18n.tr("settings.add_label")))
         self.field = QPlainTextEdit(self)
+        self.field.setObjectName("add_keys_field")
+        self.field.setAccessibleName(i18n.tr("settings.add_label"))
         self.field.setPlaceholderText(
             "AIza…" if self.provider == "gemini"
             else ("gsk_…" if self.provider == "groq"
@@ -451,10 +464,23 @@ class SettingsDialog(QDialog):
         selected when keys exist and nothing was selected."""
         import time as _time
 
-        count_before = self.key_list.count()
         had_selection = self.key_list.currentRow()
         self.key_list.clear()
-        for i, key in enumerate(self._keys()):
+        keys = self._keys()
+        self._cached_key_count = len(keys)
+        model_id = self._selected_model_id() if self._provider == "gemini" else ""
+        quota_map: dict[str, dict] = {}
+        fp_fn = None
+        if self._provider == "gemini" and keys:
+            try:
+                from dubtool.llm import quota_state
+
+                quota_map = quota_state.load()
+                fp_fn = quota_state.fingerprint
+            except Exception:
+                quota_map = {}
+        now_epoch = _time.time()
+        for i, key in enumerate(keys):
             badge = self._badges.get((self._provider, i))
             label = f"Khóa {i + 1}   ••••{(key[-4:] if len(key) >= 4 else '····')}"
             if badge == "__testing__":
@@ -462,27 +488,37 @@ class SettingsDialog(QDialog):
             elif badge in BADGE_KEYS:
                 mark = BADGE_WORDS.get(badge, "")
                 label += f"  —  {mark}{i18n.tr(BADGE_KEYS[badge])}"
-            until = self._quota_until(key)
+            until = None
+            if fp_fn is not None and quota_map:
+                entry = quota_map.get(f"{fp_fn(key)}|{model_id}")
+                if isinstance(entry, dict):
+                    try:
+                        until = float(entry["until"])
+                    except (KeyError, TypeError, ValueError):
+                        until = None
             item = QListWidgetItem(label)
-            if until is not None and until > _time.time():
-                # AGENT_UPDATE_6.md 5.3: badge shows when the day quota for
-                # the Accurate model frees up; the tooltip names the model.
+            if until is not None and until > now_epoch:
                 label += "  —  ⏳ " + i18n.tr(
                     "settings.badge_quota_until",
                     time=_time.strftime("%H:%M", _time.localtime(until)),
                 )
                 item = QListWidgetItem(label)
-                item.setToolTip(i18n.tr("settings.badge_quota_until_tooltip", model=self._accurate_model()))
+                item.setToolTip(i18n.tr("settings.badge_quota_until_tooltip", model=model_id))
             self.key_list.addItem(item)
         # The read-only `.env` rows for this provider: only keys the app has
         # not yet stored in Credential Manager (masked, with import action).
-        env_rows = self._unimported_env_rows()
+        stored_masks = {secrets.mask(k) for k in keys}
+        env_rows = [
+            (name, masked)
+            for name, masked in secrets.env_key_sources(self._provider)
+            if masked not in stored_masks
+        ]
         for name, masked in env_rows:
             item = QListWidgetItem(i18n.tr("settings.env_row", name=name, masked=masked))
             item.setData(Qt.ItemDataRole.UserRole, "env")
             item.setToolTip(i18n.tr("settings.env_row_tip"))
             self.key_list.addItem(item)
-        count = len(self._keys())
+        count = len(keys)
         status = (
             i18n.tr("settings.keys_count", count=count) if count
             else i18n.tr("settings.no_key_provider", provider=self._provider_ui_name())
@@ -504,17 +540,17 @@ class SettingsDialog(QDialog):
         """AGENT_UPDATE_7.md 2.2 button states, from the live selection.
         While read-only (Update 9 task 2.2) every control stays disabled."""
         ro = getattr(self, "_read_only_flag", False)
-        rows = self.key_list.count()
         selected = self.key_list.currentRow()
+        stored_count = self._stored_row_count()
         self.add_btn.setEnabled(not ro)  # was: always enabled
-        has_sel = self._row_is_key(selected)
+        has_sel = stored_count > selected >= 0
         self.remove_btn.setEnabled(has_sel and not ro)
         # Update 9 task 2.2: the key network tests stay enabled read-only
         # (they only read the stored key and never touch the run).
         self.test_one_btn.setEnabled(has_sel and not self._testing_rows)
         self.up_btn.setEnabled(has_sel and selected > 0 and not ro)
-        self.down_btn.setEnabled(has_sel and selected < self._stored_row_count() - 1 and not ro)
-        self.test_all_btn.setEnabled(self._stored_row_count() > 0 and not self._testing_rows)
+        self.down_btn.setEnabled(has_sel and selected < stored_count - 1 and not ro)
+        self.test_all_btn.setEnabled(stored_count > 0 and not self._testing_rows)
         # Import works only while an `.env` row is selected (and not busy).
         self.import_env_btn.setEnabled(
             not ro and self._row_is_env(selected) and not self._testing_rows
@@ -530,6 +566,9 @@ class SettingsDialog(QDialog):
         return bool(item and item.data(Qt.ItemDataRole.UserRole) == ENV_ROW_ROLE)
 
     def _stored_row_count(self) -> int:
+        cached = getattr(self, "_cached_key_count", None)
+        if cached is not None:
+            return cached
         return len(self._keys())
 
     def _provider_ui_name(self) -> str:
@@ -553,12 +592,13 @@ class SettingsDialog(QDialog):
     def _add_keys_manual(self) -> None:
         dialog = _AddKeysDialog(self, self._provider)
         code = dialog.exec()
-        # AGENT_UPDATE_7.md 2.1: take the keys first (and clear the field)
+        # Check provider mismatch BEFORE take_keys() clears the widget field.
+        mismatch = dialog.mismatched_keys() if code == QDialog.DialogCode.Accepted else None
+        # AGENT_UPDATE_7.md 2.1: take the keys (and clear the field)
         # whatever the outcome, so key text never lingers in the widget.
         new_keys = dialog.take_keys()
         if code != QDialog.DialogCode.Accepted or not new_keys:
             return
-        mismatch = dialog.mismatched_keys()
         if mismatch is not None:
             other_pid, count = mismatch
             answer = QMessageBox.question(
@@ -1008,7 +1048,9 @@ class SettingsDialog(QDialog):
         self.jobs_edit = QLineEdit()
         self.jobs_edit.setPlaceholderText(default_jobs)
         self.jobs_edit.setToolTip(i18n.tr("settings.jobs_dir_tip", path=default_jobs))
-        self.jobs_edit.textChanged.connect(lambda _t: self._refresh_jobs_stats())
+        # Use editingFinished (not textChanged) so typing "C:\..." never walks
+        # an entire drive on the UI thread on every keystroke.
+        self.jobs_edit.editingFinished.connect(self._refresh_jobs_stats)
         jobs_row = QHBoxLayout()
         jobs_row.setContentsMargins(0, 0, 0, 0)
         jobs_row.addWidget(self.jobs_edit, 1)
@@ -1099,6 +1141,7 @@ class SettingsDialog(QDialog):
         chosen = QFileDialog.getExistingDirectory(self, i18n.tr("settings.jobs_dir"), start)
         if chosen:
             self.jobs_edit.setText(chosen)
+            self._refresh_jobs_stats()
 
     def _browse_output_dir(self) -> None:
         start = self.output_edit.text().strip() or str(Path.home())
@@ -1116,9 +1159,15 @@ class SettingsDialog(QDialog):
     def _refresh_jobs_stats(self) -> None:
         """Update the size/run-count line (first called in _load; also after
         a manual jobs-dir edit is applied)."""
+        from dubtool import workspace
         from dubtool.app import housekeeping
 
         root = self._jobs_root()
+        try:
+            workspace.assert_not_protected_dir(root, action="jobs_stats")
+        except Exception:
+            self.jobs_stats_label.setText(f"{root}")
+            return
         count, size, _oldest = housekeeping.job_stats(root)
         stats_line = i18n.tr(
             "adv.jobs_stats", count=count, size=housekeeping.human(size)

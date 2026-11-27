@@ -238,6 +238,8 @@ class OptionsWidget(QGroupBox):
         # AGU10 5.2: the old 'Giữ các tệp trung gian' checkbox became a
         # three-choice dropdown.
         self.keep_combo = QComboBox()
+        self.keep_combo.setObjectName("keep_level_combo")
+        self.keep_combo.setAccessibleName(i18n.tr("options.keep_label"))
         _make_shrinkable_combo(self.keep_combo)
         self.keep_combo.addItem(i18n.tr("options.keep_none"), "none")
         self.keep_combo.addItem(i18n.tr("options.keep_light"), "light")
@@ -254,6 +256,8 @@ class OptionsWidget(QGroupBox):
         self.readable_check = QCheckBox(i18n.tr("options.readable"))
         self.readable_check.setChecked(bool(s.get("export_readable", True)))
         self.readable_format_combo = QComboBox()
+        self.readable_format_combo.setObjectName("readable_format_combo")
+        self.readable_format_combo.setAccessibleName(i18n.tr("options.readable"))
         _make_shrinkable_combo(self.readable_format_combo, min_chars=8)
         self.readable_format_combo.addItem(i18n.tr("readable.format_docx"), "docx")
         self.readable_format_combo.addItem(i18n.tr("readable.format_txt"), "txt")
@@ -261,11 +265,14 @@ class OptionsWidget(QGroupBox):
             max(0, self.readable_format_combo.findData(s.get("readable_format", "docx")))
         )
         self.gain_slider = QSlider(Qt.Orientation.Horizontal)
+        self.gain_slider.setAccessibleName(i18n.tr("options.gain"))
         self.gain_slider.setRange(-24, -6)
         self.gain_slider.setValue(int(s["original_gain_db"]))
         self.gain_value = QLabel(f"{s['original_gain_db']} dB")
         self.gain_slider.valueChanged.connect(lambda v: self.gain_value.setText(f"{v} dB"))
         self.voice_combo = QComboBox()
+        self.voice_combo.setObjectName("voice_combo")
+        self.voice_combo.setAccessibleName(i18n.tr("options.voice"))
         _make_shrinkable_combo(self.voice_combo)
         self._tts_mode = str(s.get("tts_model") or "v3turbo_int8")
         self.reload_voices(s)
@@ -449,12 +456,6 @@ class ProgressWidget(QGroupBox):
         else:
             seconds = int(now - self._last_event_mono)
         quiet_after = 20
-        try:
-            from dubtool.app import settings as _settings_mod
-
-            quiet_after = int(_settings_mod.load().get("quiet_after_s", 20) or 20)
-        except Exception:
-            pass
         text = i18n.tr("details.last_update", s=seconds)
         if seconds >= quiet_after:
             thread = getattr(self.service, "_thread", None)
@@ -738,11 +739,15 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # Menu / gear (AGU4 7.7)
+        # Menu / gear (AGU4 7.7). Defer modal dialog exec() by one event-loop
+        # tick via QTimer.singleShot(0, ...) so Windows UIA InvokePattern.Invoke
+        # returns immediately instead of hanging COM UIA while exec() runs.
         menu = self.menuBar().addMenu(i18n.tr("app.settings"))
-        menu.addAction(i18n.tr("app.settings"), self.open_settings)
-        menu.addAction(i18n.tr("app.export_diagnostics"), self.export_diagnostics)
-        menu.addAction(i18n.tr("app.about"), self.show_about)
+        menu.addAction(i18n.tr("app.settings"), lambda: QTimer.singleShot(0, self.open_settings))
+        menu.addAction(
+            i18n.tr("app.export_diagnostics"), lambda: QTimer.singleShot(0, self.export_diagnostics)
+        )
+        menu.addAction(i18n.tr("app.about"), lambda: QTimer.singleShot(0, self.show_about))
 
         # Scroll area wrapping everything below the menu bar, no horizontal
         # scrollbar (AGENT_UPDATE_5.md task 4).
@@ -828,6 +833,7 @@ class MainWindow(QMainWindow):
         self.lang_video_combo = QComboBox()
         _make_shrinkable_combo(self.lang_video_combo)
         self.lang_video_combo.setObjectName("lang_video_combo")
+        self.lang_video_combo.setAccessibleName(i18n.tr("language.video_label"))
         ui_lang = "en" if i18n.language() == "en" else "vi"
         self.lang_video_combo.addItem(i18n.tr("language.auto"), "auto")
         for lang_code, _en, _nat, _vi in lang_mod.CURATED_LANGUAGES:
@@ -1294,7 +1300,14 @@ class MainWindow(QMainWindow):
             DialogBridge, FillersDialog, OverloadDialog,
         )
 
-        bridge = DialogBridge(self)  # lives on the GUI thread
+        prev_bridge = getattr(self, "_active_dialog_bridge", None)
+        if prev_bridge is not None:
+            try:
+                prev_bridge.deleteLater()
+            except RuntimeError:
+                pass
+        bridge = DialogBridge(self, cancel_event=getattr(self.service, "_cancel", None))  # lives on the GUI thread
+        self._active_dialog_bridge = bridge
 
         def _run_modal(factory, extract=lambda dlg: dlg.choice):
             def _open():
@@ -1464,7 +1477,9 @@ class MainWindow(QMainWindow):
             dialog.setInformativeText(i18n.tr("error.internal"))
         copy_btn = dialog.addButton(i18n.tr("copy_details"), QMessageBox.ButtonRole.ActionRole)
         copy_btn.clicked.connect(
-            lambda: QApplication.clipboard().setText(errors.detail_text(result.error, result.detail))
+            lambda: QApplication.clipboard().setText(
+                _redact(errors.detail_text(result.error, result.detail))
+            )
         )
         export_btn = dialog.addButton(
             i18n.tr("app.export_diagnostics"), QMessageBox.ButtonRole.ActionRole
@@ -1509,7 +1524,7 @@ class MainWindow(QMainWindow):
         dialog = PaidProviderConfirmDialog(self, self._provider_label(provider))
         result = dialog.exec()
         remember = bool(dialog.dont_ask.isChecked())
-        if remember:
+        if result == 1 and remember:
             s = settings.load()
             seen = list(s.get("paid_notice_ok", []))
             if provider not in seen:
@@ -1523,9 +1538,30 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(
             self, i18n.tr("app.export_diagnostics"), str(default), "Zip (*.zip)"
         )
-        if path:
-            out = diagnostics.export_diagnostics(Path(path), jobs_dir=self._jobs_dir())
-            QMessageBox.information(self, i18n.tr("app.export_diagnostics"), str(out))
+        if not path:
+            return
+        jobs_root = self._jobs_dir()
+        target = Path(path)
+
+        from dubtool.app.ui.settings_dialog import _WorkResult
+
+        work = _WorkResult(self)
+        self._diag_work = work
+
+        def _done(payload) -> None:
+            if isinstance(payload, tuple) and len(payload) == 2 and payload[0] == "__error__":
+                QMessageBox.warning(
+                    self, i18n.tr("app.export_diagnostics"), _redact(str(payload[1]))
+                )
+            else:
+                QMessageBox.information(self, i18n.tr("app.export_diagnostics"), str(payload))
+            try:
+                work.deleteLater()
+            except RuntimeError:
+                pass
+
+        work.finished.connect(_done)
+        work.fire(lambda: diagnostics.export_diagnostics(target, jobs_dir=jobs_root))
 
     def show_about(self) -> None:
         # Update 9 task 4: version (1.0.<update>), build id, the author,
@@ -1558,5 +1594,10 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
             self.service.cancel()
-            self.service.wait(timeout=30)
+            # Pump Qt events while waiting for the worker thread so any pending
+            # DialogBridge BlockingQueuedConnection cannot deadlock closeEvent.
+            deadline = time.monotonic() + 30.0
+            while self.service.running and time.monotonic() < deadline:
+                QApplication.processEvents()
+                self.service.wait(timeout=0.05)
         event.accept()

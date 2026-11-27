@@ -212,6 +212,7 @@ def plan(root: Path, *, jobs_days: int = 14, now: float | None = None) \
         shot_root = root / "screenshots"
         files = [p for p in shot_root.rglob("*")
                  if p.is_file() and not p.is_symlink()]
+        newest_dir = None
         if files:
             newest_dir = None if _by_mtime(files)[0].parent == shot_root \
                 else _by_mtime(files)[0].parent
@@ -227,8 +228,8 @@ def plan(root: Path, *, jobs_days: int = 14, now: float | None = None) \
     for p in root.glob("old_before_*"):
         add(p, "old_backups", "delete", "job backup")
 
-    zips = sorted((root / "review").glob("*.zip")) if (root / "review").is_dir() else []
-    for p in _by_mtime(zips)[3:]:
+    zips = _by_mtime(sorted((root / "review").glob("*.zip"))) if (root / "review").is_dir() else []
+    for p in zips[3:]:
         add(p, "review_zips", "delete", "beyond the 3 newest")
     for p in zips[:3]:
         add(p, "review_zips", "keep")
@@ -328,8 +329,18 @@ def check_root(root: Path) -> None:
         raise SystemExit(f"project root not found: {root}")
 
 
+def _is_link_or_junction(path: Path) -> bool:
+    is_junc = getattr(os.path, "isjunction", None)
+    try:
+        return path.is_symlink() or (bool(is_junc(path)) if callable(is_junc) else False)
+    except OSError:
+        return False
+
+
 def apply(items: list[PlanItem], root: Path, log_path: Path) -> int:
     """Delete only items whose action is 'delete'; write cleanup.log."""
+    from dubtool import workspace
+
     reclaimed = 0
     lines = ["# cleanup.log  " +
              datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")]
@@ -338,9 +349,9 @@ def apply(items: list[PlanItem], root: Path, log_path: Path) -> int:
         if item.action != "delete":
             continue
         raw = Path(item.path)
-        if raw.is_symlink():
-            # Never dereference a symlink before checking containment — verify
-            # the symlink entry itself sits inside `root`, then remove only the
+        if _is_link_or_junction(raw):
+            # Never dereference a symlink/junction before checking containment —
+            # verify the entry itself sits inside `root`, then remove only the
             # link without touching its target.
             parent_resolved = raw.parent.resolve()
             if not (parent_resolved == root or parent_resolved.is_relative_to(root)):
@@ -352,13 +363,18 @@ def apply(items: list[PlanItem], root: Path, log_path: Path) -> int:
             if not (p == root or p.is_relative_to(root)):
                 log.warning("skipping outside-root path: %s", p)
                 continue
+            try:
+                workspace.assert_not_protected_dir(p, action="cleanup.apply")
+            except Exception as exc:
+                log.warning("skipping protected path %s: %s", p, exc)
+                continue
         size = item.size
         try:
-            if p.is_symlink():
+            if _is_link_or_junction(p):
                 try:
                     p.unlink()
                 except OSError:
-                    p.rmdir()      # Windows directory symlink fallback
+                    p.rmdir()      # Windows directory symlink / junction fallback
             elif p.is_file():
                 p.unlink()
             elif p.is_dir():
@@ -380,15 +396,27 @@ def apply(items: list[PlanItem], root: Path, log_path: Path) -> int:
 
 
 def _rmtree_nofollow(dirpath: Path) -> None:
+    from dubtool import workspace
+
+    workspace.assert_not_protected_dir(dirpath, action="cleanup._rmtree_nofollow")
+    if _is_link_or_junction(dirpath):
+        try:
+            dirpath.unlink()
+        except OSError:
+            dirpath.rmdir()
+        return
     for entry in os.scandir(dirpath):
         try:
             p = Path(entry.path)
-            if entry.is_symlink():
-                if entry.is_dir():
-                    p.rmdir()
+            if _is_link_or_junction(p):
+                if entry.is_dir(follow_symlinks=False) or p.is_dir():
+                    try:
+                        p.rmdir()
+                    except OSError:
+                        p.unlink()
                 else:
                     p.unlink()
-            elif entry.is_dir():
+            elif entry.is_dir(follow_symlinks=False):
                 _rmtree_nofollow(p)
             else:
                 p.unlink()

@@ -24,7 +24,13 @@ def run(job, config, force: bool = False, cancel=None) -> None:
         raise RuntimeError(
             "input video has no audio stream — cannot dub a video without audio"
         )
-    audio_utils.extract_audio(src, out, cancel=cancel)
-    if not out.exists() or out.stat().st_size == 0:
-        raise RuntimeError("ffmpeg produced no audio output")
+    part = out.with_name(out.stem + ".part" + out.suffix)
+    part.unlink(missing_ok=True)
+    try:
+        audio_utils.extract_audio(src, part, cancel=cancel)
+        if not part.exists() or part.stat().st_size == 0:
+            raise RuntimeError("ffmpeg produced no audio output")
+        part.replace(out)
+    finally:
+        part.unlink(missing_ok=True)
     log.info("s1: extracted %s", out.name)

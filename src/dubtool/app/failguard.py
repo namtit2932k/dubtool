@@ -33,6 +33,7 @@ _KEY_SHAPED = (
     re.compile(r"sk-[0-9A-Za-z_\-]{20,}"),
     re.compile(r"gsk_[0-9A-Za-z_\-]{20,}"),
     re.compile(r"AQ\.[0-9A-Za-z_\-]{20,}"),
+    re.compile(r"(?:GEMINI|GOOGLE|GROQ|OPENAI|GPT|ANTHROPIC|CLAUDE)_API_KEY\s*[=:]\s*\S+"),
 )
 
 
@@ -60,10 +61,17 @@ def _write_log(text: str) -> Path | None:
         d = logs_dir()
         d.mkdir(parents=True, exist_ok=True)
         names = sorted(d.glob("slot-error-*.log"))
+        # Compute next monotonic index BEFORE pruning so slot-error-007.log is
+        # not overwritten on every subsequent error.
+        max_idx = 0
+        for existing in names:
+            m = re.search(r"slot-error-(\d+)\.log$", existing.name)
+            if m:
+                max_idx = max(max_idx, int(m.group(1)))
         # Keep at most 5 old files (AGU6 housekeeping spirit).
         for old in names[:-5]:
             old.unlink(missing_ok=True)
-        path = d / f"slot-error-{len(names) + 1:03d}.log"
+        path = d / f"slot-error-{max_idx + 1:03d}.log"
         path.write_text(text, encoding="utf-8")
         return path
     except OSError:
@@ -78,9 +86,9 @@ def _distinct_key(text: str) -> str:
 
 
 def handle_slot_exception(exc: BaseException) -> None:
-    """Log, then show the dialog once per distinct error."""
+    """Log (scrubbed), then show the dialog once per distinct error."""
     text = f"{_QT_SLOT_LOG_PREFIX}\n{describe(exc)}"
-    log.exception("unhandled exception in slot")
+    log.error("%s", text)
     _write_log(text)
     key = _distinct_key(text)
     if key in _REPORTED:

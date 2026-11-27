@@ -166,10 +166,13 @@ def run(job, config, force: bool = False, cancel=None) -> None:
     if threads > 0:
         cmd[-1:-1] = ["-threads", str(threads)]
     started = time.monotonic()
-    result = proc.run(cmd, cwd=str(job.dir), cancel=cancel, low_priority=True)
-    seconds = time.monotonic() - started
-    if result.returncode != 0:
-        tail = (result.stderr or "").strip().splitlines()[-8:]
-        raise RuntimeError("burn failed: " + " | ".join(tail))
-    os.replace(str(tmp_out), str(out))
+    try:
+        result = proc.run(cmd, cwd=str(job.dir), cancel=cancel, low_priority=True)
+        seconds = time.monotonic() - started
+        if result.returncode != 0:
+            tail = (result.stderr or "").strip().splitlines()[-8:]
+            raise RuntimeError("burn failed: " + " | ".join(tail))
+        os.replace(str(tmp_out), str(out))
+    finally:
+        tmp_out.unlink(missing_ok=True)
     log.info("s7: burned subtitles into %s in %.1fs", out.name, seconds)

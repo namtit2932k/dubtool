@@ -52,6 +52,7 @@ def check_hosts(timeout_s: float = 10.0) -> list[dict]:
             offset = clock_offset(api_host, timeout_s)
             if offset is not None:
                 row["clock_offset_s"] = round(offset, 2)
+                record_offset(api_host, offset)
                 clock_measured = True
         rows.append(row)
     return rows

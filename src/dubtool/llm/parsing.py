@@ -121,6 +121,16 @@ def _extract_vi_field(item: dict[str, Any]) -> Any:
     return None
 
 
+def _validate_ids(data: list[Any], expected_ids: list[int]) -> None:
+    seen = [item.get("id") for item in data if isinstance(item, dict)]
+    if len(seen) != len(expected_ids) or not all(
+        isinstance(i, int) and not isinstance(i, bool) for i in seen
+    ):
+        raise LLMError(f"expected ids {sorted(expected_ids)} exactly once (integers), got {seen}")
+    if sorted(set(seen)) != sorted(expected_ids):
+        raise LLMError(f"expected ids {sorted(expected_ids)} exactly once, got {seen}")
+
+
 def parse_json_array(text: str, expected_ids: list[int]) -> list[dict[str, Any]]:
     """Parse and validate a JSON array of {"id","vi"} objects."""
     if not text or not text.strip():
@@ -130,11 +140,7 @@ def parse_json_array(text: str, expected_ids: list[int]) -> list[dict[str, Any]]
     if not isinstance(data, list):
         raise LLMError(f"expected a JSON array, got {type(data).__name__}")
 
-    seen = [item.get("id") for item in data if isinstance(item, dict)]
-    if sorted(set(seen)) != sorted(expected_ids):
-        raise LLMError(f"expected ids {sorted(expected_ids)} exactly once, got {seen}")
-    if len(seen) != len(expected_ids):
-        raise LLMError("duplicated or missing ids in response")
+    _validate_ids(data, expected_ids)
 
     out: list[dict[str, Any]] = []
     for item in data:
@@ -169,9 +175,7 @@ def parse_batch_shortened(text: str, expected_ids: list[int]) -> list[dict[str, 
         data = unwrap_items(data)
     if not isinstance(data, list):
         raise LLMError(f"expected a JSON array, got {type(data).__name__}")
-    seen = [item.get("id") for item in data if isinstance(item, dict)]
-    if sorted(set(seen)) != sorted(expected_ids):
-        raise LLMError(f"expected ids {sorted(expected_ids)} exactly once, got {seen}")
+    _validate_ids(data, expected_ids)
     out: list[dict[str, Any]] = []
     for item in data:
         vi = _extract_vi_field(item) if isinstance(item, dict) else None

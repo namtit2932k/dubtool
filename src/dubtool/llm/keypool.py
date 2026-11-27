@@ -173,10 +173,13 @@ class KeyPool:
                                    now=self._until_epoch())
 
     def mark_rate_limited(self, value: str, retry_after: float | None) -> None:
-        """429: cooldown for max(retry-after hint, configured cooldown)."""
-        wait = self._cooldown_s
+        """429 / proactive TPM pacing: honor an explicit positive ``retry_after``
+        hint from the provider instead of inflating short 3-5s resets to 30-60s;
+        fall back to ``self._cooldown_s`` only when no hint is provided."""
         if retry_after is not None and retry_after > 0:
-            wait = max(wait, float(retry_after))
+            wait = float(retry_after)
+        else:
+            wait = self._cooldown_s
         self._mark(value, 2, wait)
         log.warning(
             "keypool: key #%d is rate limited — cooling down %.1fs",
@@ -223,10 +226,10 @@ class KeyPool:
                 return False
             target = min(self._earliest_wait(), remaining_total)
             if target <= 0:
-                # Fail fast when nothing is exhaustible: cooldowns never
-                # resolve a per-day quota, and an all-daily pool would spin
-                # here forever (AGENT_UPDATE_6.md 5.3).
-                if self.all_daily_exhausted():
+                # Fail fast when every key is permanently unusable for this run
+                # (all daily-exhausted, all invalid, or a mix of invalid+daily):
+                # waiting can never free them and would spin at 100% CPU forever.
+                if self.all_daily_exhausted() or self.failed_count() >= self.keys_count():
                     return False
                 continue  # a race freed a key: recheck
             waited += target

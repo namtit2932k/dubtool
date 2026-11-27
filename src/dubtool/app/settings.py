@@ -70,9 +70,9 @@ def load(raw_path: Path | None = None) -> dict:
         merged["default_output_dir"] = legacy_out
     merged.pop("default_output", None)  # the old key is never written back
     # AGU10 5.2: migrate the old intermediates boolean into keep_level.
-    # false (delete everything) -> "none"; true -> the new default
-    # "light" (keep the translation and the logs).
-    if "keep_level" not in (data or {}):
+    # Only apply when legacy `keep_intermediate` was actually present — a fresh
+    # install (`data == {}`) must keep the default `DEFAULTS["keep_level"]`.
+    if "keep_level" not in (data or {}) and "keep_intermediate" in (data or {}):
         legacy_keep = bool(data.get("keep_intermediate"))
         merged["keep_level"] = "light" if legacy_keep else "none"
     merged.pop("keep_intermediate", None)  # the old key is never written back
@@ -156,4 +156,12 @@ def validate(settings: dict) -> list[str]:
         problems.append(
             f"model_id has characters outside A-Z a-z 0-9 . _ - /: {model_id[:40]}"
         )
+    jobs_dir_raw = str(settings.get("jobs_dir") or "").strip()
+    if jobs_dir_raw:
+        from dubtool import workspace
+
+        try:
+            workspace.assert_not_protected_dir(Path(jobs_dir_raw), action="jobs_dir")
+        except Exception as exc:
+            problems.append(f"jobs_dir points to a protected directory: {exc}")
     return problems

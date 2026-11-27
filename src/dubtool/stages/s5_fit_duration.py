@@ -119,7 +119,8 @@ def run(job, config, force: bool = False, cancel=None, api_keys: list[str] | Non
     tts = build_tts(config, job.tts_dir / "cache", media_cache=media_cache)
     tts.cancel = cancel
     max_attempts = int(getattr(config, "max_fit_attempts", 3))
-    chunk_max = 40  # at most 40 shortening items per request
+    pid_hint = str(getattr(config, "llm_provider", "") or "").lower()
+    chunk_max = 15 if pid_hint in ("groq", "auto") else 40
 
     try:
         _run_fit_body(
@@ -244,7 +245,16 @@ def _run_fit_body(
         src_lang = lang_mod.english_name(src_code)
         if mode is None:
             try:
-                client = LLMClient(get_provider(config, api_keys=api_keys, cancel=cancel))
+                provider = get_provider(
+                    config,
+                    api_keys=api_keys,
+                    cancel=cancel,
+                    model_override=getattr(config, "llm_model", None) or None,
+                )
+                try:
+                    client = LLMClient(provider, cancel=cancel)
+                except TypeError:
+                    client = LLMClient(provider)
                 client.source_lang = src_lang
                 return client
             except Exception as exc:
@@ -321,7 +331,11 @@ def _run_fit_body(
         items: list[dict] = []
         for ctx in candidates:
             entry = ctx.entry
-            new_max = max(int(entry["max_chars"] * 0.85), 1)
+            dur = float(entry.get("tts_duration") or 0.0)
+            cur_len = max(1, len(str(entry.get("vi") or "")))
+            by_round = int(entry["max_chars"] * (0.85 ** round_number))
+            by_ratio = int(cur_len * (ctx.slot / max(dur, 0.1)) * 0.92) if dur > 0 else by_round
+            new_max = max(1, min(by_round, by_ratio))
             items.append({
                 "id": entry["id"],
                 "text": entry.get("text") or "",

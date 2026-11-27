@@ -29,6 +29,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import threading
 import time
 from typing import Any, Callable
 
@@ -163,12 +164,13 @@ class LLMClient:
         # 'ask' is asked again every time this reaches overload_after, not
         # once per run as before.
         self.consecutive_since_consult = 0
-        # AGU11 2.2: the payload count the stage sets per chunk (split
-        # eligibility); None = unknown/never split.
-        self.request_units: int | None = None
-        # Update 12: source characters of the current chunk (split
-        # eligibility for the character cap).
-        self.request_chars: int | None = None
+        self._lock = threading.Lock()
+        self._tls = threading.local()
+        # AGU11 2.2: the payload count / chars / label the stage sets per chunk
+        # live in thread-local storage so concurrent chunk workers on a shared
+        # LLMClient never clobber each other's split eligibility or labels.
+        self.request_units = None
+        self.request_chars = None
         # Update 12 task 1: the bounded backoff schedule for capacity
         # errors (503/500/502): llm.backoff_s, at most 4 attempts.
         self.backoff_s = self._read_backoff()
@@ -198,6 +200,30 @@ class LLMClient:
         # The per-run request budget is captured at construction (the stage's
         # main thread has the bound context; worker threads do not).
         self._budget = budget_mod.current()
+
+    @property
+    def request_units(self) -> int | None:
+        return getattr(self._tls, "request_units", None)
+
+    @request_units.setter
+    def request_units(self, value: int | None) -> None:
+        self._tls.request_units = value
+
+    @property
+    def request_chars(self) -> int | None:
+        return getattr(self._tls, "request_chars", None)
+
+    @request_chars.setter
+    def request_chars(self, value: int | None) -> None:
+        self._tls.request_chars = value
+
+    @property
+    def request_label(self) -> str:
+        return str(getattr(self._tls, "request_label", "") or "")
+
+    @request_label.setter
+    def request_label(self, value: str) -> None:
+        self._tls.request_label = str(value or "")
 
     # ------------------------------------------------------------ internals
     def _read_backoff(self) -> list[float]:
@@ -237,15 +263,26 @@ class LLMClient:
         import time as _time
 
         self._check_cancel()
-        wait_s = max(0.0, self.rate_pause_until - _time.monotonic())
+        with self._lock:
+            target_until = self.rate_pause_until
+        wait_s = max(0.0, target_until - _time.monotonic())
         if wait_s > 0:
             def pause_text(remaining: float) -> str:
-                return _panel_text_rate_pause(int(remaining + 0.999))
+                sec = max(1, int(remaining + 0.999))
+                try:
+                    from dubtool.app import i18n
+
+                    return i18n.tr("llm.rate_pause", n=sec)
+                except Exception:
+                    return f"rate pause ({sec} s)"
 
             slept = heartbeat.sleeping(wait_s, pause_text, self.cancel)
-            self.stage_wait["waited_s"] = float(
-                self.stage_wait.get("waited_s", 0.0)) + max(0.0, float(slept))
-            self.rate_pause_until = _time.monotonic()
+            with self._lock:
+                self.stage_wait["waited_s"] = float(
+                    self.stage_wait.get("waited_s", 0.0)) + max(0.0, float(slept))
+                # Never overwrite a longer pause extended by another worker.
+                if self.rate_pause_until <= target_until:
+                    self.rate_pause_until = max(self.rate_pause_until, _time.monotonic())
             self._check_cancel()
         elif self.min_interval_s > 0:
             heartbeat.sleeping(
@@ -843,6 +880,16 @@ class LLMClient:
                     "invalid Gemini API key: the stored key was rejected and no "
                     "valid key remains (check Settings → API keys)"
                 ) from exc
+            except KeyExhaustedError:
+                # acquire() found every key unavailable right now: this is
+                # not a failure of a request — wait until the earliest
+                # cooldown WITHOUT consuming a retry attempt (AGU5 2.4).
+                # Must be caught BEFORE LLMError because KeyExhaustedError subclasses LLMError.
+                if self.provider.wait_for_key():
+                    self._check_cancel()
+                    continue
+                self._check_cancel()
+                self.provider.raise_exhausted()  # fail-fast message if all daily
             except (LLMError, ConnectionError, OSError) as exc:
                 self._check_cancel()
                 last_error = exc
@@ -857,25 +904,9 @@ class LLMClient:
                         f"giving up after {gen_attempts} attempts ({self.provider.name}): {exc}"
                     ) from exc
                 slept = heartbeat.sleeping(BACKOFF_BASE_S * gen_attempts, _backoff_text, self.cancel)
-                self.stage_wait["waited_s"] = float(self.stage_wait.get("waited_s", 0.0)) + slept
+                with self._lock:
+                    self.stage_wait["waited_s"] = float(self.stage_wait.get("waited_s", 0.0)) + slept
                 self._check_cancel()
-            except KeyExhaustedError:
-                # acquire() found every key unavailable right now: this is
-                # not a failure of a request — wait until the earliest
-                # cooldown WITHOUT consuming a retry attempt (AGU5 2.4).
-                if self.provider.wait_for_key():
-                    self._check_cancel()
-                    continue
-                self._check_cancel()
-                self.provider.raise_exhausted()  # fail-fast message if all daily
-        if isinstance(last_error, InvalidKeyError):
-            raise LLMError(
-                "invalid Gemini API key: the stored key was rejected and no "
-                "valid key remains (check Settings → API keys)"
-            ) from last_error
-        raise LLMError(
-            f"giving up after {attempt_no} attempts ({self.provider.name}): {last_error}"
-        ) from last_error
 
     def _stage_schema(self, kind: str) -> dict | None:
         """The stage's strict schema when the provider guarantees the shape

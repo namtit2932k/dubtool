@@ -692,7 +692,7 @@ def main(argv: list[str] | None = None) -> int:
     # AGU8 7.1: from source, PyAV 19+ breaks stage 2 (faster-whisper).
     # Warn once with the exact repair command when a dub command runs.
     if getattr(args, "func", None) is not None and args.func.__name__ in (
-        "cmd_dub", "cmd_export_readable",
+        "cmd_run", "cmd_export_readable",
     ):
         from dubtool.app.paths import is_frozen
         from dubtool.av_check import problem as _av_problem

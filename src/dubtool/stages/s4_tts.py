@@ -101,7 +101,6 @@ def build_tts(config, cache_dir: Path, media_cache=None) -> "SegmentTTS":
 
 
 def os_replace_strong(src: Path, dst: Path) -> None:
-    dst.unlink(missing_ok=True)
     os.replace(str(src), str(dst))
 
 
@@ -669,8 +668,13 @@ def run(job, config, force: bool = False, cancel=None) -> None:
             done_now = already_done + generated
             log.info("s4: progress %d/%d", done_now, total_count)
             _emit_row(done_now, len(failed_ids))
-            persist()
+            if generated % 20 == 0 or done_now >= total_count:
+                persist()
     finally:
+        try:
+            persist()
+        except Exception:
+            pass
         active_provider = getattr(tts, "provider", None)
         if active_provider is not None and hasattr(active_provider, "close"):
             try:

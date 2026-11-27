@@ -303,9 +303,9 @@ class AnthropicProvider:
             )
         if status == 413:
             return RequestTooLargeError("anthropic request too large", status=413)
-        if status in (500, 502, 503) or getattr(exc, "type", None) == "overloaded_error":
+        if status in (500, 502, 503, 504, 529) or code == "overloaded_error" or getattr(exc, "type", None) == "overloaded_error":
             return ServerErrorLLMError(
-                f"anthropic {status or 529} {'overloaded error' if status == 529 else 'server error'}",
+                f"anthropic {status or 529} {'overloaded error' if (status == 529 or code == 'overloaded_error') else 'server error'}",
                 status=status or 529,
             )
         if self._body_mentions_low_credit(exc):

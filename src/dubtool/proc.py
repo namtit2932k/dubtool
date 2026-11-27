@@ -184,14 +184,32 @@ def run(cmd: list[str], *, cwd=None, capture: bool = True, timeout: float | None
         out, err = proc.communicate(input=input)
         completed = subprocess.CompletedProcess(cmd, proc.returncode, out, err)
     elif cancel is not None:
+        import time as _time
+
         proc = popen(cmd, cwd=cwd, capture=capture, low_priority=low_priority, gui=gui, **kw)
         out = err = None
         cancel_seen = False
+        deadline = (_time.monotonic() + float(timeout)) if timeout is not None else None
+        pending_input = input
         while True:
+            step_timeout = 0.2
+            if deadline is not None:
+                rem = deadline - _time.monotonic()
+                if rem <= 0:
+                    _kill_tree(proc.pid)
+                    try:
+                        proc.communicate(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        with contextlib_suppress():
+                            proc.communicate(timeout=1.0)
+                    raise subprocess.TimeoutExpired(cmd, timeout)
+                step_timeout = min(step_timeout, max(0.01, rem))
             try:
-                out, err = proc.communicate(timeout=0.2)
+                out, err = proc.communicate(input=pending_input, timeout=step_timeout)
                 break
             except subprocess.TimeoutExpired:
+                pending_input = None
                 if not cancel_seen and cancel.is_set():
                     cancel_seen = True
                     _kill_tree(proc.pid)
@@ -209,10 +227,7 @@ def run(cmd: list[str], *, cwd=None, capture: bool = True, timeout: float | None
                     if proc.poll() is None:
                         proc.kill()
                     raise _cancel_exception()
-                # normal progress loop; also enforce an absolute timeout
         completed = subprocess.CompletedProcess(cmd, proc.returncode, out, err)
-        if timeout is not None and proc.returncode is not None and completed.returncode < 0:
-            pass
     else:
         # timeout only: Popen + bounded communicate so TimeoutExpired is the
         # same error type subprocess.run raises.

@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 
 _FILE_NAME = "quota_state.json"
-_lock = threading.Lock()
+_lock = threading.RLock()
 
 
 def fingerprint(key: str) -> str:
@@ -64,8 +64,11 @@ def next_pacific_midnight(now_epoch: float) -> float:
     if dst_start <= today < dst_end:
         offset = -7
     # The next 00:00 Pacific local time after `now` (kept as UTC math so no
-    # named tz database is needed — good to a few minutes).
-    for add in (1, 2):
+    # named tz database is needed — good to a few minutes). Must include
+    # `add = 0` because during 00:00..07:59 UTC (07:00..14:59 ICT), Pacific
+    # local date is still `today - 1`, so midnight of `today` Pacific is still
+    # ahead of `now`.
+    for add in (0, 1, 2):
         day_local = today + _dt.timedelta(days=add)
         candidate = _dt.datetime.combine(day_local, _dt.time(0, 0), tzinfo=_dt.timezone.utc)
         candidate = candidate + _dt.timedelta(hours=-offset)
@@ -78,30 +81,31 @@ def load(now: float | None = None) -> dict[str, dict]:
     """Entries whose `until` passed are removed on load (AGU6 5.3)."""
     now = time.time() if now is None else now
     path = state_path()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    cleaned: dict[str, dict] = {}
-    changed = False
-    for name, entry in data.items():
-        if not isinstance(entry, dict) or "until" not in entry:
-            changed = True
-            continue
+    with _lock:
         try:
-            until = float(entry["until"])
-        except (TypeError, ValueError):
-            changed = True
-            continue
-        if until > now:
-            cleaned[str(name)] = {"until": until, "reason": str(entry.get("reason", "per-day"))}
-        else:
-            changed = True
-    if changed:
-        _save(cleaned)
-    return cleaned
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        cleaned: dict[str, dict] = {}
+        changed = False
+        for name, entry in data.items():
+            if not isinstance(entry, dict) or "until" not in entry:
+                changed = True
+                continue
+            try:
+                until = float(entry["until"])
+            except (TypeError, ValueError):
+                changed = True
+                continue
+            if until > now:
+                cleaned[str(name)] = {"until": until, "reason": str(entry.get("reason", "per-day"))}
+            else:
+                changed = True
+        if changed:
+            _save(cleaned)
+        return cleaned
 
 
 def _save(data: dict[str, dict]) -> None:

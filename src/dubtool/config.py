@@ -260,6 +260,7 @@ def load_env(root: Path) -> None:
         pass
     for name in (
         "GEMINI_API_KEY", "GOOGLE_API_KEY",
+        "GROQ_API_KEY",
         "OPENAI_API_KEY", "GPT_API_KEY",
         "ANTHROPIC_API_KEY", "CLAUDE_API_KEY",
     ):
@@ -352,7 +353,10 @@ def load(root: Path, overrides: dict | None = None) -> Config:
             if key in _NESTED_KEYS and isinstance(value, dict):
                 for sub_key, sub_value in value.items():
                     if sub_value is not None:
-                        data[key][sub_key] = sub_value
+                        if isinstance(sub_value, dict) and isinstance(data[key].get(sub_key), dict):
+                            data[key][sub_key].update(sub_value)
+                        else:
+                            data[key][sub_key] = sub_value
             else:
                 data[key] = value
 

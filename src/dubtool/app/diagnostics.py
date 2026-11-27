@@ -23,12 +23,12 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Gemini keys start with "AIza" and are 35–40 chars; newer keys issued by
-# Google AI Studio start with "AQ." (used on this machine). Also scrub
-# generic assignments like GEMINI_API_KEY=... just in case.
+# Scrub all provider key prefixes (Gemini AIza/AQ., Groq gsk_, Anthropic sk-ant-,
+# OpenAI sk-) and explicit *_API_KEY env assignments.
 _KEY_PATTERNS = re.compile(
-    r"AIza[0-9A-Za-z_\-]{20,}|AQ\.[0-9A-Za-z_\-]{30,}|gsk_[0-9A-Za-z_\-]{20,}"
-    r"|(?:GEMINI|GROQ|OPENAI|ANTHROPIC)_API_KEY\s*[=:]\s*\S+"
+    r"AIza[0-9A-Za-z_\-]{20,}|AQ\.[0-9A-Za-z_\-]{20,}|gsk_[0-9A-Za-z_\-]{20,}"
+    r"|sk-ant-[0-9A-Za-z_\-]{20,}|sk-[0-9A-Za-z_\-]{20,}"
+    r"|(?:GEMINI|GOOGLE|GROQ|OPENAI|GPT|ANTHROPIC|CLAUDE)_API_KEY\s*[=:]\s*\S+"
 )
 
 

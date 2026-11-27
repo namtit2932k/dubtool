@@ -294,6 +294,8 @@ def run_dub(
     from dubtool import heartbeat
 
     budget: Any = None  # bound below, inside the try (exception paths read it)
+    budget_token: object = None
+    llm_budget_mod: Any = None
     hb_token: object = None  # heartbeat binding (reset in finally)
     try:
         video, output_dir = Path(video), Path(output_dir)
@@ -328,9 +330,6 @@ def run_dub(
                             provider_keys = [one]
                 if provider_keys:
                     keys[normalize_provider(pid)] = provider_keys
-        if not any(keys.values()) and not options.subtitles_only:
-            return DubResult(code="invalid_key", error="no API key (set it in Settings)")
-
         # Model -> provider + per-model defaults from the catalog
         # (packaging/models.yaml); the selected model replaces the old
         # fast/accurate modes entirely.
@@ -340,6 +339,8 @@ def run_dub(
         selected_model = str(options.model or catalog_mod.DEFAULT_MODEL_ID)
         info = catalog_mod.require(selected_model)
         pid = str(options.provider or info.provider).lower()
+        if not any(keys.values()) and not options.subtitles_only and pid != "ollama":
+            return DubResult(code="invalid_key", error="no API key (set it in Settings)")
         default_conc = int(info.translate_concurrency)
         if pid == "auto":
             free_key_count = len(keys.get("gemini") or []) + len(keys.get("groq") or [])
@@ -436,6 +437,8 @@ def run_dub(
         # stage's LLMClient shares the same counter.
         from dubtool.llm import budget as llm_budget
 
+        llm_budget_mod = llm_budget
+
         if pid == "auto":
             active_key_count = max(
                 1, len(keys.get("gemini") or []) + len(keys.get("groq") or [])
@@ -491,16 +494,28 @@ def run_dub(
             "s7": lambda j, c, force: s7_subtitles.run(j, c, force=force, cancel=cancel),
         }
 
+        def _stage_artifact_present(stage_name: str) -> bool:
+            required = {
+                "s1": job.audio_path,
+                "s2": job.transcript_path,
+                "s3": job.translated_path,
+                "s6": job.output_nosubs_path,
+                "s7": job.output_path,
+            }.get(stage_name)
+            return required is None or (required.is_file() and required.stat().st_size > 0)
+
         for stage in STAGE_ORDER:
             if cancel.is_set():
                 return DubResult(code="cancelled", cancelled=True, job_id=job.dir.name)
             # Dependency-aware resume (AGENT_UPDATE_5.md task 5.1): a stage
-            # whose recorded inputs hash still matches is skipped, so a
-            # rerun after a failed/changed stage only redoes what is stale.
+            # whose recorded inputs hash still matches is skipped ONLY when its
+            # required output artifact is still present on disk (e.g. after
+            # `keep_level="light"` pruned audio.wav / output.mp4, s1/s6/s7 must
+            # re-run cleanly instead of crashing downstream with FileNotFoundError).
             from dubtool.job import stage_inputs_hash
 
             current_hash = stage_inputs_hash(job, cfg, stage)
-            if job.is_done(stage, current_hash) and not force:
+            if job.is_done(stage, current_hash) and _stage_artifact_present(stage) and not force:
                 logging.getLogger("dubtool").info(
                     "%s: done with unchanged inputs, skipping", stage
                 )
@@ -609,7 +624,7 @@ def run_dub(
                     asr_stats.save({
                         "model": cfg.whisper_model,
                         "s2_elapsed_s": stage_elapsed,
-                        "video_s": _au.probe_duration(job.dir / "input.mp4"),
+                        "video_s": _au.probe_duration(job.resolve_input()),
                     })
                 except Exception:
                     pass
@@ -688,26 +703,29 @@ def run_dub(
 
         out_srt = None
         if options.save_srt and job.srt_path.exists():
-            srt_target = output_dir / (video.stem + "_vi.srt")
-            tmp_srt = output_dir / (video.stem + "_vi.srt.part")
+            srt_stem = options.output_name_base or video.stem
+            srt_target = output_dir / (srt_stem + "_vi.srt")
+            tmp_srt = output_dir / (srt_stem + "_vi.srt.part")
             shutil.copyfile(job.srt_path, tmp_srt)
             os.replace(tmp_srt, srt_target)
             out_srt = srt_target
 
         keep_level = str(getattr(options, "keep_level", "light") or "light").lower()
         if keep_level == "none":
-            # Keep only the log (AGU4 7.4): delete everything else.
+            # Keep only the log (AGU4 7.4): delete everything else (do NOT
+            # re-create state.json via job.save() afterwards).
             from dubtool.job import prune_none
 
             prune_none(job.dir)
         elif keep_level == "light":
-        # AGU10 5.2: 'Giữ bản dịch và nhật ký': keep the small
-        # translation files and logs, delete the bulky ones.
+            # AGU10 5.2: 'Giữ bản dịch và nhật ký': keep the small
+            # translation files and logs, delete the bulky ones.
             from dubtool.job import prune_light
 
             prune_light(job.dir)
-
-        job.save()
+            job.save()
+        else:
+            job.save()
         sl = job.state.get("source_language") if isinstance(job.state, dict) else None
         result = DubResult(
             ok=True, code="ok", out_video=target, out_srt=out_srt, job_id=job_id,
@@ -730,6 +748,8 @@ def run_dub(
         )
     finally:
         heartbeat.reset(hb_token)
+        if budget_token is not None and llm_budget_mod is not None:
+            llm_budget_mod.reset(budget_token)
 
 
 def _user_settings() -> dict:

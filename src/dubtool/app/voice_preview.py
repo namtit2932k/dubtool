@@ -41,10 +41,17 @@ def ensure_preview_wav(mode: str, voice: str, *, provider_factory=None) -> Path:
     out = preview_wav_path(m, v)
     if out.is_file() and out.stat().st_size >= 400:
         return out
+    part = out.with_name(f"{out.stem}.{threading.get_ident()}.part{out.suffix}")
+    part.unlink(missing_ok=True)
     provider = provider_factory(m) if provider_factory else VieNeuTTSProvider(mode=m)
     try:
-        provider.synthesize(SAMPLE_TEXT, v, out)
+        provider.synthesize(SAMPLE_TEXT, v, part)
+        if part.is_file() and part.stat().st_size >= 400:
+            part.replace(out)
+        else:
+            raise RuntimeError("voice preview synthesis produced empty audio")
     finally:
+        part.unlink(missing_ok=True)
         close_fn = getattr(provider, "close", None)
         if callable(close_fn):
             try:
@@ -141,11 +148,20 @@ def make_preview_button(get_mode_and_voice, parent=None):
         btn._preview_busy = True
         btn.setEnabled(False)
         btn.setText(i18n.tr("options.preview_loading"))
-        synthesize_in_background(
-            mode,
-            voice,
-            lambda wav, err: bridge.done.emit(wav, err),
-        )
+        def _safe_emit(wav, err) -> None:
+            try:
+                import shiboken6
+
+                if not shiboken6.isValid(bridge):
+                    return
+            except Exception:
+                pass
+            try:
+                bridge.done.emit(wav, err)
+            except RuntimeError:
+                pass  # button/dialog closed while synthesizing
+
+        synthesize_in_background(mode, voice, _safe_emit)
 
     btn.clicked.connect(_clicked)
     return btn

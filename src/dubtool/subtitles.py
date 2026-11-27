@@ -160,9 +160,10 @@ def split_cue_times(char_counts: list[int], start: float, end: float) -> list[fl
             for i in spare_parts:
                 give = take * (durations[i] - MIN_CUE_S) / spare_total
                 durations[i] -= give
+            deficits = {i: MIN_CUE_S - durations[i] for i in short}
+            total_deficit = max(sum(deficits.values()), 1e-9)
             for i in short:
-                gain = take * ((MIN_CUE_S - durations[i]) / max(sum(MIN_CUE_S - durations[j] for j in short), 1e-9))
-                durations[i] += gain
+                durations[i] += take * (deficits[i] / total_deficit)
         # Round-off safety: keep within the span.
         drift = sum(durations) - span
         if drift > 0 and durations:
@@ -342,7 +343,8 @@ def build_srt(
 
 def _entry_by_id(entries: list[dict], seg_id) -> dict:
     for entry in entries:
-        if entry["id"] == seg_id:
+        eid = entry.get("id", entry.get("unit_id"))
+        if eid == seg_id:
             return entry
     return {"id": seg_id, "vi": None}
 

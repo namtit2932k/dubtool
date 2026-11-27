@@ -78,6 +78,9 @@ class FillersDialog(QDialog):
                 target.show()
             else:
                 target.hide()
+            combo.currentIndexChanged.connect(
+                lambda _idx, c=combo, t=target: t.setVisible(c.currentData() == ACTION_TRANSLATE)
+            )
             row.addWidget(combo, 1)
             row.addWidget(target, 1)
             holder = QWidget()
@@ -155,12 +158,15 @@ class DialogBridge(QObject):
 
     _invoke = Signal(object)
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, parent: QWidget | None = None, cancel_event=None):
         super().__init__(parent)
+        self._cancel_event = cancel_event
         self._invoke.connect(self._run, Qt.ConnectionType.BlockingQueuedConnection)
 
     def call(self, opener):
         """opener: () -> the dialog result. Never returns before the user."""
+        if self._cancel_event is not None and self._cancel_event.is_set():
+            return None
         if QThread.currentThread() is self.thread():
             return opener()
         box: list = []

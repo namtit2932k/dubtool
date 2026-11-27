@@ -31,7 +31,7 @@ ACCOUNTS = {
 LEGACY_ACCOUNT = "gemini_api_key"
 
 MAX_KEYS = 10
-MAX_ENCODED_BYTES = 2000
+MAX_ENCODED_BYTES = 2500  # Windows CredWrite UTF-16LE blob cap is 2560 bytes
 
 # The read-only environment names per provider, each also available with
 # _2, _3, … suffixes. GPT_API_KEY is the user-chosen name for OpenAI.
@@ -117,47 +117,66 @@ def _stored_list(provider: str) -> list[str]:
 
 
 def _save_list(provider: str, keys: list[str]) -> None:
-    encoded = json.dumps(keys, ensure_ascii=False).encode("utf-8")
+    encoded_str = json.dumps(keys, ensure_ascii=False)
+    utf16_bytes = len(encoded_str.encode("utf-16-le"))
     if len(keys) > MAX_KEYS:
         raise KeyLimitError(
             f"too many keys: {len(keys)} (the limit is {MAX_KEYS})"
         )
-    if len(encoded) > MAX_ENCODED_BYTES:
+    if utf16_bytes > MAX_ENCODED_BYTES:
         raise KeyLimitError(
-            f"stored keys too large ({len(encoded)} bytes; limit {MAX_ENCODED_BYTES})"
+            f"stored keys too large ({utf16_bytes} UTF-16LE bytes; limit {MAX_ENCODED_BYTES})"
         )
-    _write_entry(account_for(provider), encoded.decode("utf-8"))
+    _write_entry(account_for(provider), encoded_str)
 
 
 def _migrate_legacy(provider: str = "gemini") -> None:
-    """The old Gemini-only layouts (single key, interim three-slot)."""
+    """The old Gemini-only layouts (single key, interim three-slot).
+
+    Always saves the migrated list BEFORE deleting legacy entries so a write
+    failure or size limit error never drops user keys."""
+    if normalize_provider(provider) != "gemini":
+        return
     extra_values: list[str] = []
+    legacy_accounts_found: list[str] = []
 
     legacy = _read_entry(LEGACY_ACCOUNT)
     if legacy:
+        legacy_accounts_found.append(LEGACY_ACCOUNT)
         value = clean_key(legacy)
         if value and not looks_like_placeholder(value):
             extra_values.insert(0, value)  # the legacy key was the primary
-        _delete_entry(LEGACY_ACCOUNT)
     for suffix in ("_2", "_3"):
-        extra = _read_entry(LEGACY_ACCOUNT + suffix)
+        acc = LEGACY_ACCOUNT + suffix
+        extra = _read_entry(acc)
         if extra:
+            legacy_accounts_found.append(acc)
             value = clean_key(extra)
             if value and not looks_like_placeholder(value) and value not in extra_values:
                 extra_values.append(value)
-            _delete_entry(LEGACY_ACCOUNT + suffix)
 
-    if not extra_values or normalize_provider(provider) != "gemini":
+    if not legacy_accounts_found:
         return
-    stored = _stored_list("gemini")
-    for value in extra_values:
-        if value not in stored:
-            stored.append(value)
-    try:
-        _save_list("gemini", stored)
-    except KeyLimitError:
-        # never lose migrated keys silently; store what fits
-        _save_list("gemini", stored[:MAX_KEYS])
+    if extra_values:
+        stored = _stored_list("gemini")
+        for value in extra_values:
+            if value not in stored:
+                stored.append(value)
+        try:
+            _save_list("gemini", stored)
+        except KeyLimitError:
+            # never lose migrated keys silently; store what fits, keeping legacy if still too big
+            trimmed = stored[:MAX_KEYS]
+            while trimmed:
+                try:
+                    _save_list("gemini", trimmed)
+                    break
+                except KeyLimitError:
+                    trimmed = trimmed[:-1]
+            else:
+                return
+    for acc in legacy_accounts_found:
+        _delete_entry(acc)
 
 
 def clean_key(value: str) -> str:
@@ -242,17 +261,10 @@ def env_key_sources(provider: str) -> list[tuple[str, str]]:
     """(variable name, masked value) pairs for the read-only '.env' rows."""
     pid = normalize_provider(provider)
     out: list[tuple[str, str]] = []
-    for name in ENV_PREFIXES.get(pid, ()):
+    for name in env_names(pid):
         value = _env_value(name)
-        if not value or looks_like_placeholder(value):
-            continue
-        out.append((name, mask(value)))
-        i = 2
-        while i <= MAX_KEYS:
-            value_n = _env_value(f"{name}_{i}")
-            if value_n and not looks_like_placeholder(value_n):
-                out.append((f"{name}_{i}", mask(value_n)))
-            i += 1
+        if value and not looks_like_placeholder(value):
+            out.append((name, mask(value)))
     return out
 
 

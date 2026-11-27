@@ -250,9 +250,13 @@ class MediaCache:
     @staticmethod
     def _key(path: Path, root: Path | None) -> str:
         st = path.stat()
-        rel = path.name if root is None else (
-            str(path.relative_to(root)) if str(path).startswith(str(root)) else path.name
-        )
+        if root is None:
+            rel = path.name
+        else:
+            try:
+                rel = str(path.resolve().relative_to(root.resolve()))
+            except ValueError:
+                rel = path.name
         return f"{rel}|{st.st_size}|{st.st_mtime_ns}"
 
     def duration(self, path: Path, root: Path | None = None) -> float:
@@ -793,10 +797,12 @@ def mix_original_with_dub(
     ]
     if threads > 0:
         cmd[-1:-1] = ["-threads", str(threads)]
-    result = proc.run(
-        cmd, cwd=working_dir, cancel=cancel, low_priority=True
-    )
-    if result.returncode != 0:
-        tail = (result.stderr or "").strip().splitlines()[-8:]
-        raise RuntimeError("mix failed: " + " | ".join(tail))
-    script_path.unlink(missing_ok=True)
+    try:
+        result = proc.run(
+            cmd, cwd=working_dir, cancel=cancel, low_priority=True
+        )
+        if result.returncode != 0:
+            tail = (result.stderr or "").strip().splitlines()[-8:]
+            raise RuntimeError("mix failed: " + " | ".join(tail))
+    finally:
+        script_path.unlink(missing_ok=True)
