@@ -1,13 +1,13 @@
 <!doctype html>
-<html lang="vi" data-type="software" data-radius="soft" data-ground="sage" data-buttons="pill" data-motion>
+<html lang="en" data-type="software" data-radius="soft" data-ground="sage" data-buttons="pill" data-motion>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>DubTool: Phần mềm lồng tiếng Việt cho video trên Windows</title>
-<meta name="description" content="DubTool tự động nhận diện ngôn ngữ video bằng Whisper, dịch theo câu và tạo giọng đọc tiếng Việt 48 kHz cục bộ trên Windows, miễn phí mã nguồn mở MIT.">
+<title>DubTool: Free Windows app to dub foreign videos into Vietnamese</title>
+<meta name="description" content="Turn foreign-language videos into natural Vietnamese-dubbed videos with clean subtitles on Windows. No coding needed, free and open source.">
 <meta property="og:type" content="website">
-<meta property="og:title" content="DubTool: Phần mềm lồng tiếng Việt cho video trên Windows">
-<meta property="og:description" content="Nhận diện tiếng nói Whisper cục bộ, dịch đa nhà cung cấp miễn phí và tạo giọng đọc tiếng Việt 48 kHz offline trên Windows 64-bit.">
+<meta property="og:title" content="DubTool: Free Windows app to dub foreign videos into Vietnamese">
+<meta property="og:description" content="Listen, translate, speak in natural Vietnamese, and export a ready-to-watch video with subtitles on Windows. Free and open source.">
 <meta property="og:image" content="https://namtit2932k.github.io/dubtool/share.jpg">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -58,6 +58,27 @@
 <style>
   .brand-hex { width: 24px; height: 24px; flex: none; display: inline-block; }
 
+  /* Compact EN / VI switcher inside nav bar */
+  .lang-switch {
+    display: inline-flex; align-items: center; gap: 2px;
+    padding: 3px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--p-surface);
+  }
+  .lang-switch__btn {
+    border: 0; background: transparent; color: color-mix(in oklab, var(--ink) 80%, transparent);
+    font: 500 13px/1 var(--font-text); padding: 0 10px; height: 34px; min-width: 38px;
+    border-radius: 999px; cursor: pointer;
+    transition: background-color 140ms ease, color 140ms ease;
+  }
+  .lang-switch__btn:hover { color: var(--ink); }
+  .lang-switch__btn.is-active { background: var(--accent); color: var(--p-accent-ink); }
+  @media (max-width: 1023px) {
+    .lang-switch { margin-left: auto; margin-right: var(--s-2); }
+  }
+  @media (max-width: 639px) {
+    .lang-switch__btn { padding: 0 9px; min-width: 34px; height: 32px; font-size: 13px; }
+  }
+
   /* Keep dealt CSS ground sections locked to layout-v4 screen heights and top alignment */
   main > section.section:is(.bg-mist, .bg-band) {
     --g-screen: calc(var(--h, 1) * 100svh);
@@ -85,15 +106,34 @@
   .d-note__line i { width: 18px; height: 18px; border-radius: 50%; flex: none; display: grid; place-items: center; background: #e7f4ec; color: #17673f; font-style: normal; font-size: 13px; font-weight: 700; }
   .d-note__line b { font-weight: 500; color: #16181a; }
   .hero__proof { font-size: var(--t-small); color: color-mix(in oklab, var(--ink) 86%, transparent); }
-  .ly-piece--main .d-row { grid-template-columns: 36px minmax(0, 1fr) 56px 88px; }
+  .ly-piece--main .d-row { grid-template-columns: 36px minmax(0, 1fr) 56px 80px; }
   .ly-piece--main .d-main { padding-right: calc(var(--ly-cut-room) + 12px); }
   @media (max-width: 1023px) { .hero__art > .ly-piece--note { left: var(--s-4); bottom: var(--s-4); width: 270px; } }
   @media (max-width: 639px) {
-    .ly-piece--main .d-row { grid-template-columns: 36px minmax(0, 1fr) 88px; }
+    .ly-piece--main .d-row { grid-template-columns: 36px minmax(0, 1fr) 80px; }
     .ly-piece--main .d-row:nth-of-type(n+2) { display: none; }
   }
 
-  /* App-frame recipe (sections-library.md app-frame) */
+  /* 4-step beginner user guide section */
+  .guide-grid { margin-top: var(--s-6); }
+  .guide-card { display: grid; align-content: start; gap: var(--s-3); padding: var(--s-6); }
+  .guide-card__top { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); }
+  .guide-card__step { font: 500 13px/1.2 var(--font-mono); color: var(--accent); }
+  .guide-card h3 { margin: 0; font: 500 var(--t-card)/1.3 var(--font-display); color: var(--ink); }
+  .guide-card p { margin: 0; font: 400 var(--t-body)/1.5 var(--font-text); color: color-mix(in oklab, var(--ink) 88%, transparent); }
+  .guide-tip {
+    margin-top: var(--s-5); padding: var(--s-4) var(--s-5);
+    border-radius: var(--r-md); background: var(--p-surface);
+    border: 1px solid var(--line); display: flex; align-items: baseline; gap: var(--s-4); flex-wrap: wrap;
+  }
+  .guide-tip strong { font: 500 var(--t-body)/1.4 var(--font-display); color: var(--accent); }
+  .guide-tip span { font: 400 var(--t-body)/1.5 var(--font-text); color: color-mix(in oklab, var(--ink) 88%, transparent); }
+  @media (max-width: 639px) {
+    .guide-card { padding: var(--s-5); gap: var(--s-2); }
+    .guide-tip { padding: var(--s-4); gap: var(--s-2); }
+  }
+
+  /* App-frame recipe */
   .app.ui { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); margin-top: var(--s-7); background: var(--u-bg); border: 1px solid var(--u-border); border-radius: var(--u-r); box-shadow: var(--u-shadow); }
   .app > .app__pane { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
   .app > .app__pane + .app__pane { border-left: 1px solid var(--u-line); }
@@ -147,16 +187,20 @@
     .bench-bar { display: none; }
   }
 
-  /* Providers 3-column mode cards with real colour icons in lit panels */
+  /* Providers 3-column open cards (2 levels max: card--open > lit panel) */
   .mode-card { display: grid; align-content: start; gap: var(--s-4); }
-  .mode-card .panel { height: 212px; min-height: 212px; --p-h: 212px; display: grid; align-content: center; gap: var(--s-3); padding: var(--s-5); background:
+  .mode-card .panel {
+    height: 196px; min-height: 196px; --p-h: 196px;
+    display: grid; align-content: space-between; padding: var(--s-5);
+    background:
       radial-gradient(80% 70% at 20% 0%, color-mix(in oklab, var(--ground-surface) 80%, white), transparent 70%),
-      var(--ground-bg); margin: 0; border-radius: var(--r-md); }
-  .mode-card__preview { background: #1c1d20; color: #f3f5f1; border: 1px solid rgb(255 255 255 / .12); border-radius: 12px; padding: 14px 16px; display: grid; gap: 10px; box-shadow: 0 12px 24px -16px rgb(0 0 0 / .45); }
+      var(--ground-bg);
+    margin: 0; border-radius: var(--r-lg); color: #162418;
+  }
   .mode-card__top { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
   .mode-card__icons { display: flex; align-items: center; gap: var(--s-2); }
-  .mode-card__tag { font: 500 12px/1.2 var(--font-text); color: #0f1f10; background: #c6f19d; padding: 4px 10px; border-radius: 999px; }
-  .mode-card__models { font: 400 13px/1.45 var(--font-mono); color: #dce3dc; margin: 0; }
+  .mode-card__tag { font: 500 12px/1.2 var(--font-text); color: #ffffff; background: #142a17; padding: 5px 11px; border-radius: 999px; }
+  .mode-card__caption { font: 500 14px/1.4 var(--font-text); color: #162418; margin: 0; }
   .mode-card__list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-3); }
   .mode-card__list li { display: grid; gap: 2px; }
   .mode-card__k { font: 500 var(--t-label)/1.3 var(--font-text); color: color-mix(in oklab, var(--ink) 84%, transparent); }
@@ -164,8 +208,8 @@
   @media (max-width: 1279px) { .mode-card .panel { height: 156px; min-height: 156px; --p-h: 156px; } }
   @media (min-width: 640px) and (max-width: 1023px) { #providers { --h: 2; } }
   @media (max-width: 639px) {
-    .mode-card { gap: var(--s-3); padding: var(--s-5); }
-    .mode-card .panel { height: 164px; min-height: 164px; --p-h: 164px; padding: var(--s-4); }
+    .mode-card { gap: var(--s-3); }
+    .mode-card .panel { height: 156px; min-height: 156px; --p-h: 156px; padding: var(--s-4); }
     .mode-card__list { gap: var(--s-2); }
   }
 
@@ -181,7 +225,7 @@
 
 <header class="nav">
   <div class="wrap nav__bar">
-    <a class="skip-link" href="#top">Chuyển tới nội dung</a>
+    <a class="skip-link" href="#top" data-i18n="skip">Skip to content</a>
     <a class="nav__logo" href="#top">
       <svg class="brand-hex" viewBox="0 0 96 96" aria-hidden="true">
         <g transform="translate(48, 48)">
@@ -194,22 +238,22 @@
       </svg>
       DubTool
     </a>
-    <nav class="nav__links" aria-label="Điều hướng chính">
+    <nav class="nav__links" aria-label="Main navigation">
       <div class="nav__item">
-        <a class="nav__link" href="#workspace">Quy trình <svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+        <a class="nav__link" href="#guide"><span data-i18n="nav.guide">Guide</span> <svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
         <div class="nav__menu">
           <div class="wrap grid">
             <div class="menu-col span-3">
-              <p class="t-label">Xử lý cục bộ</p>
-              <a href="#workspace">Nhận diện Whisper<span>Tự phát hiện ngôn ngữ nguồn</span></a>
-              <a href="#features">Giọng đọc VieNeu-TTS<span>25 giọng Turbo 48 kHz offline</span></a>
-              <a href="#features">Trộn và burn phụ đề<span>FFmpeg 8.1.2 đóng gói sẵn</span></a>
+              <p class="t-label" data-i18n="nav.menu.start">Get started</p>
+              <a href="#guide"><b data-i18n="nav.menu.s1.t">4-step setup guide</b><span data-i18n="nav.menu.s1.d">From download to your first video</span></a>
+              <a href="#workspace"><b data-i18n="nav.menu.s2.t">Live app preview</b><span data-i18n="nav.menu.s2.d">See every step as it runs</span></a>
+              <a href="#features"><b data-i18n="nav.menu.s3.t">Built-in voices</b><span data-i18n="nav.menu.s3.d">Listen offline before you dub</span></a>
             </div>
             <div class="menu-col span-3">
-              <p class="t-label">Dịch thuật</p>
-              <a href="#providers">Xoay vòng miễn phí<span>Tự xoay Gemini và Groq</span></a>
-              <a href="#providers">Chạy ngoại tuyến<span>Dùng Ollama trên máy</span></a>
-              <a href="#faq">Câu hỏi thường gặp<span>Yêu cầu máy và dữ liệu</span></a>
+              <p class="t-label" data-i18n="nav.menu.more">Options &amp; help</p>
+              <a href="#providers"><b data-i18n="nav.menu.m1.t">Free translation keys</b><span data-i18n="nav.menu.m1.d">Use Google Gemini or Groq for free</span></a>
+              <a href="#providers"><b data-i18n="nav.menu.m2.t">100% offline mode</b><span data-i18n="nav.menu.m2.d">Keep private videos on your PC</span></a>
+              <a href="#faq"><b data-i18n="nav.menu.m3.t">Common questions</b><span data-i18n="nav.menu.m3.d">PC requirements, privacy, Mac support</span></a>
             </div>
             <a class="menu-card span-3 start-10" href="https://github.com/namtit2932k/dubtool/releases/latest">
               <div class="panel">
@@ -217,27 +261,30 @@
                   <div class="at-corner" style="--ax:20px;--ay:20px">
                     <div class="ui ui-notify" data-ui="notify" data-ui-still>
                       <ul class="ui-notify__list">
-                        <li class="ui-note"><span class="ui-note__ico"><svg class="ui-icon" viewBox="0 0 16 16"><path d="m3.5 8.4 2.8 2.8 6.2-6.4"/></svg></span><span class="ui-note__text"><span class="ui-note__title">DubTool v1.0.23<time>mới</time></span><span class="ui-note__body">Sửa ghép câu S3 và nâng giọng +2.5 dB</span></span></li>
+                        <li class="ui-note"><span class="ui-note__ico"><svg class="ui-icon" viewBox="0 0 16 16"><path d="m3.5 8.4 2.8 2.8 6.2-6.4"/></svg></span><span class="ui-note__text"><span class="ui-note__title"><span data-i18n="nav.card.note.t">DubTool v1.0.23</span><time data-i18n="nav.card.note.time">latest</time></span><span class="ui-note__body" data-i18n="nav.card.note.b">Clearer voice mix &amp; cleaner sentence translation</span></span></li>
                       </ul>
                     </div>
                   </div>
                 </div>
               </div>
-              <span class="t-card">Bản phát hành v1.0.23</span>
-              <span class="t-small muted">Gói zip Windows 64-bit, mở dùng ngay</span>
+              <span class="t-card" data-i18n="nav.card.title">Latest Windows build</span>
+              <span class="t-small muted" data-i18n="nav.card.sub">Single zip file, unzip and open directly</span>
             </a>
           </div>
         </div>
       </div>
-      <div class="nav__item"><a class="nav__link" href="#features">Tính năng</a></div>
-      <div class="nav__item"><a class="nav__link" href="#providers">Mô hình</a></div>
-      <div class="nav__item"><a class="nav__link" href="#faq">Hỏi đáp</a></div>
+      <div class="nav__item"><a class="nav__link" href="#features" data-i18n="nav.features">Features</a></div>
+      <div class="nav__item"><a class="nav__link" href="#providers" data-i18n="nav.modes">Translators</a></div>
+      <div class="nav__item"><a class="nav__link" href="#faq" data-i18n="nav.faq">FAQ</a></div>
     </nav>
     <div class="nav__actions">
-      <a class="nav__link" href="https://github.com/namtit2932k/dubtool">GitHub</a>
-      <a class="btn btn--primary" href="https://github.com/namtit2932k/dubtool/releases/latest">Tải DubTool<svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
+      <a class="btn btn--primary" href="https://github.com/namtit2932k/dubtool/releases/latest"><span data-i18n="cta.download">Download DubTool</span><svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
     </div>
-    <button class="nav__toggle" type="button" aria-expanded="false" aria-label="Mở trình đơn">
+    <div class="lang-switch" role="group" aria-label="Language switcher">
+      <button class="lang-switch__btn is-active" type="button" data-lang-btn="en" aria-pressed="true">EN</button>
+      <button class="lang-switch__btn" type="button" data-lang-btn="vi" aria-pressed="false">VI</button>
+    </div>
+    <button class="nav__toggle" type="button" aria-expanded="false" aria-label="Menu">
       <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M2 5h14M2 13h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
     </button>
   </div>
@@ -247,89 +294,152 @@
   <section class="hero hero--collage" data-enter aria-labelledby="hero-h">
     <div class="wrap"><div class="hero-text grid hero__grid">
       <div class="hero__text span-5">
-        <h1 id="hero-h">Lồng tiếng Việt cho video trên Windows</h1>
-        <p class="hero__lead">DubTool nhận diện giọng nói bằng Whisper, dịch theo từng câu hoàn chỉnh và đọc tiếng Việt 48 kHz ngay trên máy. Tải một gói zip Windows 64-bit, miễn phí giấy phép MIT.</p>
+        <h1 id="hero-h" data-i18n="hero.h1">Turn foreign videos into Vietnamese</h1>
+        <p class="hero__lead" data-i18n="hero.lead">DubTool listens to your video, translates it into natural Vietnamese, adds built-in voices, and exports a ready-to-watch Windows video. Free and open source.</p>
         <div class="btn-row">
-          <a class="btn btn--primary" href="https://github.com/namtit2932k/dubtool/releases/latest">Tải DubTool<svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
-          <a class="btn btn--secondary" href="#workspace">Xem quy trình</a>
+          <a class="btn btn--primary" href="https://github.com/namtit2932k/dubtool/releases/latest"><span data-i18n="cta.download">Download DubTool</span><svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
+          <a class="btn btn--secondary" href="#guide" data-i18n="cta.guide">See how to use</a>
         </div>
-        <p class="hero__proof">Kèm sẵn FFmpeg 8.1.2 và VieNeu-TTS v3 ONNX. Không ghi đè tệp video gốc.</p>
+        <p class="hero__proof" data-i18n="hero.proof">Works on Windows 10 and 11 (64-bit). No extra installs needed, and your original video stays untouched.</p>
       </div>
-      <div class="hero__art span-6 start-7" role="img" aria-label="Cửa sổ làm việc DubTool hiển thị bảy giai đoạn lồng tiếng Việt cho video và thẻ báo hoàn tất xuất tệp MP4 kèm bản dịch Word" data-fx="painterly-landscape" data-fx-seed="23" data-fx-palette='{"bg":"#c9d4c2","accent":"#5a7f56"}' data-fx-params='{"blur":1,"brush":0.35,"slope":0,"hillY":0.3,"horizon":0.62,"drift":0}'>
+      <div class="hero__art span-6 start-7" role="img" aria-label="DubTool desktop window showing automatic Vietnamese dubbing steps and the completed output card" data-fx="painterly-landscape" data-fx-seed="23" data-fx-palette='{"bg":"#c9d4c2","accent":"#5a7f56"}' data-fx-params='{"blur":1,"brush":0.35,"slope":0,"hillY":0.3,"horizon":0.62,"drift":0}'>
         <div class="ly-piece ly-piece--main d-win" aria-hidden="true">
-          <div class="d-win__bar"><span class="d-win__dots"><i></i><i></i><i></i></span><span>DubTool v1.0.23 · Lồng tiếng Việt</span></div>
+          <div class="d-win__bar"><span class="d-win__dots"><i></i><i></i><i></i></span><span data-i18n="hero.win.title">DubTool v1.0.23 · Vietnamese Video Dubbing</span></div>
           <div class="d-win__body">
             <div class="d-side">
-              <span class="is-on"><i></i>Tiến trình</span><span><i></i>Tùy chọn</span><span><i></i>Khóa API</span><span><i></i>Giọng đọc</span><span><i></i>Bản dịch</span>
-              <span class="d-side__label">Giọng cục bộ</span><span><i></i>Trúc Ly</span><span><i></i>Đức Trí</span>
+              <span class="is-on"><i></i><b data-i18n="hero.win.side1" style="font-weight:inherit">Progress</b></span>
+              <span><i></i><b data-i18n="hero.win.side2" style="font-weight:inherit">Options</b></span>
+              <span><i></i><b data-i18n="hero.win.side3" style="font-weight:inherit">API Keys</b></span>
+              <span><i></i><b data-i18n="hero.win.side4" style="font-weight:inherit">Voices</b></span>
+              <span><i></i><b data-i18n="hero.win.side5" style="font-weight:inherit">Script</b></span>
+              <span class="d-side__label" data-i18n="hero.win.label">Built-in voices</span>
+              <span><i></i>Trúc Ly</span>
+              <span><i></i>Đức Trí</span>
             </div>
             <div class="d-main">
-              <div class="d-main__head"><h4>7 giai đoạn</h4><span class="d-btn">Chạy</span></div>
-              <div class="d-tabs"><span class="is-on">Hoàn tất 7</span><span>Tiếng Trung</span><span>48 kHz</span></div>
+              <div class="d-main__head"><h4 data-i18n="hero.win.head">Automatic steps</h4><span class="d-btn" data-i18n="hero.win.btn">Start</span></div>
+              <div class="d-tabs"><span class="is-on" data-i18n="hero.win.t1">All done</span><span data-i18n="hero.win.t2">Auto-detected</span><span data-i18n="hero.win.t3">Vietnamese</span></div>
               <div class="d-rows">
-                <div class="d-row"><span class="d-thumb" style="background:#d9e5d6"></span><div><b>Trích âm thanh WAV</b><small>FFmpeg 8.1.2 · 16 kHz mono</small></div><span class="num">7.4s</span><span class="d-chip">Xong</span></div>
-                <div class="d-row"><span class="d-thumb" style="background:#cfe0ce"></span><div><b>Nhận diện Whisper</b><small>Tự động · Tiếng Trung 99.9%</small></div><span class="num">15m</span><span class="d-chip">Xong</span></div>
-                <div class="d-row"><span class="d-thumb" style="background:#e4ead5"></span><div><b>Dịch xoay vòng API</b><small>Gemini + Groq · 1.543 câu</small></div><span class="num">2m53s</span><span class="d-chip">Xong</span></div>
-                <div class="d-row"><span class="d-thumb" style="background:#d8e3dc"></span><div><b>Giọng VieNeu-TTS v3</b><small>Trúc Ly · Turbo INT8 cục bộ</small></div><span class="num">17m</span><span class="d-chip">Xong</span></div>
-                <div class="d-row"><span class="d-thumb" style="background:#e7e4d3"></span><div><b>Khớp thời lượng câu</b><small>0 chồng tiếng · lệch 0.16s</small></div><span class="num">2m10s</span><span class="d-chip">Xong</span></div>
-                <div class="d-row"><span class="d-thumb" style="background:#dce6d8"></span><div><b>Trộn nền &amp; burn SRT</b><small>CRF 21 · hộp nền tối mờ</small></div><span class="num">22m</span><span class="d-chip">Xong</span></div>
+                <div class="d-row"><span class="d-thumb" style="background:#d9e5d6"></span><div><b data-i18n="hero.r1.t">Read video audio</b><small data-i18n="hero.r1.s">Keeps original picture untouched</small></div><span class="num">7s</span><span class="d-chip" data-i18n="hero.chip.done">Done</span></div>
+                <div class="d-row"><span class="d-thumb" style="background:#cfe0ce"></span><div><b data-i18n="hero.r2.t">Listen to speech</b><small data-i18n="hero.r2.s">Auto-detected Chinese (99.9%)</small></div><span class="num">15m</span><span class="d-chip" data-i18n="hero.chip.done">Done</span></div>
+                <div class="d-row"><span class="d-thumb" style="background:#e4ead5"></span><div><b data-i18n="hero.r3.t">Translate sentences</b><small data-i18n="hero.r3.s">Free Gemini + Groq · 1,543 lines</small></div><span class="num">3m</span><span class="d-chip" data-i18n="hero.chip.done">Done</span></div>
+                <div class="d-row"><span class="d-thumb" style="background:#d8e3dc"></span><div><b data-i18n="hero.r4.t">Speak in Vietnamese</b><small data-i18n="hero.r4.s">Trúc Ly · natural local voice</small></div><span class="num">17m</span><span class="d-chip" data-i18n="hero.chip.done">Done</span></div>
+                <div class="d-row"><span class="d-thumb" style="background:#e7e4d3"></span><div><b data-i18n="hero.r5.t">Match video timing</b><small data-i18n="hero.r5.s">No overlapping speech</small></div><span class="num">2m</span><span class="d-chip" data-i18n="hero.chip.done">Done</span></div>
+                <div class="d-row"><span class="d-thumb" style="background:#dce6d8"></span><div><b data-i18n="hero.r6.t">Save video &amp; subtitles</b><small data-i18n="hero.r6.s">Readable dark box behind subtitles</small></div><span class="num">21m</span><span class="d-chip" data-i18n="hero.chip.done">Done</span></div>
               </div>
             </div>
           </div>
         </div>
         <div class="ly-piece ly-piece--note d-card" aria-hidden="true" data-ly-steps="700">
-          <div class="d-card__row"><h5>Xuất hoàn tất</h5><span class="d-chip" data-step data-step-at="4">100%</span></div>
-          <div class="d-note__line" data-step><i>✓</i><span><b>phim_co_trang_vi.mp4</b> · 1080p</span></div>
-          <div class="d-note__line" data-step><i>✓</i><span><b>1.543 câu</b> · 0 ký tự Hán sót</span></div>
-          <div class="d-note__line" data-step><i>✓</i><span>Kèm <b>bản dịch Word (.docx)</b></span></div>
+          <div class="d-card__row"><h5 data-i18n="hero.note.h">Ready to watch</h5><span class="d-chip" data-step data-step-at="4">100%</span></div>
+          <div class="d-note__line" data-step><i>✓</i><span data-i18n-html="hero.note.l1"><b>movie_vi.mp4</b> · Full HD video</span></div>
+          <div class="d-note__line" data-step><i>✓</i><span data-i18n-html="hero.note.l2"><b>Synced voice &amp; subtitles</b> · no overlap</span></div>
+          <div class="d-note__line" data-step><i>✓</i><span data-i18n-html="hero.note.l3">Includes <b>Word script (.docx)</b></span></div>
         </div>
       </div>
     </div></div>
+  </section>
+
+  <section class="section" id="guide" style="--hm: 2" aria-labelledby="guide-h">
+    <div class="wrap">
+      <div class="grid">
+        <div class="span-6">
+          <h2 id="guide-h" data-i18n="guide.h2">How to use DubTool in 4 simple steps</h2>
+        </div>
+        <div class="span-6 start-7 stack-4">
+          <p class="t-lead" data-i18n="guide.sub">No programming, no command line, and no extra software to install. Set it up once in about two minutes.</p>
+          <p><a class="link" href="https://github.com/namtit2932k/dubtool#readme" data-i18n="guide.link">Read full setup guide on GitHub</a></p>
+        </div>
+      </div>
+
+      <div class="grid guide-grid">
+        <article class="card guide-card span-6 m-nolift">
+          <div class="guide-card__top">
+            <span class="guide-card__step" data-i18n="guide.s1.k">Step 1 · Download</span>
+            <span class="ic-tile"><img data-icon="video" src="assets/icons/video.svg" alt="" width="24" height="24" loading="lazy"></span>
+          </div>
+          <h3 data-i18n="guide.s1.h">Unzip and open DubTool</h3>
+          <p data-i18n="guide.s1.p">Download the Windows zip from GitHub Releases, right-click Extract All, and double-click DubTool.exe. Everything needed is already inside.</p>
+        </article>
+
+        <article class="card guide-card span-6 m-nolift">
+          <div class="guide-card__top">
+            <span class="guide-card__step" data-i18n="guide.s2.k">Step 2 · One-time setup</span>
+            <span class="ic-tile"><img data-icon="gemini" src="assets/icons/gemini.svg" alt="" width="24" height="24" loading="lazy"></span>
+          </div>
+          <h3 data-i18n="guide.s2.h">Paste a free translation key</h3>
+          <p data-i18n="guide.s2.p">Open Settings → API Keys, paste a free key from Google AI Studio or Groq, and click Test all to see a green check.</p>
+        </article>
+
+        <article class="card guide-card span-6 m-nolift">
+          <div class="guide-card__top">
+            <span class="guide-card__step" data-i18n="guide.s3.k">Step 3 · Pick video</span>
+            <span class="ic-tile"><img data-icon="hugging-face" src="assets/icons/hugging-face.svg" alt="" width="24" height="24" loading="lazy"></span>
+          </div>
+          <h3 data-i18n="guide.s3.h">Drop your video and pick a voice</h3>
+          <p data-i18n="guide.s3.p">Drag your video into the box, choose an output folder, leave language on Auto-detect, and click Preview voice to listen first.</p>
+        </article>
+
+        <article class="card guide-card span-6 m-nolift">
+          <div class="guide-card__top">
+            <span class="guide-card__step" data-i18n="guide.s4.k">Step 4 · Click Generate</span>
+            <span class="ic-tile"><img data-icon="docx" src="assets/icons/docx.svg" alt="" width="24" height="24" loading="lazy"></span>
+          </div>
+          <h3 data-i18n="guide.s4.h">Get your dubbed video and script</h3>
+          <p data-i18n="guide.s4.p">Click Generate and wait. Your original file stays safe, and your folder gets a new Vietnamese MP4 plus a Word translation table.</p>
+        </article>
+      </div>
+
+      <div class="guide-tip">
+        <strong data-i18n="guide.tip.title">Beginner tip: already in Vietnamese?</strong>
+        <span data-i18n="guide.tip.text">If you drop a Vietnamese video by mistake, DubTool detects it automatically, stops before using any translation key, and lets you export clean subtitles instead.</span>
+      </div>
+    </div>
   </section>
 
   <section class="section" id="workspace" aria-labelledby="workspace-h">
     <div class="wrap">
       <div class="grid">
         <div class="span-5">
-          <h2 id="workspace-h">7 bước lồng tiếng trong cửa sổ DubTool</h2>
+          <h2 id="workspace-h" data-i18n="ws.h2">One clear DubTool window tracks every step</h2>
         </div>
         <div class="span-6 start-7 stack-4">
-          <p class="t-lead">Chọn video và thư mục xuất, DubTool tự tách âm, nhận diện lời thoại, dịch câu, đọc giọng Việt rồi xuất tệp mới mà không đụng tệp gốc.</p>
-          <p><a class="link" href="https://github.com/namtit2932k/dubtool/blob/main/docs/ARCHITECTURE.md">Đọc kiến trúc DubTool</a></p>
+          <p class="t-lead" data-i18n="ws.lead">You always see which step is running, how many lines are left, and the exact files saved. If you pause or close the app, you can resume right where it stopped.</p>
+          <p><a class="link" href="https://github.com/namtit2932k/dubtool#readme" data-i18n="ws.link">See screenshots on GitHub</a></p>
         </div>
       </div>
 
-      <div class="ui app fill" role="img" aria-label="Giao diện chính DubTool với danh sách tệp video bên trái và bảng tiến trình chạy bảy giai đoạn kèm nhật ký xử lý bên phải" data-ui-pause-host>
+      <div class="ui app fill" role="img" aria-label="DubTool desktop interface showing recent videos on the left and the live step-by-step progress log on the right" data-ui-pause-host>
         <div class="app__pane app__pane--list">
-          <div class="ui ui-panel ui-win" data-ui="window" data-open="Chờ" data-work="Đang chạy" data-done="Xong">
+          <div class="ui ui-panel ui-win" data-ui="window" data-open="Queued" data-work="Running" data-done="Done">
             <div class="ui-win__bar">
               <span class="ui-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-              <span class="ui-win__crumb">DubTool <i>/</i> <b>Lịch sử chạy</b></span>
+              <span class="ui-win__crumb">DubTool <i>/</i> <b data-i18n="ws.win.crumb">Recent videos</b></span>
               <span class="ui-spacer"></span>
-              <span class="ui-win__search" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span class="ui-win__ph">Tìm tệp</span><span class="ui-kbd">/</span></span>
+              <span class="ui-win__search" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span class="ui-win__ph" data-i18n="ws.win.search">Search files</span><span class="ui-kbd">/</span></span>
             </div>
             <div class="ui-win__body">
               <nav class="ui-win__side" aria-hidden="true">
-                <span class="ui-win__nav is-on"><svg class="ui-icon" viewBox="0 0 16 16"><path d="M2.5 9h3l1 1.5h3l1-1.5h3"/><path d="M2.5 9 4 3.5h8L13.5 9v3.5h-11z"/></svg>Gần đây<em>9</em></span>
-                <span class="ui-win__nav"><svg class="ui-icon" viewBox="0 0 16 16"><path d="m3.5 8.4 2.8 2.8 6.2-6.4"/></svg>Hoàn tất<em>7</em></span>
-                <span class="ui-win__nav"><svg class="ui-icon" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg>Tạm dừng<em>2</em></span>
-                <span class="ui-win__label">Ngôn ngữ</span>
-                <span class="ui-win__nav"><span class="ui-win__hash">#</span>Tiếng Trung</span>
-                <span class="ui-win__nav"><span class="ui-win__hash">#</span>Tiếng Anh</span>
-                <span class="ui-win__nav"><span class="ui-win__hash">#</span>Tiếng Nhật</span>
+                <span class="ui-win__nav is-on"><svg class="ui-icon" viewBox="0 0 16 16"><path d="M2.5 9h3l1 1.5h3l1-1.5h3"/><path d="M2.5 9 4 3.5h8L13.5 9v3.5h-11z"/></svg><span data-i18n="ws.win.s1">Recent</span><em>9</em></span>
+                <span class="ui-win__nav"><svg class="ui-icon" viewBox="0 0 16 16"><path d="m3.5 8.4 2.8 2.8 6.2-6.4"/></svg><span data-i18n="ws.win.s2">Finished</span><em>7</em></span>
+                <span class="ui-win__nav"><svg class="ui-icon" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg><span data-i18n="ws.win.s3">Paused</span><em>2</em></span>
+                <span class="ui-win__label" data-i18n="ws.win.lang">Languages</span>
+                <span class="ui-win__nav"><span class="ui-win__hash">#</span><span data-i18n="ws.win.l1">Chinese</span></span>
+                <span class="ui-win__nav"><span class="ui-win__hash">#</span><span data-i18n="ws.win.l2">English</span></span>
+                <span class="ui-win__nav"><span class="ui-win__hash">#</span><span data-i18n="ws.win.l3">Japanese</span></span>
               </nav>
               <div class="ui-win__main">
-                <div class="ui-win__cols" aria-hidden="true"><span>Video</span><span>Chi tiết</span><span>Trạng thái</span><span>Thời gian</span></div>
+                <div class="ui-win__cols" aria-hidden="true"><span data-i18n="ws.win.c1">Video</span><span data-i18n="ws.win.c2">Details</span><span data-i18n="ws.win.c3">Status</span><span data-i18n="ws.win.c4">Time</span></div>
                 <ul class="ui-win__rows">
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="1">ZH</span><span class="ui-win__who">tap_01_co_trang.mp4</span><span class="ui-win__sub">2:33:04 · 1.543 câu · Trúc Ly</span><span class="ui-win__st is-done" data-st>Xong</span><span class="ui-win__age">61m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="3">ZH</span><span class="ui-win__who">phim_ngan_doc.mp4</span><span class="ui-win__sub">29:15 · 720x1280 · 264 câu</span><span class="ui-win__st is-done" data-st>Xong</span><span class="ui-win__age">12m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="4">EN</span><span class="ui-win__who">huong_dan_blender.mp4</span><span class="ui-win__sub">18:40 · 1080p · Đức Trí</span><span class="ui-win__st" data-st>Đang chạy</span><span class="ui-win__age">4m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="2">JA</span><span class="ui-win__who">phong_su_kyoto.mp4</span><span class="ui-win__sub">14:22 · 1080p · Mai Anh</span><span class="ui-win__st is-done" data-st>Xong</span><span class="ui-win__age">8m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="5">KO</span><span class="ui-win__who">review_am_thuc.mp4</span><span class="ui-win__sub">11:05 · 1080p · Trúc Ly</span><span class="ui-win__st is-done" data-st>Xong</span><span class="ui-win__age">6m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="1">EN</span><span class="ui-win__who">bai_giang_ai.mp4</span><span class="ui-win__sub">42:10 · 1080p · Minh Quân</span><span class="ui-win__st is-done" data-st>Xong</span><span class="ui-win__age">21m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="3">ZH</span><span class="ui-win__who">lich_su_nha_tong.mp4</span><span class="ui-win__sub">35:48 · 1080p · Trúc Ly</span><span class="ui-win__st is-done" data-st>Xong</span><span class="ui-win__age">16m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="4">FR</span><span class="ui-win__who">tai_lieu_kien_truc.mp4</span><span class="ui-win__sub">22:15 · 1080p · Bảo Ngọc</span><span class="ui-win__st is-done" data-st>Xong</span><span class="ui-win__age">11m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="2">EN</span><span class="ui-win__who">gioi_thieu_san_pham.mp4</span><span class="ui-win__sub">03:18 · 1080p · Trúc Ly</span><span class="ui-win__st is-done" data-st>Xong</span><span class="ui-win__age">2m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="1">ZH</span><span class="ui-win__who">drama_ep01.mp4</span><span class="ui-win__sub">2:33:04 · 1,543 lines · Trúc Ly</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">61m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="3">ZH</span><span class="ui-win__who">short_clip_vertical.mp4</span><span class="ui-win__sub">29:15 · Vertical · 264 lines</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">12m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="4">EN</span><span class="ui-win__who">design_tutorial.mp4</span><span class="ui-win__sub">18:40 · Full HD · Đức Trí</span><span class="ui-win__st" data-st data-i18n="ws.st.run">Running</span><span class="ui-win__age">4m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="2">JA</span><span class="ui-win__who">kyoto_travel_vlog.mp4</span><span class="ui-win__sub">14:22 · Full HD · Mai Anh</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">8m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="5">KO</span><span class="ui-win__who">street_food_tour.mp4</span><span class="ui-win__sub">11:05 · Full HD · Trúc Ly</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">6m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="1">EN</span><span class="ui-win__who">course_lesson_04.mp4</span><span class="ui-win__sub">42:10 · Full HD · Minh Quân</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">21m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="3">ZH</span><span class="ui-win__who">history_story.mp4</span><span class="ui-win__sub">35:48 · Full HD · Trúc Ly</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">16m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="4">FR</span><span class="ui-win__who">architecture_film.mp4</span><span class="ui-win__sub">22:15 · Full HD · Bảo Ngọc</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">11m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="2">EN</span><span class="ui-win__who">product_demo.mp4</span><span class="ui-win__sub">03:18 · Full HD · Trúc Ly</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">2m</span></li>
                 </ul>
               </div>
             </div>
@@ -339,34 +449,33 @@
           <div class="ui ui-panel ui-pipe" data-ui="pipeline-board">
             <div class="ui-pipe__head">
               <svg class="ui-icon ui-pipe__branch" viewBox="0 0 16 16" aria-hidden="true"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5" r="1.5"/><path d="M4.5 5v6M11.5 6.5c0 2.6-2.2 3.6-5.6 4.6"/></svg>
-              <span class="ui-pipe__repo">dubtool</span><i class="ui-pipe__slash">/</i><code class="ui-pipe__ref">tap01.mp4</code>
-              <span class="ui-pipe__run">#4eec</span>
+              <span class="ui-pipe__repo">dubtool</span><i class="ui-pipe__slash">/</i><code class="ui-pipe__ref">ep01.mp4</code>
+              <span class="ui-pipe__run">#1023</span>
               <span class="ui-spacer"></span>
               <span class="ui-pipe__total"><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8.5" r="5.5"/><path d="M8 5.5v3l2 1.25M6.5 1.75h3"/></svg><span data-pipe-total>61m 15s</span></span>
-              <span class="ui-chip ui-chip--ink ui-chip--live ui-pipe__chip" data-pipe-chip data-done="Xong">Chạy</span>
+              <span class="ui-chip ui-chip--ink ui-chip--live ui-pipe__chip" data-pipe-chip data-done="Done" data-i18n="ws.pipe.chip">Run</span>
             </div>
             <div class="ui-pipe__commit">
               <span class="ui-avatar" data-tone="4">VI</span>
-              <span class="ui-pipe__msg">Auto-Rotate · Trúc Ly 48 kHz · CRF 21</span>
+              <span class="ui-pipe__msg" data-i18n="ws.pipe.msg">Free Auto-Rotate · Trúc Ly voice · Clean subtitles</span>
               <code class="ui-pipe__sha">v1.0.23</code>
-              <button class="ui-btn ui-btn--ghost ui-btn--sm ui-pipe__btn" type="button" tabindex="-1" data-pipe-btn data-done="Chạy lại">Hủy</button>
+              <button class="ui-btn ui-btn--ghost ui-btn--sm ui-pipe__btn" type="button" tabindex="-1" data-pipe-btn data-done="Run again" data-i18n="ws.pipe.btn">Cancel</button>
             </div>
             <ol class="ui-pipe__steps">
-              <li class="ui-pipe__step is-done" data-step="extract"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="logos:ffmpeg-icon" src="assets/icons/ffmpeg-icon.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm">Trích</span></span><code class="ui-pipe__cmd">ffmpeg -ac 1 -ar 16000</code><span class="ui-pipe__time" data-time>7.4s</span><span class="ui-pipe__bar"><i></i></span></li>
-              <li class="ui-pipe__step is-done" data-step="asr"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="python" src="assets/icons/python.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm">ASR</span></span><code class="ui-pipe__cmd">medium · zh (99.9%)</code><span class="ui-pipe__time" data-time>15m 41s</span><span class="ui-pipe__bar"><i></i></span></li>
-              <li class="ui-pipe__step is-run" data-step="translate" style="--k:0.7"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="gemini" src="assets/icons/gemini.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm">Dịch</span></span><code class="ui-pipe__cmd">auto-rotate · 1.543 câu</code><span class="ui-pipe__time" data-time="2m 53s">2m 04s</span><span class="ui-pipe__bar"><i></i></span></li>
-              <li class="ui-pipe__step" data-step="tts"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="hugging-face" src="assets/icons/hugging-face.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm">TTS</span></span><code class="ui-pipe__cmd">v3turbo_int8 · Trúc Ly</code><span class="ui-pipe__time" data-time="17m 25s">Đang chờ</span><span class="ui-pipe__bar"><i></i></span></li>
-              <li class="ui-pipe__step" data-step="burn"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="logos:ffmpeg-icon" src="assets/icons/ffmpeg-icon.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm">Xuất</span></span><code class="ui-pipe__cmd">mix +2.5 dB · CRF 21</code><span class="ui-pipe__time" data-time="25m 08s">Đang chờ</span><span class="ui-pipe__bar"><i></i></span></li>
+              <li class="ui-pipe__step is-done" data-step="extract"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="logos:ffmpeg-icon" src="assets/icons/ffmpeg-icon.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p1">Audio</span></span><code class="ui-pipe__cmd">read original sound</code><span class="ui-pipe__time" data-time>7s</span><span class="ui-pipe__bar"><i></i></span></li>
+              <li class="ui-pipe__step is-done" data-step="asr"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="python" src="assets/icons/python.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p2">Listen</span></span><code class="ui-pipe__cmd">detected Chinese</code><span class="ui-pipe__time" data-time>15m</span><span class="ui-pipe__bar"><i></i></span></li>
+              <li class="ui-pipe__step is-run" data-step="translate" style="--k:0.7"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="gemini" src="assets/icons/gemini.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p3">Translate</span></span><code class="ui-pipe__cmd">1,543 sentences</code><span class="ui-pipe__time" data-time="3m">2m</span><span class="ui-pipe__bar"><i></i></span></li>
+              <li class="ui-pipe__step" data-step="tts"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="hugging-face" src="assets/icons/hugging-face.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p4">Voice</span></span><code class="ui-pipe__cmd">Trúc Ly (local)</code><span class="ui-pipe__time" data-time="17m" data-i18n="ws.pipe.wait">Next</span><span class="ui-pipe__bar"><i></i></span></li>
+              <li class="ui-pipe__step" data-step="burn"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="logos:ffmpeg-icon" src="assets/icons/ffmpeg-icon.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p5">Save</span></span><code class="ui-pipe__cmd">MP4 + SRT + Word</code><span class="ui-pipe__time" data-time="25m" data-i18n="ws.pipe.wait">Next</span><span class="ui-pipe__bar"><i></i></span></li>
             </ol>
             <div class="ui-pipe__log" aria-hidden="true">
-              <span class="ui-pipe__line" data-step="extract"><b>[s1]</b> audio.wav 293.9 MB extracted in 7.4s</span>
-              <span class="ui-pipe__line" data-step="asr"><b>[s2]</b> detected zh (99.98%), 2.815 segments -&gt; 1.543 sentence units</span>
-              <span class="ui-pipe__line is-on" data-step="translate"><b>[s3]</b> auto-rotate pool: Gemini + Groq active (8.9 units/s)</span>
-              <span class="ui-pipe__line is-on" data-step="translate"><b>[s3]</b> completeness check on whole dub_units: 0 CJK leaked</span>
-              <span class="ui-pipe__line" data-step="tts"><b>[s4]</b> VieNeu-TTS v3turbo_int8 (48 kHz) · 1.543/1.543 clips ok</span>
-              <span class="ui-pipe__line" data-step="burn"><b>[s5]</b> fit: 1.464 ok / 62 stretched / 17 shortened / 0 overflow</span>
-              <span class="ui-pipe__line" data-step="burn"><b>[s6]</b> streaming mix: orig -14 dB, dub +2.5 dB, limiter -1.0 dB</span>
-              <span class="ui-pipe__line" data-step="burn"><b>[s7]</b> wrote tap_01_co_trang_vi.mp4 and translation.docx</span>
+              <span class="ui-pipe__line" data-step="extract"><b>[1/5]</b> Extracted original audio cleanly in 7 seconds</span>
+              <span class="ui-pipe__line" data-step="asr"><b>[2/5]</b> Detected Chinese speech (99.9%) · 1,543 sentences</span>
+              <span class="ui-pipe__line is-on" data-step="translate"><b>[3/5]</b> Translating with free Gemini + Groq keys automatically</span>
+              <span class="ui-pipe__line is-on" data-step="translate"><b>[3/5]</b> Verified complete Vietnamese sentences · zero foreign letters left</span>
+              <span class="ui-pipe__line" data-step="tts"><b>[4/5]</b> Generated 1,543 natural Vietnamese voice clips on this PC</span>
+              <span class="ui-pipe__line" data-step="burn"><b>[5/5]</b> Synced voice timing · 0 overlaps · kept movie background sound</span>
+              <span class="ui-pipe__line" data-step="burn"><b>[done]</b> Saved drama_ep01_vi.mp4 and drama_ep01_vi_translation.docx</span>
             </div>
           </div>
         </div>
@@ -378,20 +487,20 @@
     <div class="wrap">
       <div class="group">
         <div class="section-head">
-          <h2 id="features-h">Whisper và VieNeu-TTS chạy cục bộ. <span class="muted">Chỉ gửi văn bản khi dịch.</span></h2>
+          <h2 id="features-h"><span data-i18n="feat.h2.a">Built to be simple and reliable.</span> <span class="muted" data-i18n="feat.h2.b">Your video never leaves your computer.</span></h2>
         </div>
         <div class="grid">
           <article class="card card--row span-6">
-            <h3>Xoay vòng khóa API Gemini và Groq</h3>
-            <p>Tự chuyển giữa nhiều khóa miễn phí khi chạm giới hạn và sửa đích danh câu sót chữ Hán.</p>
+            <h3 data-i18n="feat.c1.h">Free translation that keeps going</h3>
+            <p data-i18n="feat.c1.p">Add several free Google Gemini or Groq keys. If one hits its free limit, DubTool switches automatically so long movies finish smoothly.</p>
             <div class="panel panel--flush" data-fx="gradient-mesh" data-fx-seed="11" data-fx-palette='{"bg":"#cdd6c6","surface":"#dce3d6","ink":"#262d24","accent":"#6c8e63"}' data-fx-params='{"speed":0,"drift":0,"calmY":0.95}'>
               <div class="stage stage--fade-b">
                 <div class="at-rise fit" style="--fit-max:390px;--ax:max(24px, 50% - 195px);--ay:calc(100% - 190px);--ay-sm:calc(100% - 140px)" data-ui-loop>
                   <div class="ui ui-notify" data-ui="notify">
                     <ul class="ui-notify__list" data-notify-list>
-                      <li class="ui-note"><span class="ui-agent ui-note__av" aria-hidden="true"></span><span class="ui-note__text"><span class="ui-note__title">Auto-Rotate đổi sang Groq<time>vừa xong</time></span><span class="ui-note__body">Gemini 503 tạm thời · giữ nguyên tiến độ</span></span></li>
-                      <li class="ui-note"><span class="ui-note__ico"><svg class="ui-icon" viewBox="0 0 16 16"><path d="m3.5 8.4 2.8 2.8 6.2-6.4"/></svg></span><span class="ui-note__text"><span class="ui-note__title">Sửa đích danh 2 câu sót CJK<time>1p</time></span><span class="ui-note__body">Giữ nguyên 18 câu sạch trong lô</span></span></li>
-                      <li class="ui-note"><span class="ui-note__ico"><svg class="ui-icon" viewBox="0 0 16 16"><path d="m3.5 8.4 2.8 2.8 6.2-6.4"/></svg></span><span class="ui-note__text"><span class="ui-note__title">1.543 câu dịch hoàn tất<time>3p</time></span><span class="ui-note__body">0 ký tự CJK sót · đúng xưng hô phim</span></span></li>
+                      <li class="ui-note"><span class="ui-agent ui-note__av" aria-hidden="true"></span><span class="ui-note__text"><span class="ui-note__title"><span data-i18n="feat.n1.t">Switched to free Groq key</span><time data-i18n="feat.n1.time">now</time></span><span class="ui-note__body" data-i18n="feat.n1.b">Google busy for a moment · no progress lost</span></span></li>
+                      <li class="ui-note"><span class="ui-note__ico"><svg class="ui-icon" viewBox="0 0 16 16"><path d="m3.5 8.4 2.8 2.8 6.2-6.4"/></svg></span><span class="ui-note__text"><span class="ui-note__title"><span data-i18n="feat.n2.t">Fixed 2 untranslated lines</span><time data-i18n="feat.n2.time">1m</time></span><span class="ui-note__body" data-i18n="feat.n2.b">Checked automatically · kept clean lines</span></span></li>
+                      <li class="ui-note"><span class="ui-note__ico"><svg class="ui-icon" viewBox="0 0 16 16"><path d="m3.5 8.4 2.8 2.8 6.2-6.4"/></svg></span><span class="ui-note__text"><span class="ui-note__title"><span data-i18n="feat.n3.t">All 1,543 lines translated</span><time data-i18n="feat.n3.time">3m</time></span><span class="ui-note__body" data-i18n="feat.n3.b">Natural movie dialogue · zero leftover characters</span></span></li>
                     </ul>
                   </div>
                 </div>
@@ -400,38 +509,38 @@
           </article>
 
           <article class="card card--row span-6">
-            <h3>Đọc tiếng Việt 48 kHz bằng VieNeu-TTS</h3>
-            <p>Gồm 25 giọng Turbo INT8 tự nhiên và 11 giọng Nano nhẹ RAM, nghe thử ngay trên máy.</p>
+            <h3 data-i18n="feat.c2.h">Natural Vietnamese voices built in</h3>
+            <p data-i18n="feat.c2.p">Choose from 25 studio-quality voices or 11 lightweight voices for older PCs. Preview any voice offline before you start.</p>
             <div class="panel panel--flush" data-fx="gradient-mesh" data-fx-seed="22" data-fx-palette='{"bg":"#d9ccb7","surface":"#e9e0d2","ink":"#2a2622","accent":"#a8794a"}' data-fx-params='{"speed":0,"drift":0,"calmY":0.95}'>
               <div class="stage stage--fade-b">
                 <div class="at-right to-edge" style="--ax:32px;--ay:36px">
                   <div class="ui ui-panel ui-toggles" data-ui="toggles" data-ui-still>
                     <div class="ui-head">
                       <svg class="ui-icon ui-toggles__ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8 13 4v3.6c0 3-2.1 5.4-5 6.6-2.9-1.2-5-3.6-5-6.6V4z"/><path d="m5.8 8 1.6 1.6 3-3.2"/></svg>
-                      <div class="ui-title">Cấu hình xuất mặc định</div>
+                      <div class="ui-title" data-i18n="feat.tg.title">Safe defaults out of the box</div>
                       <span class="ui-spacer"></span>
-                      <div class="ui-meta" data-tg-count>4 / 5 bật</div>
+                      <div class="ui-meta" data-tg-count data-i18n="feat.tg.count">4 / 5 on</div>
                     </div>
                     <ul class="ui-toggles__list">
                       <li class="ui-tg">
-                        <span class="ui-tg__text"><span class="ui-tg__label">VieNeu v3 Turbo INT8</span><span class="ui-tg__sub">48 kHz cục bộ · giọng Trúc Ly</span></span>
-                        <button class="ui-switch is-on" type="button" role="switch" aria-checked="true" aria-label="VieNeu v3 Turbo INT8"><i></i></button>
+                        <span class="ui-tg__text"><span class="ui-tg__label" data-i18n="feat.tg1.t">Natural Vietnamese voice</span><span class="ui-tg__sub" data-i18n="feat.tg1.s">Runs on your PC · Trúc Ly voice</span></span>
+                        <button class="ui-switch is-on" type="button" role="switch" aria-checked="true" aria-label="Natural Vietnamese voice"><i></i></button>
                       </li>
                       <li class="ui-tg">
-                        <span class="ui-tg__text"><span class="ui-tg__label">Hộp nền phụ đề tối mờ</span><span class="ui-tg__sub">Chống đè phụ đề gốc trên video</span></span>
-                        <button class="ui-switch is-on" type="button" role="switch" aria-checked="true" aria-label="Hộp nền phụ đề tối mờ"><i></i></button>
+                        <span class="ui-tg__text"><span class="ui-tg__label" data-i18n="feat.tg2.t">Dark box behind subtitles</span><span class="ui-tg__sub" data-i18n="feat.tg2.s">Easy to read over original text</span></span>
+                        <button class="ui-switch is-on" type="button" role="switch" aria-checked="true" aria-label="Dark box behind subtitles"><i></i></button>
                       </li>
                       <li class="ui-tg">
-                        <span class="ui-tg__text"><span class="ui-tg__label">Hạ nền gốc -14 dB</span><span class="ui-tg__sub">Giọng Việt +2.5 dB, limiter -1 dB</span></span>
-                        <button class="ui-switch is-on" type="button" role="switch" aria-checked="true" aria-label="Hạ nền gốc -14 dB"><i></i></button>
+                        <span class="ui-tg__text"><span class="ui-tg__label" data-i18n="feat.tg3.t">Keep movie music &amp; effects</span><span class="ui-tg__sub" data-i18n="feat.tg3.s">Lowers original voice softly</span></span>
+                        <button class="ui-switch is-on" type="button" role="switch" aria-checked="true" aria-label="Keep movie music and effects"><i></i></button>
                       </li>
                       <li class="ui-tg">
-                        <span class="ui-tg__text"><span class="ui-tg__label">Xuất kèm bản dịch Word</span><span class="ui-tg__sub">Bảng đối chiếu thời gian gốc và Việt</span></span>
-                        <button class="ui-switch is-on" type="button" role="switch" aria-checked="true" aria-label="Xuất kèm bản dịch Word"><i></i></button>
+                        <span class="ui-tg__text"><span class="ui-tg__label" data-i18n="feat.tg4.t">Save editable Word script</span><span class="ui-tg__sub" data-i18n="feat.tg4.s">Side-by-side original &amp; Vietnamese</span></span>
+                        <button class="ui-switch is-on" type="button" role="switch" aria-checked="true" aria-label="Save editable Word script"><i></i></button>
                       </li>
                       <li class="ui-tg">
-                        <span class="ui-tg__text"><span class="ui-tg__label">Ghi đè tệp video gốc</span><span class="ui-tg__sub">Luôn tắt để bảo vệ tệp đầu vào</span></span>
-                        <button class="ui-switch" type="button" role="switch" aria-checked="false" aria-label="Ghi đè tệp video gốc"><i></i></button>
+                        <span class="ui-tg__text"><span class="ui-tg__label" data-i18n="feat.tg5.t">Overwrite original video</span><span class="ui-tg__sub" data-i18n="feat.tg5.s">Always off to protect your file</span></span>
+                        <button class="ui-switch" type="button" role="switch" aria-checked="false" aria-label="Overwrite original video"><i></i></button>
                       </li>
                     </ul>
                   </div>
@@ -444,53 +553,53 @@
 
       <div class="grid">
         <article class="card card--row span-6">
-          <h3>Xuất tệp MP4, phụ đề SRT và Word</h3>
-          <p>Tự căn chữ theo khung ngang hoặc dọc 9:16 và giữ nguyên tệp gốc không ghi đè.</p>
+          <h3 data-i18n="feat.c3.h">Ready-to-share video, subtitles and Word file</h3>
+          <p data-i18n="feat.c3.p">Automatically sizes subtitles for both widescreen YouTube videos and vertical phone clips, and never overwrites your source file.</p>
           <div class="panel panel--flush" data-fx="gradient-mesh" data-fx-seed="33" data-fx-palette='{"bg":"#c6d3df","surface":"#d6e0e9","ink":"#25303a","accent":"#3f6a92"}' data-fx-params='{"speed":0,"drift":0,"calmY":0.95}'>
             <div class="stage stage--fade-br">
               <div class="at-corner wide" style="--ax:32px;--ay:28px;--w:620px">
-                <div class="ui ui-files" data-ui="files" data-ui-still data-reading="Đang ghi {n} / {total}">
-                  <div class="ui-files__status"><span class="ui-dot"></span><span data-files-status>6 tệp đã sẵn sàng</span></div>
+                <div class="ui ui-files" data-ui="files" data-ui-still data-reading="Saving {n} of {total}">
+                  <div class="ui-files__status"><span class="ui-dot"></span><span data-files-status data-i18n="feat.f.status">6 output &amp; project files</span></div>
                   <ul class="ui-files__grid">
                     <li class="ui-file is-done">
                       <span class="ui-file__icon"><img data-icon="video" src="assets/icons/video.svg" alt="" width="24" height="24" loading="lazy"></span>
-                      <span class="ui-file__name">phim_vi.mp4</span>
-                      <span class="ui-file__kind">H.264 · CRF 21</span>
+                      <span class="ui-file__name">movie_vi.mp4</span>
+                      <span class="ui-file__kind" data-i18n="feat.f1.k">Dubbed HD video</span>
                       <span class="ui-file__bar"><i></i></span>
                       <span class="ui-file__check"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
                     </li>
                     <li class="ui-file is-done">
                       <span class="ui-file__icon"><img data-icon="docx" src="assets/icons/docx.svg" alt="" width="24" height="24" loading="lazy"></span>
-                      <span class="ui-file__name">ban_dich.docx</span>
-                      <span class="ui-file__kind">Word đối chiếu</span>
+                      <span class="ui-file__name">translation.docx</span>
+                      <span class="ui-file__kind" data-i18n="feat.f2.k">Readable Word script</span>
                       <span class="ui-file__bar"><i></i></span>
                       <span class="ui-file__check"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
                     </li>
                     <li class="ui-file is-done">
                       <span class="ui-file__icon"><img data-icon="txt" src="assets/icons/txt.svg" alt="" width="24" height="24" loading="lazy"></span>
-                      <span class="ui-file__name">output.vi.srt</span>
-                      <span class="ui-file__kind">Phụ đề khớp âm</span>
+                      <span class="ui-file__name">subtitles.vi.srt</span>
+                      <span class="ui-file__kind" data-i18n="feat.f3.k">Synced subtitle file</span>
                       <span class="ui-file__bar"><i></i></span>
                       <span class="ui-file__check"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
                     </li>
                     <li class="ui-file is-done">
                       <span class="ui-file__icon"><img data-icon="json" src="assets/icons/json.svg" alt="" width="24" height="24" loading="lazy"></span>
                       <span class="ui-file__name">dub_units.json</span>
-                      <span class="ui-file__kind">1.543 câu dịch</span>
+                      <span class="ui-file__kind" data-i18n="feat.f4.k">Translated sentences</span>
                       <span class="ui-file__bar"><i></i></span>
                       <span class="ui-file__check"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
                     </li>
                     <li class="ui-file is-done">
                       <span class="ui-file__icon"><img data-icon="json" src="assets/icons/json.svg" alt="" width="24" height="24" loading="lazy"></span>
                       <span class="ui-file__name">schedule.json</span>
-                      <span class="ui-file__kind">0 chồng tiếng</span>
+                      <span class="ui-file__kind" data-i18n="feat.f5.k">Voice timing map</span>
                       <span class="ui-file__bar"><i></i></span>
                       <span class="ui-file__check"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
                     </li>
                     <li class="ui-file is-done">
                       <span class="ui-file__icon"><img data-icon="yaml" src="assets/icons/yaml.svg" alt="" width="24" height="24" loading="lazy"></span>
-                      <span class="ui-file__name">config.yaml</span>
-                      <span class="ui-file__kind">Tham số trộn</span>
+                      <span class="ui-file__name">settings.yaml</span>
+                      <span class="ui-file__kind" data-i18n="feat.f6.k">Saved preferences</span>
                       <span class="ui-file__bar"><i></i></span>
                       <span class="ui-file__check"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
                     </li>
@@ -502,10 +611,10 @@
         </article>
 
         <article class="card card--row span-6">
-          <h3>Kết nối 5 nhà cung cấp dịch và FFmpeg</h3>
-          <p>Quản lý khóa Gemini, Groq, OpenAI, Anthropic và Ollama ngay trong Windows Credential Manager.</p>
+          <h3 data-i18n="feat.c4.h">Works with 5 translators and built-in tools</h3>
+          <p data-i18n="feat.c4.p">Start free with Google Gemini and Groq, switch to OpenAI or Claude anytime, or stay 100% offline with Ollama.</p>
           <div class="panel panel--flush">
-            <div class="dg" data-diagram data-dg-still><script type="application/json">{"layout":"hub","alt":"Sơ đồ DubTool kết nối với Gemini, Groq, OpenAI, Anthropic, Ollama và FFmpeg","ground":"rings","motion":{"cycle":3.2},"center":{"label":"DubTool","icon":"ui:audio-waveform"},"spokes":[{"label":"Gemini","icon":"gemini"},{"label":"Groq","icon":"groq"},{"label":"OpenAI","icon":"openai"},{"label":"Anthropic","icon":"anthropic"},{"label":"Ollama","icon":"ollama"},{"label":"FFmpeg","icon":"logos:ffmpeg-icon"}]}</script></div>
+            <div class="dg" data-diagram data-dg-still><script type="application/json">{"layout":"hub","alt":"Diagram showing DubTool connecting to Gemini, Groq, OpenAI, Anthropic, Ollama and FFmpeg","ground":"rings","motion":{"cycle":3.2},"center":{"label":"DubTool","icon":"ui:audio-waveform"},"spokes":[{"label":"Gemini","icon":"gemini"},{"label":"Groq","icon":"groq"},{"label":"OpenAI","icon":"openai"},{"label":"Anthropic","icon":"anthropic"},{"label":"Ollama","icon":"ollama"},{"label":"FFmpeg","icon":"logos:ffmpeg-icon"}]}</script></div>
           </div>
         </article>
       </div>
@@ -515,28 +624,28 @@
   <section class="section bg-mist" id="statement" aria-labelledby="statement-h">
     <div class="wrap">
       <div class="statement-block" data-moment="liquid-type">
-        <h2 id="statement-h" class="mo-lt__type">DubTool giữ hình ảnh gốc, nói tiếng Việt khớp khung hình</h2>
-        <p class="t-lead measure">Mỗi câu thoại được rút gọn vừa thời lượng phát trước khi tổng hợp giọng đọc, trộn lên nền âm thanh gốc đã hạ mức và giới hạn đỉnh ở -1.0 dB để không vỡ tiếng.</p>
-        <p><a class="link" href="https://github.com/namtit2932k/dubtool">Xem mã nguồn trên GitHub</a></p>
+        <h2 id="statement-h" class="mo-lt__type" data-i18n="stmt.h2">DubTool keeps the original picture sharp and the sound natural</h2>
+        <p class="t-lead measure" data-i18n="stmt.lead">Every Vietnamese sentence is paced to fit the speaker's timing and mixed cleanly over lowered movie background sound so nothing clips or overlaps, even on a 2.5-hour film.</p>
+        <p><a class="link" href="https://github.com/namtit2932k/dubtool" data-i18n="stmt.link">Explore source code on GitHub</a></p>
       </div>
       <dl class="statement-facts">
         <div>
-          <dt>2.5× thực tế</dt>
-          <dd>Kiểm chứng trên CPU cho video 2 giờ 33 phút 1080p hoàn tất trong 61 phút.</dd>
+          <dt data-i18n="stmt.f1.dt">2.5× faster</dt>
+          <dd data-i18n="stmt.f1.dd">Tested on a normal PC without a graphics card: a 2h 33m Full HD movie finished in 61 minutes.</dd>
         </div>
         <div>
-          <dt>0.16 giây</dt>
-          <dd>Độ lệch tối đa trên toàn bộ 1.543 câu thoại, không chồng tiếng và không sót chữ Hán.</dd>
+          <dt data-i18n="stmt.f2.dt">0 overlaps</dt>
+          <dd data-i18n="stmt.f2.dd">All 1,543 spoken lines stayed in sync with the video, with clean subtitles and zero leftover foreign script.</dd>
         </div>
         <div>
-          <dt>0 MB cài thêm</dt>
-          <dd>Gói zip Windows 64-bit chứa sẵn Python runtime, FFmpeg 8.1.2 và phông chữ Noto Sans.</dd>
+          <dt data-i18n="stmt.f3.dt">0 extra installs</dt>
+          <dd data-i18n="stmt.f3.dd">One Windows 64-bit zip includes everything needed. Just unzip and double-click DubTool.exe.</dd>
         </div>
       </dl>
-      <div class="ui ui-panel bench-bar" role="img" aria-label="Phân bổ thời gian chạy thực tế bảy giai đoạn cho video hai giờ ba mươi ba phút: Whisper 15 phút 41 giây, Dịch 2 phút 53 giây, VieNeu TTS 17 phút 25 giây, Khớp và trộn 4 phút 26 giây, Burn phụ đề 20 phút 42 giây">
+      <div class="ui ui-panel bench-bar" role="img" aria-label="Measured run time breakdown for a 2 hour 33 minute Full HD movie on a normal Windows PC: 61 minutes total">
         <div class="bench-bar__head">
-          <span class="bench-bar__title">Phân bổ 61 phút 15 giây xử lý video 1080p (02:33:04 · CPU)</span>
-          <span class="bench-bar__meta">0 overlap · 0 overflow · 0 clipping</span>
+          <span class="bench-bar__title" data-i18n="stmt.bar.t">Real timing for a 2h 33m Full HD movie on a regular Windows PC (61 min total)</span>
+          <span class="bench-bar__meta" data-i18n="stmt.bar.m">100% finished · 0 errors · original file untouched</span>
         </div>
         <div class="bench-bar__track" aria-hidden="true">
           <span style="background:#34d399"></span>
@@ -546,11 +655,11 @@
           <span style="background:#6ee7b7"></span>
         </div>
         <div class="bench-bar__legend" aria-hidden="true">
-          <span>S2 Whisper 15m41s</span>
-          <span>S3 Dịch 2m53s</span>
-          <span>S4 VieNeu 17m25s</span>
-          <span>S5–S6 Trộn 4m26s</span>
-          <span>S7 Burn CRF 21 20m42s</span>
+          <span data-i18n="stmt.bar.l1">Listen 15m</span>
+          <span data-i18n="stmt.bar.l2">Translate 3m</span>
+          <span data-i18n="stmt.bar.l3">Voice 17m</span>
+          <span data-i18n="stmt.bar.l4">Sync &amp; mix 4m</span>
+          <span data-i18n="stmt.bar.l5">Save subtitles 21m</span>
         </div>
       </div>
     </div>
@@ -559,67 +668,61 @@
   <section class="section" id="providers" style="--hm: 2" aria-labelledby="providers-h">
     <div class="wrap">
       <div class="section-head">
-        <h2 id="providers-h">3 chế độ API dịch cho DubTool</h2>
-        <p>Cùng một bộ nhận diện Whisper và giọng đọc VieNeu-TTS cục bộ, chỉ khác nguồn dịch văn bản.</p>
+        <h2 id="providers-h" data-i18n="prov.h2">3 easy ways to translate with DubTool</h2>
+        <p data-i18n="prov.sub">Listening and Vietnamese voice generation always run free on your PC. You only choose how the text gets translated.</p>
       </div>
       <div class="grid">
-        <article class="card mode-card span-4 m-nolift">
-          <div class="panel" data-visual role="img" aria-label="Biểu trưng Gemini và Groq cùng danh sách mô hình xoay vòng miễn phí">
-            <div class="mode-card__preview" aria-hidden="true">
-              <div class="mode-card__top">
-                <div class="mode-card__icons">
-                  <span class="ic-tile"><img data-icon="gemini" src="assets/icons/gemini.svg" alt="" width="24" height="24" loading="lazy"></span>
-                  <span class="ic-tile ic-wide"><img data-icon="groq" src="assets/icons/groq.svg" alt="" width="48" height="16" loading="lazy"></span>
-                </div>
-                <span class="mode-card__tag">Mặc định</span>
+        <article class="card card--open mode-card span-4 m-nolift">
+          <div class="panel" data-visual role="img" aria-label="Google Gemini and Groq icons for free automatic translation">
+            <div class="mode-card__top">
+              <div class="mode-card__icons">
+                <span class="ic-tile"><img data-icon="gemini" src="assets/icons/gemini.svg" alt="" width="24" height="24" loading="lazy"></span>
+                <span class="ic-tile ic-wide"><img data-icon="groq" src="assets/icons/groq.svg" alt="" width="48" height="16" loading="lazy"></span>
               </div>
-              <p class="mode-card__models">gemini-3.5-flash-lite<br>qwen/qwen3.8-27b</p>
+              <span class="mode-card__tag" data-i18n="prov.tag">Recommended</span>
             </div>
+            <p class="mode-card__caption" data-i18n="prov.c1.m">Best for almost everyone · Free keys</p>
           </div>
-          <h3>Xoay vòng Gemini và Groq</h3>
+          <h3 data-i18n="prov.c1.h">Free mode: Google &amp; Groq</h3>
           <ul class="mode-card__list">
-            <li><span class="mode-card__k">Chi phí dịch</span><span class="mode-card__v">0 đồng với khóa miễn phí</span></li>
-            <li><span class="mode-card__k">Dữ liệu gửi đi</span><span class="mode-card__v">Chỉ gửi bản chép chữ cần dịch</span></li>
-            <li><span class="mode-card__k">Phù hợp nhất</span><span class="mode-card__v">Phim dài, vlog, khóa học dài</span></li>
+            <li><span class="mode-card__k" data-i18n="prov.k1">Cost</span><span class="mode-card__v" data-i18n="prov.c1.v1">$0 using free API keys</span></li>
+            <li><span class="mode-card__k" data-i18n="prov.k2">What leaves your PC</span><span class="mode-card__v" data-i18n="prov.c1.v2">Only the spoken text to translate</span></li>
+            <li><span class="mode-card__k" data-i18n="prov.k3">Best for</span><span class="mode-card__v" data-i18n="prov.c1.v3">Long movies, YouTube videos, courses</span></li>
           </ul>
         </article>
 
-        <article class="card mode-card span-4 m-nolift">
-          <div class="panel" data-visual role="img" aria-label="Biểu trưng OpenAI và Anthropic cho chế độ API trả phí">
-            <div class="mode-card__preview" aria-hidden="true">
-              <div class="mode-card__top">
-                <div class="mode-card__icons">
-                  <span class="ic-tile"><img data-icon="openai" src="assets/icons/openai.svg" alt="" width="24" height="24" loading="lazy"></span>
-                  <span class="ic-tile"><img data-icon="anthropic" src="assets/icons/anthropic.svg" alt="" width="24" height="24" loading="lazy"></span>
-                </div>
+        <article class="card card--open mode-card span-4 m-nolift">
+          <div class="panel" data-visual role="img" aria-label="OpenAI and Anthropic icons for optional paid accounts">
+            <div class="mode-card__top">
+              <div class="mode-card__icons">
+                <span class="ic-tile"><img data-icon="openai" src="assets/icons/openai.svg" alt="" width="24" height="24" loading="lazy"></span>
+                <span class="ic-tile"><img data-icon="anthropic" src="assets/icons/anthropic.svg" alt="" width="24" height="24" loading="lazy"></span>
               </div>
-              <p class="mode-card__models">gpt-4.1 · claude-sonnet<br>glossary + brief ngữ cảnh</p>
             </div>
+            <p class="mode-card__caption" data-i18n="prov.c2.m">Optional · Use your own account</p>
           </div>
-          <h3>API OpenAI và Anthropic</h3>
+          <h3 data-i18n="prov.c2.h">Paid accounts: OpenAI &amp; Claude</h3>
           <ul class="mode-card__list">
-            <li><span class="mode-card__k">Chi phí dịch</span><span class="mode-card__v">Tính theo token tài khoản API</span></li>
-            <li><span class="mode-card__k">Dữ liệu gửi đi</span><span class="mode-card__v">Chỉ gửi bản chép chữ cần dịch</span></li>
-            <li><span class="mode-card__k">Phù hợp nhất</span><span class="mode-card__v">Video kỹ thuật và thuật ngữ sâu</span></li>
+            <li><span class="mode-card__k" data-i18n="prov.k1">Cost</span><span class="mode-card__v" data-i18n="prov.c2.v1">Standard pay-as-you-go AI usage</span></li>
+            <li><span class="mode-card__k" data-i18n="prov.k2">What leaves your PC</span><span class="mode-card__v" data-i18n="prov.c2.v2">Only the spoken text to translate</span></li>
+            <li><span class="mode-card__k" data-i18n="prov.k3">Best for</span><span class="mode-card__v" data-i18n="prov.c2.v3">Technical talks with custom glossaries</span></li>
           </ul>
         </article>
 
-        <article class="card mode-card span-4 m-nolift">
-          <div class="panel" data-visual role="img" aria-label="Biểu trưng Ollama cho chế độ dịch ngoại tuyến hoàn toàn">
-            <div class="mode-card__preview" aria-hidden="true">
-              <div class="mode-card__top">
-                <div class="mode-card__icons">
-                  <span class="ic-tile"><img data-icon="ollama" src="assets/icons/ollama.svg" alt="" width="24" height="24" loading="lazy"></span>
-                </div>
+        <article class="card card--open mode-card span-4 m-nolift">
+          <div class="panel" data-visual role="img" aria-label="Ollama icon for 100 percent offline translation on your PC">
+            <div class="mode-card__top">
+              <div class="mode-card__icons">
+                <span class="ic-tile"><img data-icon="ollama" src="assets/icons/ollama.svg" alt="" width="24" height="24" loading="lazy"></span>
               </div>
-              <p class="mode-card__models">gemma3:12b · qwen3<br>http://localhost:11434</p>
             </div>
+            <p class="mode-card__caption" data-i18n="prov.c3.m">No internet required · Private</p>
           </div>
-          <h3>Ollama chạy ngoại tuyến</h3>
+          <h3 data-i18n="prov.c3.h">100% Offline: Ollama on your PC</h3>
           <ul class="mode-card__list">
-            <li><span class="mode-card__k">Chi phí dịch</span><span class="mode-card__v">0 đồng, không cần kết nối mạng</span></li>
-            <li><span class="mode-card__k">Dữ liệu gửi đi</span><span class="mode-card__v">Không gửi dữ liệu ra khỏi máy</span></li>
-            <li><span class="mode-card__k">Phù hợp nhất</span><span class="mode-card__v">Tài liệu nội bộ cần kín 100%</span></li>
+            <li><span class="mode-card__k" data-i18n="prov.k1">Cost</span><span class="mode-card__v" data-i18n="prov.c3.v1">$0, runs fully on your computer</span></li>
+            <li><span class="mode-card__k" data-i18n="prov.k2">What leaves your PC</span><span class="mode-card__v" data-i18n="prov.c3.v2">Nothing leaves your computer</span></li>
+            <li><span class="mode-card__k" data-i18n="prov.k3">Best for</span><span class="mode-card__v" data-i18n="prov.c3.v3">Private company or personal videos</span></li>
           </ul>
         </article>
       </div>
@@ -630,31 +733,31 @@
     <div class="wrap">
       <div class="grid">
         <div class="span-5 stack-4">
-          <h2 id="faq-h">Câu hỏi về DubTool trên Windows</h2>
-          <p>Thông tin thực tế về cấu hình máy, dữ liệu và giới hạn hiện tại của bản phát hành.</p>
-          <p><a class="link" href="https://github.com/namtit2932k/dubtool/issues">Báo lỗi trên GitHub</a></p>
+          <h2 id="faq-h" data-i18n="faq.h2">Common questions about DubTool</h2>
+          <p data-i18n="faq.sub">Plain answers about cost, PC requirements, privacy, and current limits before you download.</p>
+          <p><a class="link" href="https://github.com/namtit2932k/dubtool/issues" data-i18n="faq.link">Ask a question on GitHub</a></p>
         </div>
         <div class="span-6 start-7">
           <div class="faq">
             <div class="faq__item">
-              <h3>DubTool có thu phí hay gắn watermark không?</h3>
-              <p>Không. Mã nguồn phát hành theo giấy phép MIT, không giới hạn thời lượng video và không chèn logo vào video xuất.</p>
+              <h3 data-i18n="faq.q1">Is DubTool completely free and without watermarks?</h3>
+              <p data-i18n="faq.a1">Yes. DubTool is free, open-source software (MIT license) with no video length limit and no logos stamped on your exported video.</p>
             </div>
             <div class="faq__item">
-              <h3>Máy không có card đồ họa NVIDIA có chạy DubTool được không?</h3>
-              <p>Có. Whisper và VieNeu-TTS v3 ONNX chạy trực tiếp trên CPU; máy ít RAM có thể chuyển sang giọng Nano 24 kHz trong Cài đặt.</p>
+              <h3 data-i18n="faq.q2">Do I need a gaming PC or graphics card?</h3>
+              <p data-i18n="faq.a2">No. DubTool runs directly on a normal Windows CPU. If your PC has less memory, switch to the lightweight Nano voice mode in Settings.</p>
             </div>
             <div class="faq__item">
-              <h3>Video gốc có bị tải lên máy chủ ngoài không?</h3>
-              <p>Không. Video và âm thanh nằm trên máy bạn; phần mềm chỉ gửi đoạn chữ đã bóc tách tới nhà cung cấp dịch, hoặc giữ 100% cục bộ với Ollama.</p>
+              <h3 data-i18n="faq.q3">Is it hard to get a free Google or Groq translation key?</h3>
+              <p data-i18n="faq.a3">No. Sign in to Google AI Studio or Groq Console, click Create API Key, copy the text, and paste it into DubTool Settings once. It takes about two minutes.</p>
             </div>
             <div class="faq__item">
-              <h3>DubTool đã hỗ trợ macOS hay GPU CUDA chưa?</h3>
-              <p>Chưa. Bản đóng gói hiện chỉ chạy trên Windows 10 và 11 64-bit bằng CPU; tăng tốc GPU CUDA đang nằm trong lộ trình sau.</p>
+              <h3 data-i18n="faq.q4">Will my original video be uploaded to the internet?</h3>
+              <p data-i18n="faq.a4">Never. Your video and audio stay on your computer. Only the short transcribed text lines are sent for translation, or nothing at all if you choose Ollama.</p>
             </div>
             <div class="faq__item">
-              <h3>Cần cài Python hay FFmpeg trước khi chạy DubTool không?</h3>
-              <p>Không. Giải nén tệp zip phát hành và mở DubTool.exe trực tiếp; gói đã kèm sẵn Python runtime và FFmpeg 8.1.2.</p>
+              <h3 data-i18n="faq.q5">Does DubTool work on Mac or require installing Python?</h3>
+              <p data-i18n="faq.a5">Right now DubTool is for Windows 10 and 11 (64-bit) only, and you do not need to install Python or FFmpeg. Just unzip and run DubTool.exe.</p>
             </div>
           </div>
         </div>
@@ -668,10 +771,10 @@
     <div class="closing__cta close--word">
       <div class="section-head--split">
         <div>
-          <h2 id="close-h">Tải DubTool bản Windows mới nhất</h2>
-          <p class="t-lead">Miễn phí mã nguồn mở MIT cho Windows 10 và 11 64-bit.</p>
+          <h2 id="close-h" data-i18n="close.h2">Download DubTool for Windows</h2>
+          <p class="t-lead" data-i18n="close.lead">Free and open source (MIT) for Windows 10 and 11 (64-bit).</p>
         </div>
-        <a class="btn btn--primary" href="https://github.com/namtit2932k/dubtool/releases/latest">Tải DubTool<svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
+        <a class="btn btn--primary" href="https://github.com/namtit2932k/dubtool/releases/latest"><span data-i18n="cta.download">Download DubTool</span><svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
       </div>
       <p class="close__word" aria-hidden="true">DubTool</p>
     </div>
@@ -690,41 +793,41 @@
             </svg>
             DubTool
           </a>
-          <p class="footer__lede">Phần mềm lồng tiếng Việt đa ngôn ngữ cho Windows.</p>
+          <p class="footer__lede" data-i18n="foot.lede">Free Windows app that dubs foreign videos into natural Vietnamese.</p>
         </div>
         <div class="span-2 footer__col">
-          <h3>Quy trình</h3>
+          <h3 data-i18n="foot.c1">Guide</h3>
           <ul>
-            <li><a href="#workspace">Bảy giai đoạn</a></li>
-            <li><a href="#statement">Khớp thời lượng</a></li>
+            <li><a href="#guide" data-i18n="foot.c1.1">4-step setup</a></li>
+            <li><a href="#workspace" data-i18n="foot.c1.2">Live preview</a></li>
           </ul>
         </div>
         <div class="span-2 footer__col">
-          <h3>Tính năng</h3>
+          <h3 data-i18n="foot.c2">Features</h3>
           <ul>
-            <li><a href="#features">Xoay vòng API</a></li>
-            <li><a href="#features">Giọng VieNeu 48 kHz</a></li>
+            <li><a href="#features" data-i18n="foot.c2.1">Free translation</a></li>
+            <li><a href="#features" data-i18n="foot.c2.2">Built-in voices</a></li>
           </ul>
         </div>
         <div class="span-2 footer__col">
-          <h3>Mô hình</h3>
+          <h3 data-i18n="foot.c3">Help</h3>
           <ul>
-            <li><a href="#providers">Ba chế độ dịch</a></li>
-            <li><a href="#faq">Câu hỏi thường gặp</a></li>
+            <li><a href="#providers" data-i18n="foot.c3.1">3 translator modes</a></li>
+            <li><a href="#faq" data-i18n="foot.c3.2">Common questions</a></li>
           </ul>
         </div>
         <div class="span-2 footer__col">
-          <h3>Mã nguồn</h3>
+          <h3 data-i18n="foot.c4">Project</h3>
           <ul>
-            <li><a href="https://github.com/namtit2932k/dubtool">Kho GitHub</a></li>
-            <li><a href="https://github.com/namtit2932k/dubtool/blob/main/docs/README.vi.md">Hướng dẫn tiếng Việt</a></li>
+            <li><a href="https://github.com/namtit2932k/dubtool" data-i18n="foot.c4.1">GitHub repository</a></li>
+            <li><a href="https://github.com/namtit2932k/dubtool/blob/main/docs/README.vi.md" data-i18n="foot.c4.2">Vietnamese README</a></li>
           </ul>
         </div>
       </div>
       <div class="footer__legal">
-        <span>&copy; 2026 sickyturtlez &middot; <a href="https://github.com/namtit2932k/dubtool/blob/main/LICENSE">Giấy phép MIT</a></span>
+        <span>&copy; 2026 sickyturtlez &middot; <a href="https://github.com/namtit2932k/dubtool/blob/main/LICENSE" data-i18n="foot.lic">MIT License</a></span>
         <div class="socials"></div>
-        <span class="t-small muted">Tên và biểu trưng bên thứ ba thuộc quyền sở hữu của chủ sở hữu tương ứng.</span>
+        <span class="t-small muted" data-i18n="foot.tm">Product names and logos are trademarks of their respective owners.</span>
       </div>
     </div>
   </div>
@@ -734,5 +837,6 @@
 <script type="module" src="assets/motion/motion.js"></script>
 <script type="module" src="assets/layout/layout.js"></script>
 <script type="module" src="assets/diagrams/mount.js"></script>
+<script type="module" src="assets/lang.js"></script>
 </body>
 </html>
