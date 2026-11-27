@@ -58,6 +58,9 @@
 <style>
   .brand-hex { width: 24px; height: 24px; flex: none; display: inline-block; }
 
+  /* Keep preview loops clean & autoplaying without floating pause discs */
+  .loop-pause, .ui-pause, .ly-pause, button[aria-label*="Pause" i], button[aria-label*="Play" i] { display: none !important; }
+
   /* White logo plates across guide steps, provider cards, output files & hub diagram */
   .ic-tile {
     --tile-bg: #ffffff;

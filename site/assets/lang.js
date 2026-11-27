@@ -487,7 +487,7 @@ const STRINGS = {
     "faq.q1": "DubTool có thật sự miễn phí và không gắn logo không?",
     "faq.a1": "Đúng vậy. Phần mềm hoàn toàn miễn phí theo giấy phép mở MIT, không giới hạn độ dài video và không chèn logo hay chữ ký vào video xuất.",
     "faq.q2": "DubTool có cần máy chơi game hay card rời không?",
-    "faq.a2": "Có. DubTool chạy thẳng trên chip xử lý (CPU) của máy Windows bình thường. Nếu máy ít bộ nhớ RAM, bạn chỉ cần chọn chế độ giọng Nano nhẹ hơn trong Cài đặt.",
+    "faq.a2": "Không. DubTool chạy thẳng trên chip xử lý (CPU) của máy Windows bình thường. Nếu máy ít bộ nhớ RAM, bạn chỉ cần chọn chế độ giọng Nano nhẹ hơn trong Cài đặt.",
     "faq.q3": "Lấy khóa dịch miễn phí từ Google hoặc Groq có khó không?",
     "faq.a3": "Không khó. Bạn đăng nhập Google AI Studio hoặc Groq Console, bấm tạo khóa (Create API Key), sao chép rồi dán vào mục Cài đặt của DubTool 1 lần duy nhất, mất khoảng 2 phút.",
     "faq.q4": "Video gốc của tôi có bị tải lên mạng không?",
