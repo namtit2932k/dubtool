@@ -38,7 +38,7 @@
   --display-tracking: -0.028em;
   --display-tracking-xl: -0.036em;
   --display-stretch: 96%;
-  --ly-scale: 1.04;
+  --ly-scale: 0.96;
 }
 </style>
 <link rel="stylesheet" href="assets/ui/base.css">
@@ -60,7 +60,7 @@
 
   /* Compact EN / VI switcher inside nav bar */
   .lang-switch {
-    display: inline-flex; align-items: center; gap: 2px;
+    display: inline-flex; align-items: center; gap: 2px; flex: none;
     padding: 3px; border-radius: 999px;
     border: 1px solid var(--line); background: var(--p-surface);
   }
@@ -72,11 +72,18 @@
   }
   .lang-switch__btn:hover { color: var(--ink); }
   .lang-switch__btn.is-active { background: var(--accent); color: var(--p-accent-ink); }
+  @media (min-width: 1024px) {
+    .lang-switch { margin-left: auto; }
+    .nav__bar > .nav__actions { margin-left: var(--s-3); }
+  }
   @media (max-width: 1023px) {
-    .lang-switch { margin-left: auto; margin-right: var(--s-2); }
+    .lang-switch { margin-left: auto; }
+    .nav:not(.is-open) .nav__actions { margin-left: 0; }
+    .nav__toggle { margin-left: 0; }
   }
   @media (max-width: 639px) {
-    .lang-switch__btn { padding: 0 9px; min-width: 34px; height: 32px; font-size: 13px; }
+    .nav:not(.is-open) .nav__actions { display: none; }
+    .lang-switch__btn { padding: 0 10px; min-width: 36px; height: 34px; font-size: 13px; }
   }
 
   /* Keep dealt CSS ground sections locked to layout-v4 screen heights and top alignment */
@@ -277,12 +284,12 @@
       <div class="nav__item"><a class="nav__link" href="#providers" data-i18n="nav.modes">Translators</a></div>
       <div class="nav__item"><a class="nav__link" href="#faq" data-i18n="nav.faq">FAQ</a></div>
     </nav>
-    <div class="nav__actions">
-      <a class="btn btn--primary" href="https://github.com/namtit2932k/dubtool/releases/latest"><span data-i18n="cta.download">Download DubTool</span><svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
-    </div>
     <div class="lang-switch" role="group" aria-label="Language switcher">
       <button class="lang-switch__btn is-active" type="button" data-lang-btn="en" aria-pressed="true">EN</button>
       <button class="lang-switch__btn" type="button" data-lang-btn="vi" aria-pressed="false">VI</button>
+    </div>
+    <div class="nav__actions">
+      <a class="btn btn--primary" href="https://github.com/namtit2932k/dubtool/releases/latest"><span data-i18n="cta.download">Download DubTool</span><svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
     </div>
     <button class="nav__toggle" type="button" aria-expanded="false" aria-label="Menu">
       <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M2 5h14M2 13h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
