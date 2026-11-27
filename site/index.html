@@ -42,8 +42,6 @@
 }
 </style>
 <link rel="stylesheet" href="assets/ui/base.css">
-<link rel="stylesheet" href="assets/ui/window/fragment.css">
-<link rel="stylesheet" href="assets/ui/pipeline-board/fragment.css">
 <link rel="stylesheet" href="assets/ui/notify/fragment.css">
 <link rel="stylesheet" href="assets/ui/toggles/fragment.css">
 <link rel="stylesheet" href="assets/ui/files/fragment.css">
@@ -94,13 +92,6 @@
   #features .dg .dg-node--tile > .dg-cap { color: #162418; }
   #features .dg .dg-node--tile.is-hit > .dg-cap,
   #features .dg .dg-node--tile.is-done > .dg-cap { color: #0f1f10; }
-
-  /* Keep window search box single-line, sidebar nowrap & pipeline step names untruncated */
-  .ui-win__search { white-space: nowrap; }
-  .ui-win__search .ui-win__ph { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ui-win__nav { white-space: nowrap; }
-  .ui-pipe__steps .ui-pipe__step { padding-inline: 10px; }
-  .ui-pipe__steps .ui-pipe__name { gap: 5px; }
 
   /* Unified secondary button contrast (>= 1.6:1 off dark ground) */
   html[data-buttons="pill"] .btn--secondary {
@@ -214,9 +205,9 @@
   @media (min-width: 1024px) {
     .hero--collage .hero__grid { align-items: center; }
     .hero--collage .hero__text { align-self: center; }
-    .hero__art { height: min(100%, 660px); max-height: 660px; align-self: center; }
+    .hero__art { height: min(100%, 730px); max-height: 730px; align-self: center; }
     .hero__art > .ly-piece--main { top: 34px; }
-    .hero__art > .ly-piece--note { left: var(--s-6); top: 472px; bottom: auto; width: 300px; z-index: 2; }
+    .hero__art > .ly-piece--note { left: var(--s-6); top: 526px; bottom: auto; width: 300px; z-index: 2; }
   }
   .hero__art .d-card__row { align-items: center; margin-bottom: 8px; }
   .hero__art .d-card__row h5 { margin: 0; line-height: 22px; }
@@ -276,27 +267,6 @@
     .guide-mock { padding: var(--s-4); }
     .guide-mock__row { grid-template-columns: 32px minmax(0, 1fr); }
     .guide-mock__ok { display: none; }
-  }
-
-  /* App-frame recipe */
-  .app.ui { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); margin-top: var(--s-7); background: var(--u-bg); border: 1px solid var(--u-border); border-radius: var(--u-r); box-shadow: var(--u-shadow); }
-  .app > .app__pane { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
-  .app > .app__pane + .app__pane { border-left: 1px solid var(--u-line); }
-  .app > .app__pane > .ui-panel { width: 100%; border: 0; border-radius: 0; box-shadow: none; }
-  .app > .app__pane::after { content: ""; position: absolute; inset: auto 0 0 0; height: 64px; background: linear-gradient(transparent, var(--u-bg)); pointer-events: none; }
-  @media (min-width: 1024px) and (max-width: 1279px) { .app.ui { grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); } }
-  @media (max-width: 1023px) {
-    .app.ui { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-    .app > .app__pane--list { max-height: 252px; }
-    .app > .app__pane--list::after { display: none; }
-    .app .ui-win__side { display: none; }
-    .app .ui-win__body { grid-template-columns: minmax(0, 1fr); }
-    .app > .app__pane + .app__pane { border-left: 0; border-top: 1px solid var(--u-line); }
-  }
-  @media (max-width: 639px) {
-    .app.ui { grid-template-rows: minmax(0, 1fr); }
-    .app > .app__pane--list { display: none; }
-    .app > .app__pane + .app__pane { border-top: 0; }
   }
 
   /* Features 2x2 tight grid & equal card alignment per breakpoint */
@@ -393,17 +363,25 @@
   }
   #faq .faq__item p { color: color-mix(in oklab, var(--ink) 86%, transparent); }
 
-  /* Closing CTA + footer (close--type with wide pill action and subtle emerald aurora glow) */
+  /* Closing CTA + footer (compact vertical spacing, no empty gap) */
   footer.closing {
     position: relative;
     isolation: isolate;
+    height: auto !important;
+    min-height: 0 !important;
+    padding-top: var(--s-9) !important;
+    padding-bottom: var(--s-6) !important;
     background-color: #0b180d;
     background-image:
       radial-gradient(72% 48% at 50% 0%, rgb(198 241 157 / .16), transparent 68%),
       radial-gradient(52% 42% at 88% 22%, rgb(52 211 153 / .14), transparent 70%),
       linear-gradient(180deg, #0d1f11 0%, #09150b 100%);
   }
-  footer.closing > .wrap { row-gap: var(--s-7); }
+  footer.closing > .wrap {
+    height: auto !important;
+    grid-template-rows: auto auto;
+    row-gap: var(--s-8);
+  }
   .closing__cta.close--type { gap: var(--s-5); justify-content: start; }
   .closing__head { display: grid; gap: var(--s-3); max-width: 720px; }
   .closing__eyebrow { font: 500 13px/1.3 var(--font-mono); color: var(--accent); margin: 0; }
@@ -448,7 +426,7 @@
             <div class="menu-col span-3">
               <p class="t-label" data-i18n="nav.menu.start">Get started</p>
               <a href="#guide"><b data-i18n="nav.menu.s1.t">4-step setup guide</b><span data-i18n="nav.menu.s1.d">From download to your first video</span></a>
-              <a href="#workspace"><b data-i18n="nav.menu.s2.t">Live app preview</b><span data-i18n="nav.menu.s2.d">See every step as it runs</span></a>
+              <a href="#statement"><b data-i18n="nav.menu.s2.t">Real speed results</b><span data-i18n="nav.menu.s2.d">2.5h Full HD film tested on a normal PC</span></a>
               <a href="#features"><b data-i18n="nav.menu.s3.t">Built-in voices</b><span data-i18n="nav.menu.s3.d">Listen offline before you dub</span></a>
             </div>
             <div class="menu-col span-3">
@@ -606,92 +584,6 @@
             </li>
           </ol>
           <p class="guide-tip"><strong data-i18n="guide.tip.title">Already in Vietnamese?</strong> <span data-i18n="guide.tip.text">DubTool detects it automatically, stops before using any key, and offers clean subtitles instead.</span></p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="section" id="workspace" aria-labelledby="workspace-h">
-    <div class="wrap">
-      <div class="grid">
-        <div class="span-5">
-          <h2 id="workspace-h" data-i18n="ws.h2">One clear DubTool window tracks every step</h2>
-        </div>
-        <div class="span-6 start-7 stack-4">
-          <p class="t-lead" data-i18n="ws.lead">You always see which step is running, how many lines are left, and the exact files saved. If you pause or close the app, you can resume right where it stopped.</p>
-          <p><a class="link" href="https://github.com/namtit2932k/dubtool#readme" data-i18n="ws.link">See screenshots on GitHub</a></p>
-        </div>
-      </div>
-
-      <div class="ui app fill" role="img" aria-label="DubTool desktop interface showing recent videos on the left and the live step-by-step progress log on the right" data-ui-pause-host>
-        <div class="app__pane app__pane--list" data-ui-loop>
-          <div class="ui ui-panel ui-win" data-ui="window" data-open="Queued" data-work="Running" data-done="Done" data-i18n-attrs="data-open:ws.st.open,data-work:ws.st.run,data-done:ws.st.done">
-            <div class="ui-win__bar">
-              <span class="ui-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-              <span class="ui-win__crumb">DubTool <i>/</i> <b data-i18n="ws.win.crumb">Recent videos</b></span>
-              <span class="ui-spacer"></span>
-              <span class="ui-win__search" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span class="ui-win__ph" data-i18n="ws.win.search">Search</span><span class="ui-kbd">/</span></span>
-            </div>
-            <div class="ui-win__body">
-              <nav class="ui-win__side" aria-hidden="true">
-                <span class="ui-win__nav is-on"><svg class="ui-icon" viewBox="0 0 16 16"><path d="M2.5 9h3l1 1.5h3l1-1.5h3"/><path d="M2.5 9 4 3.5h8L13.5 9v3.5h-11z"/></svg><span data-i18n="ws.win.s1">Recent</span><em>9</em></span>
-                <span class="ui-win__nav"><svg class="ui-icon" viewBox="0 0 16 16"><path d="m3.5 8.4 2.8 2.8 6.2-6.4"/></svg><span data-i18n="ws.win.s2">Finished</span><em>7</em></span>
-                <span class="ui-win__nav"><svg class="ui-icon" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg><span data-i18n="ws.win.s3">Paused</span><em>2</em></span>
-                <span class="ui-win__label" data-i18n="ws.win.lang">Languages</span>
-                <span class="ui-win__nav"><span class="ui-win__hash">#</span><span data-i18n="ws.win.l1">Chinese</span></span>
-                <span class="ui-win__nav"><span class="ui-win__hash">#</span><span data-i18n="ws.win.l2">English</span></span>
-                <span class="ui-win__nav"><span class="ui-win__hash">#</span><span data-i18n="ws.win.l3">Japanese</span></span>
-              </nav>
-              <div class="ui-win__main">
-                <div class="ui-win__cols" aria-hidden="true"><span data-i18n="ws.win.c1">Video</span><span data-i18n="ws.win.c2">Details</span><span data-i18n="ws.win.c3">Status</span><span data-i18n="ws.win.c4">Time</span></div>
-                <ul class="ui-win__rows">
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="1">ZH</span><span class="ui-win__who">drama_ep01.mp4</span><span class="ui-win__sub" data-i18n="ws.r1.s">2:33:04 · 1,543 lines · Trúc Ly</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">61m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="3">ZH</span><span class="ui-win__who">short_clip_vertical.mp4</span><span class="ui-win__sub" data-i18n="ws.r2.s">29:15 · Vertical · 264 lines</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">12m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="4">EN</span><span class="ui-win__who">design_tutorial.mp4</span><span class="ui-win__sub" data-i18n="ws.r3.s">18:40 · Full HD · Đức Trí</span><span class="ui-win__st" data-st data-st-kind="open" data-i18n="ws.st.run">Running</span><span class="ui-win__age">4m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="2">JA</span><span class="ui-win__who">kyoto_travel_vlog.mp4</span><span class="ui-win__sub" data-i18n="ws.r4.s">14:22 · Full HD · Mai Anh</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">8m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="5">KO</span><span class="ui-win__who">street_food_tour.mp4</span><span class="ui-win__sub" data-i18n="ws.r5.s">11:05 · Full HD · Trúc Ly</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">6m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="1">EN</span><span class="ui-win__who">course_lesson_04.mp4</span><span class="ui-win__sub" data-i18n="ws.r6.s">42:10 · Full HD · Minh Quân</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">21m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="3">ZH</span><span class="ui-win__who">history_story.mp4</span><span class="ui-win__sub" data-i18n="ws.r7.s">35:48 · Full HD · Trúc Ly</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">16m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="4">FR</span><span class="ui-win__who">architecture_film.mp4</span><span class="ui-win__sub" data-i18n="ws.r8.s">22:15 · Full HD · Bảo Ngọc</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">11m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="2">EN</span><span class="ui-win__who">product_demo.mp4</span><span class="ui-win__sub" data-i18n="ws.r9.s">03:18 · Full HD · Trúc Ly</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">2m</span></li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="app__pane app__pane--open" data-ui-loop>
-          <div class="ui ui-panel ui-pipe" data-ui="pipeline-board">
-            <div class="ui-pipe__head">
-              <svg class="ui-icon ui-pipe__branch" viewBox="0 0 16 16" aria-hidden="true"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5" r="1.5"/><path d="M4.5 5v6M11.5 6.5c0 2.6-2.2 3.6-5.6 4.6"/></svg>
-              <span class="ui-pipe__repo">dubtool</span><i class="ui-pipe__slash">/</i><code class="ui-pipe__ref">ep01.mp4</code>
-              <span class="ui-pipe__run">#1023</span>
-              <span class="ui-spacer"></span>
-              <span class="ui-pipe__total"><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8.5" r="5.5"/><path d="M8 5.5v3l2 1.25M6.5 1.75h3"/></svg><span data-pipe-total>61m 15s</span></span>
-              <span class="ui-chip ui-chip--ink ui-chip--live ui-pipe__chip" data-pipe-chip data-idle="Run" data-done="Done" data-i18n="ws.pipe.chip" data-i18n-attrs="data-idle:ws.pipe.chip,data-done:ws.pipe.chipDone">Run</span>
-            </div>
-            <div class="ui-pipe__commit">
-              <span class="ui-avatar" data-tone="4">VI</span>
-              <span class="ui-pipe__msg" data-i18n="ws.pipe.msg">Free Auto-Rotate · Trúc Ly voice · Clean subtitles</span>
-              <code class="ui-pipe__sha">v1.0.23</code>
-              <button class="ui-btn ui-btn--ghost ui-btn--sm ui-pipe__btn" type="button" tabindex="-1" data-pipe-btn data-idle="Cancel" data-done="Run again" data-i18n="ws.pipe.btn" data-i18n-attrs="data-idle:ws.pipe.btn,data-done:ws.pipe.btnDone">Cancel</button>
-            </div>
-            <ol class="ui-pipe__steps">
-              <li class="ui-pipe__step is-done" data-step="extract"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="logos:ffmpeg-icon" src="assets/icons/ffmpeg-icon.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p1">Audio</span></span><code class="ui-pipe__cmd" data-i18n="ws.pipe.c1">read original sound</code><span class="ui-pipe__time" data-time>7s</span><span class="ui-pipe__bar"><i></i></span></li>
-              <li class="ui-pipe__step is-done" data-step="asr"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="python" src="assets/icons/python.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p2">Listen</span></span><code class="ui-pipe__cmd" data-i18n="ws.pipe.c2">detected Chinese</code><span class="ui-pipe__time" data-time>15m</span><span class="ui-pipe__bar"><i></i></span></li>
-              <li class="ui-pipe__step is-run" data-step="translate" style="--k:0.7"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="gemini" src="assets/icons/gemini.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p3">Lines</span></span><code class="ui-pipe__cmd" data-i18n="ws.pipe.c3">1,543 sentences</code><span class="ui-pipe__time" data-time="3m">2m</span><span class="ui-pipe__bar"><i></i></span></li>
-              <li class="ui-pipe__step" data-step="tts"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="hugging-face" src="assets/icons/hugging-face.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p4">Voice</span></span><code class="ui-pipe__cmd" data-i18n="ws.pipe.c4">Trúc Ly (local)</code><span class="ui-pipe__time" data-time="17m" data-wait="Next" data-i18n="ws.pipe.wait" data-i18n-attrs="data-wait:ws.pipe.wait">Next</span><span class="ui-pipe__bar"><i></i></span></li>
-              <li class="ui-pipe__step" data-step="burn"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="logos:ffmpeg-icon" src="assets/icons/ffmpeg-icon.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p5">Save</span></span><code class="ui-pipe__cmd" data-i18n="ws.pipe.c5">MP4 + SRT + Word</code><span class="ui-pipe__time" data-time="25m" data-wait="Next" data-i18n="ws.pipe.wait" data-i18n-attrs="data-wait:ws.pipe.wait">Next</span><span class="ui-pipe__bar"><i></i></span></li>
-            </ol>
-            <div class="ui-pipe__log" aria-hidden="true">
-              <span class="ui-pipe__line" data-step="extract" data-i18n-html="ws.log.1"><b>[1/5]</b> Extracted original audio cleanly in 7 seconds</span>
-              <span class="ui-pipe__line" data-step="asr" data-i18n-html="ws.log.2"><b>[2/5]</b> Detected Chinese speech (99.9%) · 1,543 sentences</span>
-              <span class="ui-pipe__line is-on" data-step="translate" data-i18n-html="ws.log.3"><b>[3/5]</b> Translating with free Gemini + Groq keys automatically</span>
-              <span class="ui-pipe__line is-on" data-step="translate" data-i18n-html="ws.log.4"><b>[3/5]</b> Verified complete Vietnamese sentences · zero foreign letters left</span>
-              <span class="ui-pipe__line" data-step="tts" data-i18n-html="ws.log.5"><b>[4/5]</b> Generated 1,543 natural Vietnamese voice clips on this PC</span>
-              <span class="ui-pipe__line" data-step="burn" data-i18n-html="ws.log.6"><b>[5/5]</b> Synced voice timing · 0 overlaps · kept movie background sound</span>
-              <span class="ui-pipe__line" data-step="burn" data-i18n-html="ws.log.7"><b>[done]</b> Saved drama_ep01_vi.mp4 and drama_ep01_vi_translation.docx</span>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -1021,7 +913,7 @@
           <h3 data-i18n="foot.c1">Guide</h3>
           <ul>
             <li><a href="#guide" data-i18n="foot.c1.1">4-step setup</a></li>
-            <li><a href="#workspace" data-i18n="foot.c1.2">Live preview</a></li>
+            <li><a href="#statement" data-i18n="foot.c1.2">Speed &amp; results</a></li>
           </ul>
         </div>
         <div class="span-2 footer__col">
@@ -1059,7 +951,7 @@
   <button class="sec-nav__btn" type="button" data-sec-prev aria-label="Previous section" title="Previous section" data-i18n-attrs="aria-label:secnav.prev,title:secnav.prev">
     <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10l4-4 4 4"/></svg>
   </button>
-  <span class="sec-nav__pos" data-sec-pos aria-live="polite">1 / 8</span>
+  <span class="sec-nav__pos" data-sec-pos aria-live="polite">1 / 7</span>
   <button class="sec-nav__btn" type="button" data-sec-next aria-label="Next section" title="Next section" data-i18n-attrs="aria-label:secnav.next,title:secnav.next">
     <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
   </button>
