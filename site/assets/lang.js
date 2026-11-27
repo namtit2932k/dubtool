@@ -168,12 +168,12 @@ const STRINGS = {
     "feat.c3.p": "Auto-sizes subtitles for widescreen and vertical clips, and never overwrites your source.",
     "feat.f.status": "6 output & project files",
     "feat.f.reading": "Saving {n} of {total}",
-    "feat.f1.k": "Dubbed HD video",
-    "feat.f2.k": "Readable Word script",
-    "feat.f3.k": "Synced subtitle file",
-    "feat.f4.k": "Translated sentences",
-    "feat.f5.k": "Voice timing map",
-    "feat.f6.k": "Saved preferences",
+    "feat.f1.k": "Dubbed video",
+    "feat.f2.k": "Word script",
+    "feat.f3.k": "Vietnamese subs",
+    "feat.f4.k": "Translated lines",
+    "feat.f5.k": "Voice timing",
+    "feat.f6.k": "Saved settings",
     "feat.c4.h": "Works with 5 translators and built-in tools",
     "feat.c4.p": "Start free with Gemini and Groq, use OpenAI or Claude anytime, or run 100% offline with Ollama.",
 
@@ -413,12 +413,12 @@ const STRINGS = {
     "feat.c3.p": "Tự căn cỡ phụ đề cho video ngang lẫn video dọc, luôn lưu tệp mới và giữ nguyên video gốc.",
     "feat.f.status": "6 tệp đầu ra & dự án",
     "feat.f.reading": "Đang lưu {n} / {total}",
-    "feat.f1.k": "Video lồng tiếng HD",
-    "feat.f2.k": "Bản dịch Word dễ sửa",
-    "feat.f3.k": "Tệp phụ đề khớp tiếng",
-    "feat.f4.k": "Danh sách câu đã dịch",
-    "feat.f5.k": "Mốc thời gian giọng đọc",
-    "feat.f6.k": "Tùy chỉnh đã lưu",
+    "feat.f1.k": "Video lồng tiếng",
+    "feat.f2.k": "Bản dịch Word",
+    "feat.f3.k": "Phụ đề Việt",
+    "feat.f4.k": "Câu đã dịch",
+    "feat.f5.k": "Nhịp giọng đọc",
+    "feat.f6.k": "Tùy chọn lưu",
     "feat.c4.h": "Linh hoạt 5 nguồn dịch khác nhau",
     "feat.c4.p": "Bắt đầu miễn phí với Gemini và Groq, chuyển sang OpenAI/Claude hoặc chạy offline bằng Ollama.",
 
@@ -558,6 +558,32 @@ function initLang() {
   setTimeout(() => {
     window.dispatchEvent(new CustomEvent("dubtool:lang", { detail: { lang: document.documentElement.lang || initial } }));
   }, 120);
+  syncLatestReleaseZip();
+}
+
+/* Keep direct-download zip links pointed at the latest GitHub Release asset automatically. */
+async function syncLatestReleaseZip() {
+  const links = document.querySelectorAll("a[data-download-zip]");
+  if (!links.length) return;
+  const cacheKey = "dubtool-latest-zip-v1";
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(cacheKey) || "null");
+    if (cached && cached.url && Date.now() - cached.ts < 10 * 60 * 1000) {
+      links.forEach((a) => { a.href = cached.url; });
+      return;
+    }
+  } catch (_) {}
+  try {
+    const res = await fetch("https://api.github.com/repos/namtit2932k/dubtool/releases/latest", {
+      headers: { Accept: "application/vnd.github+json" }
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const zip = (data.assets || []).find((a) => typeof a.name === "string" && a.name.toLowerCase().endsWith(".zip") && a.browser_download_url);
+    if (!zip) return;
+    links.forEach((a) => { a.href = zip.browser_download_url; });
+    try { sessionStorage.setItem(cacheKey, JSON.stringify({ url: zip.browser_download_url, ts: Date.now() })); } catch (_) {}
+  } catch (_) {}
 }
 
 if (document.readyState === "loading") {

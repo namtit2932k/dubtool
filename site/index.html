@@ -71,6 +71,14 @@
     padding: 4px;
     box-shadow: inset 0 0 0 1px rgb(15 31 16 / .10);
   }
+  .ui-file__kind {
+    max-width: 100%;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+  }
   #features .dg .dg-node--tile,
   #features .dg .dg-node--pill {
     background: #ffffff;
@@ -299,7 +307,7 @@
               <a href="#providers"><b data-i18n="nav.menu.m2.t">100% offline mode</b><span data-i18n="nav.menu.m2.d">Keep private videos on your PC</span></a>
               <a href="#faq"><b data-i18n="nav.menu.m3.t">Common questions</b><span data-i18n="nav.menu.m3.d">PC requirements, privacy, Mac support</span></a>
             </div>
-            <a class="menu-card span-3 start-10" href="https://github.com/namtit2932k/dubtool/releases/latest">
+            <a class="menu-card span-3 start-10" href="https://github.com/namtit2932k/dubtool/releases/download/v1.0.23/DubTool-1.0.23-win64.zip" download data-download-zip>
               <div class="panel">
                 <div class="stage stage--fade-br">
                   <div class="at-corner" style="--ax:20px;--ay:20px">
@@ -326,7 +334,7 @@
       <button class="lang-switch__btn" type="button" data-lang-btn="vi" aria-pressed="false">VI</button>
     </div>
     <div class="nav__actions">
-      <a class="btn btn--primary" href="https://github.com/namtit2932k/dubtool/releases/latest"><span data-i18n="cta.download">Download DubTool</span><svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
+      <a class="btn btn--primary" href="https://github.com/namtit2932k/dubtool/releases/download/v1.0.23/DubTool-1.0.23-win64.zip" download data-download-zip><span data-i18n="cta.download">Download DubTool</span><svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
     </div>
     <button class="nav__toggle" type="button" aria-expanded="false" aria-label="Menu">
       <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M2 5h14M2 13h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -341,7 +349,7 @@
         <h1 id="hero-h" data-i18n="hero.h1">Turn foreign videos into Vietnamese</h1>
         <p class="hero__lead" data-i18n="hero.lead">DubTool listens to your video, translates it into natural Vietnamese, adds built-in voices, and exports a ready-to-watch Windows video. Free and open source.</p>
         <div class="btn-row">
-          <a class="btn btn--primary" href="https://github.com/namtit2932k/dubtool/releases/latest"><span data-i18n="cta.download">Download DubTool</span><svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
+          <a class="btn btn--primary" href="https://github.com/namtit2932k/dubtool/releases/download/v1.0.23/DubTool-1.0.23-win64.zip" download data-download-zip><span data-i18n="cta.download">Download DubTool</span><svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
           <a class="btn btn--secondary" href="#guide" data-i18n="cta.guide">See how to use</a>
         </div>
         <p class="hero__proof" data-i18n="hero.proof">Works on Windows 10 and 11 (64-bit). No extra installs needed, and your original video stays untouched.</p>
@@ -608,42 +616,42 @@
                     <li class="ui-file is-done">
                       <span class="ui-file__icon"><img data-icon="video" src="assets/icons/video.svg" alt="" width="24" height="24" loading="lazy"></span>
                       <span class="ui-file__name">movie_vi.mp4</span>
-                      <span class="ui-file__kind" data-i18n="feat.f1.k">Dubbed HD video</span>
+                      <span class="ui-file__kind" data-i18n="feat.f1.k">Dubbed video</span>
                       <span class="ui-file__bar"><i></i></span>
                       <span class="ui-file__check"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
                     </li>
                     <li class="ui-file is-done">
                       <span class="ui-file__icon"><img data-icon="docx" src="assets/icons/docx.svg" alt="" width="24" height="24" loading="lazy"></span>
                       <span class="ui-file__name">translation.docx</span>
-                      <span class="ui-file__kind" data-i18n="feat.f2.k">Readable Word script</span>
+                      <span class="ui-file__kind" data-i18n="feat.f2.k">Word script</span>
                       <span class="ui-file__bar"><i></i></span>
                       <span class="ui-file__check"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
                     </li>
                     <li class="ui-file is-done">
                       <span class="ui-file__icon"><img data-icon="txt" src="assets/icons/txt.svg" alt="" width="24" height="24" loading="lazy"></span>
                       <span class="ui-file__name">subtitles.vi.srt</span>
-                      <span class="ui-file__kind" data-i18n="feat.f3.k">Synced subtitle file</span>
+                      <span class="ui-file__kind" data-i18n="feat.f3.k">Vietnamese subs</span>
                       <span class="ui-file__bar"><i></i></span>
                       <span class="ui-file__check"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
                     </li>
                     <li class="ui-file is-done">
                       <span class="ui-file__icon"><img data-icon="json" src="assets/icons/json.svg" alt="" width="24" height="24" loading="lazy"></span>
                       <span class="ui-file__name">dub_units.json</span>
-                      <span class="ui-file__kind" data-i18n="feat.f4.k">Translated sentences</span>
+                      <span class="ui-file__kind" data-i18n="feat.f4.k">Translated lines</span>
                       <span class="ui-file__bar"><i></i></span>
                       <span class="ui-file__check"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
                     </li>
                     <li class="ui-file is-done">
                       <span class="ui-file__icon"><img data-icon="json" src="assets/icons/json.svg" alt="" width="24" height="24" loading="lazy"></span>
                       <span class="ui-file__name">schedule.json</span>
-                      <span class="ui-file__kind" data-i18n="feat.f5.k">Voice timing map</span>
+                      <span class="ui-file__kind" data-i18n="feat.f5.k">Voice timing</span>
                       <span class="ui-file__bar"><i></i></span>
                       <span class="ui-file__check"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
                     </li>
                     <li class="ui-file is-done">
                       <span class="ui-file__icon"><img data-icon="yaml" src="assets/icons/yaml.svg" alt="" width="24" height="24" loading="lazy"></span>
                       <span class="ui-file__name">settings.yaml</span>
-                      <span class="ui-file__kind" data-i18n="feat.f6.k">Saved preferences</span>
+                      <span class="ui-file__kind" data-i18n="feat.f6.k">Saved settings</span>
                       <span class="ui-file__bar"><i></i></span>
                       <span class="ui-file__check"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
                     </li>
@@ -818,7 +826,7 @@
           <h2 id="close-h" data-i18n="close.h2">Download DubTool for Windows</h2>
           <p class="t-lead" data-i18n="close.lead">Free and open source (MIT) for Windows 10 and 11 (64-bit).</p>
         </div>
-        <a class="btn btn--primary" href="https://github.com/namtit2932k/dubtool/releases/latest"><span data-i18n="cta.download">Download DubTool</span><svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
+        <a class="btn btn--primary" href="https://github.com/namtit2932k/dubtool/releases/download/v1.0.23/DubTool-1.0.23-win64.zip" download data-download-zip><span data-i18n="cta.download">Download DubTool</span><svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
       </div>
       <p class="close__word" aria-hidden="true">DubTool</p>
     </div>
