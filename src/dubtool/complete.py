@@ -81,14 +81,15 @@ def flagged_entries(
 RETRANSLATE_SYSTEM = (
     "You complete Vietnamese subtitle translations that came back "
     "incomplete. The previous output was cut short: reproduce the FULL "
-    "meaning of the English, keep it one complete sentence, keep the "
-    "pronouns already used, never add information the English does not "
-    "have. Reply with ONLY a JSON array of "
+    "meaning of the source text, keep it one complete sentence, preserve "
+    "the exact pronouns and register already used, never add information "
+    "the source text does not have, and leave zero Chinese/Japanese/Korean "
+    "characters untranslated. Reply with ONLY a JSON array of "
     "{\"id\": <int>, \"vi\": \"<complete text>\"}, one per input id, "
     "exactly the same ids."
 )
 
-RETRANSLATE_USER = """The previous Vietnamese for each fragment was incomplete ({reason}). Write a COMPLETE new Vietnamese translation that keeps all of the English meaning, a complete sentence ending with the same sentence punctuation as the English. Character allowance: up to {chars} characters (30% more than before).
+RETRANSLATE_USER = """The previous Vietnamese for each fragment was incomplete ({reason}). Write a COMPLETE new Vietnamese translation that keeps all of the source meaning, a complete sentence ending with natural sentence punctuation. Character allowance: up to {chars} characters (30% more than before).
 
 Fragments:
 {segments}

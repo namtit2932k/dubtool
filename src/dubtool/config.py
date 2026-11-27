@@ -30,7 +30,7 @@ DEFAULTS: dict = {
 MIX_DEFAULTS: dict = {
     "mode": "static",  # static | duck
     "original_gain_db": -14,
-    "dub_gain_db": 0,
+    "dub_gain_db": 2.5,
     "duck": {
         "threshold": 0.03,  # sidechaincompress params, duck mode only
         "ratio": 8,

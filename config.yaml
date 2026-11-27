@@ -69,7 +69,7 @@ llm:
 mix:
   mode: static           # static | duck
   original_gain_db: -14  # how much to lower the original audio
-  dub_gain_db: 0
+  dub_gain_db: 2.5       # gentle boost before the -1.0 dB limiter so voice stays present over loud sources
   duck:                  # sidechaincompress params, duck mode only
     threshold: 0.03
     ratio: 8

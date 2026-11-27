@@ -99,7 +99,7 @@ def run(job, config, force: bool = False, cancel=None) -> None:
     graph = audio_utils.build_mix_graph(
         mix.get("mode", "static"),
         float(mix.get("original_gain_db", -14)),
-        float(mix.get("dub_gain_db", 0)),
+        float(mix.get("dub_gain_db", 2.5)),
         mix.get("duck") or {},
     )
     part = out.with_name(out.stem + ".part" + out.suffix)
@@ -120,7 +120,7 @@ def run(job, config, force: bool = False, cancel=None) -> None:
         "s6: wrote %s (%d clips over %.1fs, mode=%s, orig=%sdB, dub=%sdB)",
         out.name, len(clips), video_duration,
         mix.get("mode", "static"),
-        mix.get("original_gain_db", -14), mix.get("dub_gain_db", 0),
+        mix.get("original_gain_db", -14), mix.get("dub_gain_db", 2.5),
     )
 
 

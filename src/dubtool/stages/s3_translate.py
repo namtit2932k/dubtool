@@ -484,7 +484,9 @@ def _completeness_pass(job, entries, config, client, cancel) -> list[dict]:
             user = complete_mod.render_retranslate_batch(chunk)
 
             def _validate(raw, _ids=ids):
-                return llm_parsing.parse_json_items(raw, _ids)
+                parsed = llm_parsing.parse_json_items(raw, _ids)
+                llm_parsing.check_no_untranslated_cjk(parsed)
+                return parsed
 
             def _note(exc):
                 return ("Your previous reply was invalid: %s. Follow the format "
@@ -1348,10 +1350,11 @@ def run(
             if vi is None:
                 # Resume of an older sentence-mode run: rebuild the sentence
                 # from its derived segments with the boundary-dedupe join.
+                from dubtool.llm.parsing import normalize_vietnamese_casing
                 from dubtool.stages.s8_export_readable import _join_deduped
 
                 segs = [(seg_by_id.get(sid) or {}).get("vi") or "" for sid in u["seg_ids"]]
-                vi = _join_deduped([t for t in segs if t.strip()])
+                vi = normalize_vietnamese_casing(_join_deduped([t for t in segs if t.strip()]))
             translations[uid] = {"vi": vi, "model": u.get("model")}
             is_reviewed = u.get("reviewed") or any(
                 (seg_by_id.get(sid) or {}).get("reviewed") for sid in u["seg_ids"]
@@ -1416,44 +1419,93 @@ def run(
     write_json(job.translated_path, entries)
 
     # AGU8 6.2: truncation/shrink guard — one re-translation batch, then the
-    # quality report for what is still flagged. Always persist updates back to
-    # both translated.json and dub_units.json so repaired lines and `uncertain`
-    # flags actually reach Stage 4-8.
-    before_vi = {e["id"]: (e.get("vi"), bool(e.get("uncertain"))) for e in entries}
-    uncertain = _completeness_pass(job, entries, config, final_client, cancel)
-    changed_after_pass = any(
-        (e.get("vi"), bool(e.get("uncertain"))) != before_vi.get(e["id"])
-        for e in entries
-    )
-    if uncertain or changed_after_pass:
-        write_json(job.translated_path, entries)
-        if unit_mode == "sentence" and units and job.dub_units_path.exists():
-            from dubtool.dub_units import write_dub_units
-            from dubtool.stages.s8_export_readable import _join_deduped
+    # quality report for what is still flagged.
+    # Update 23: in sentence mode, inspect and re-translate whole dub_units
+    # (not proportionally sliced segments in translated.json) so mid-sentence
+    # splits never trigger false-positive dangling rewrites that splice broken
+    # periods/pronouns back into dub_units.json.
+    if unit_mode == "sentence" and units and job.dub_units_path.exists():
+        from dubtool.dub_units import write_dub_units
 
-            try:
-                dub_units_list = read_json(job.dub_units_path)
-                if isinstance(dub_units_list, list):
-                    seg_by_id = {e["id"]: e for e in entries}
-                    u_by_id = {int(u["unit_id"]): u for u in units}
-                    for du in dub_units_list:
-                        uid = int(du.get("unit_id", du.get("id", -1)))
-                        u = u_by_id.get(uid)
-                        if not u:
-                            continue
-                        sids = u.get("seg_ids") or []
-                        if any((seg_by_id.get(sid) or {}).get("vi") != (before_vi.get(sid) or (None, None))[0] for sid in sids):
-                            segs = [(seg_by_id.get(sid) or {}).get("vi") or "" for sid in sids]
-                            rejoined = _join_deduped([t for t in segs if t.strip()])
-                            if rejoined:
-                                du["vi"] = rejoined
-                        if any((seg_by_id.get(sid) or {}).get("uncertain") for sid in sids):
-                            du["uncertain"] = True
-                        else:
-                            du.pop("uncertain", None)
-                    write_dub_units(job, dub_units_list)
-            except Exception as exc:
-                log.warning("s3: failed to sync completeness updates to dub_units.json: %s", exc)
+        dub_units_list = read_json(job.dub_units_path)
+        if isinstance(dub_units_list, list) and dub_units_list:
+            seg_by_id = {e["id"]: e for e in entries}
+            u_by_id = {int(u["unit_id"]): u for u in units}
+            unit_entries: list[dict[str, Any]] = []
+            du_by_uid: dict[int, dict[str, Any]] = {}
+            for du in dub_units_list:
+                uid = int(du.get("unit_id", du.get("id", -1)))
+                u = u_by_id.get(uid)
+                sids = (u.get("seg_ids") if u else None) or du.get("seg_ids") or []
+                is_reviewed = bool(du.get("reviewed")) or any(
+                    bool((seg_by_id.get(sid) or {}).get("reviewed")) for sid in sids
+                )
+                dur = max(0.2, float(du.get("end", 0.0)) - float(du.get("start", 0.0)))
+                max_c = int(
+                    (u.get("max_chars") if u else 0)
+                    or du.get("max_chars")
+                    or max(1, round(dur * config.chars_per_sec))
+                )
+                du_by_uid[uid] = du
+                unit_entries.append({
+                    "id": uid,
+                    "start": float(du.get("start", 0.0)),
+                    "end": float(du.get("end", 0.0)),
+                    "text": str(du.get("text") or (u.get("text") if u else "") or ""),
+                    "vi": str(du.get("vi") or ""),
+                    "max_chars": max_c,
+                    "reviewed": is_reviewed,
+                    "uncertain": bool(du.get("uncertain")),
+                })
+            before_unit_vi = {
+                ue["id"]: (ue.get("vi"), bool(ue.get("uncertain")))
+                for ue in unit_entries
+            }
+            uncertain = _completeness_pass(job, unit_entries, config, final_client, cancel)
+            changed_units = any(
+                (ue.get("vi"), bool(ue.get("uncertain"))) != before_unit_vi.get(ue["id"])
+                for ue in unit_entries
+            )
+            if uncertain or changed_units:
+                for ue in unit_entries:
+                    uid = ue["id"]
+                    du = du_by_uid.get(uid)
+                    u = u_by_id.get(uid)
+                    if du is None:
+                        continue
+                    old_vi = (before_unit_vi.get(uid) or (None, None))[0]
+                    new_vi = str(ue.get("vi") or "").strip()
+                    if new_vi and new_vi != old_vi:
+                        du["vi"] = new_vi
+                        if u is not None:
+                            apply_unit_translation(entries, u, new_vi, derived=True)
+                    is_unc = bool(ue.get("uncertain"))
+                    if is_unc:
+                        du["uncertain"] = True
+                    else:
+                        du.pop("uncertain", None)
+                    if u is not None:
+                        for sid in u.get("seg_ids") or []:
+                            seg = seg_by_id.get(sid)
+                            if seg is None:
+                                continue
+                            if is_unc:
+                                seg["uncertain"] = True
+                            else:
+                                seg.pop("uncertain", None)
+                write_dub_units(job, dub_units_list)
+                write_json(job.translated_path, entries)
+        else:
+            uncertain = []
+    else:
+        before_vi = {e["id"]: (e.get("vi"), bool(e.get("uncertain"))) for e in entries}
+        uncertain = _completeness_pass(job, entries, config, final_client, cancel)
+        changed_after_pass = any(
+            (e.get("vi"), bool(e.get("uncertain"))) != before_vi.get(e["id"])
+            for e in entries
+        )
+        if uncertain or changed_after_pass:
+            write_json(job.translated_path, entries)
 
     cli_provider = getattr(final_client, "provider", None)
     provider_name = getattr(cli_provider, "name", "?")

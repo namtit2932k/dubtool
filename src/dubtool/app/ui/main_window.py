@@ -995,6 +995,19 @@ class MainWindow(QMainWindow):
         self.page_layout.setStretchFactor(self.left_box, stretch[0])
         self.page_layout.setStretchFactor(self.progress_group, stretch[1])
 
+    def _scroll_to_progress(self) -> None:
+        """In single-column (stacked) layout, scroll smoothly down so the
+        newly visible Progress card is immediately in view after clicking
+        Generate. No-op in two-column split layout where Progress sits side
+        by side with the controls."""
+        if self._split_state == "split" or not self.progress_group.isVisible():
+            return
+        bar = self.scroll.verticalScrollBar()
+        if bar is None:
+            return
+        target_y = max(0, self.progress_group.y() - 8)
+        bar.setValue(min(bar.maximum(), target_y))
+
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
         if not getattr(self, "_dwm_applied", False):
@@ -1342,6 +1355,7 @@ class MainWindow(QMainWindow):
         self.progress_group._last_mode = "generate"
         self.progress_group.show_running()
         self.set_busy(True)
+        QTimer.singleShot(0, self._scroll_to_progress)
         from dubtool.app.ui.fillers_dialog import (
             DialogBridge, FillersDialog, OverloadDialog,
         )

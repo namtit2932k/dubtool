@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="../README.md">English</a> · <strong>Tiếng Việt</strong>
+  <a href="../README.md">English</a> · <strong>Tiếng Việt</strong> · <a href="https://namtit2932k.github.io/dubtool/">Trang giới thiệu</a>
 </p>
 
 <p align="center">
