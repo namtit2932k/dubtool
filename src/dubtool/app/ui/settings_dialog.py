@@ -50,6 +50,7 @@ from PySide6.QtWidgets import (
 
 from dubtool.app import i18n, secrets, settings
 from dubtool.app.key_test import run_key_test
+from dubtool.app.ui.theme import apply_win_dark_titlebar, set_button_variant
 
 PROVIDERS_UI = (
     ("gemini", "Gemini"),
@@ -230,12 +231,17 @@ class _AddKeysDialog(QDialog):
         row.addStretch(1)
         self.ok_button = QPushButton(i18n.tr("settings.add"))
         self.ok_button.setDefault(True)
+        set_button_variant(self.ok_button, "primary")
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.clicked.connect(self.reject)
         self.ok_button.clicked.connect(self.accept)
         row.addWidget(self.ok_button)
         row.addWidget(self.cancel_button)
         layout.addLayout(row)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        apply_win_dark_titlebar(self)
 
     def keys(self) -> list[str]:
         """One key per line, blanks dropped, trimmed (duplicates and quote
@@ -287,9 +293,6 @@ class SettingsDialog(QDialog):
         self.read_only_banner = QLabel(i18n.tr("settings.read_only_banner"))
         self.read_only_banner.setObjectName("read_only_banner")
         self.read_only_banner.setWordWrap(True)
-        self.read_only_banner.setStyleSheet(
-            "background: #f3d98a; color: #40300a; padding: 6px; border-radius: 4px;"
-        )
         self.read_only_banner.setVisible(bool(read_only))
         layout.addWidget(self.read_only_banner)
         self._read_only_flag = bool(read_only)
@@ -305,6 +308,7 @@ class SettingsDialog(QDialog):
         ok = QPushButton("OK")
         ok.setObjectName("ok_btn")
         ok.setDefault(True)
+        set_button_variant(ok, "primary")
         cancel = QPushButton("Cancel")
         cancel.setObjectName("close_btn")
         ok.clicked.connect(self.accept)
@@ -333,6 +337,10 @@ class SettingsDialog(QDialog):
         self._on_key_saved = on_key_saved
         self.setMinimumHeight(400)
         self.resize(max(540, self.minimumSizeHint().width()), min(580, max(480, self.sizeHint().height())))
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        apply_win_dark_titlebar(self)
 
     # ------------------------------------------------- read-only (AGU9 2.2)
     def _apply_read_only(self) -> None:
@@ -387,9 +395,11 @@ class SettingsDialog(QDialog):
         self.test_all_btn = QPushButton(i18n.tr("settings.test_all"))
         self.test_one_btn = QPushButton(i18n.tr("settings.test_selected"))
         self.add_btn = QPushButton(i18n.tr("settings.add_keys"))
+        set_button_variant(self.add_btn, "primary")
         self.up_btn = QPushButton(i18n.tr("settings.move_up"))
         self.down_btn = QPushButton(i18n.tr("settings.move_down"))
         self.remove_btn = QPushButton(i18n.tr("settings.remove"))
+        set_button_variant(self.remove_btn, "danger")
         self.import_env_btn = QPushButton(i18n.tr("settings.env_import"))
         for b in (self.add_btn, self.up_btn, self.down_btn, self.remove_btn):
             btns_row1.addWidget(b)
@@ -1108,7 +1118,7 @@ class SettingsDialog(QDialog):
 
         days_hint = QLabel(i18n.tr("adv.jobs_days_hint"), group)
         days_hint.setWordWrap(True)
-        days_hint.setStyleSheet("color: #9aa0a6; font-size: 9pt;")
+        days_hint.setStyleSheet("color: #94A3B8; font-size: 9pt;")
         limits_grid.addWidget(days_hint, 1, 0, 1, 2)
         self.jobs_days_hint_label = days_hint
 

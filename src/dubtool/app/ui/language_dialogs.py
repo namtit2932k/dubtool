@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from dubtool import languages as lang_mod
 from dubtool.app import i18n
+from dubtool.app.ui.theme import apply_win_dark_titlebar, set_button_variant
 
 
 class OtherLanguageDialog(QDialog):
@@ -50,6 +51,7 @@ class OtherLanguageDialog(QDialog):
         self.cancel_btn = QPushButton(i18n.tr("language.cancel"))
         self.ok_btn = QPushButton(i18n.tr("language.ok"))
         self.ok_btn.setDefault(True)
+        set_button_variant(self.ok_btn, "primary")
         btn_row.addWidget(self.cancel_btn)
         btn_row.addWidget(self.ok_btn)
         layout.addLayout(btn_row)
@@ -58,6 +60,10 @@ class OtherLanguageDialog(QDialog):
         self.list_widget.itemDoubleClicked.connect(lambda _item: self._accept_current())
         self.ok_btn.clicked.connect(self._accept_current)
         self.cancel_btn.clicked.connect(self.reject)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        apply_win_dark_titlebar(self)
 
     def _populate(self, query: str) -> None:
         q = (query or "").strip().lower()
@@ -121,12 +127,17 @@ class LanguageUncertainDialog(QDialog):
         self.cancel_btn = QPushButton(i18n.tr("language.cancel"))
         self.continue_btn = QPushButton(i18n.tr("language.uncertain_continue"))
         self.continue_btn.setDefault(True)
+        set_button_variant(self.continue_btn, "primary")
         btn_row.addWidget(self.cancel_btn)
         btn_row.addWidget(self.continue_btn)
         layout.addLayout(btn_row)
 
         self.continue_btn.clicked.connect(self._on_continue)
         self.cancel_btn.clicked.connect(self.reject)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        apply_win_dark_titlebar(self)
 
     def _on_continue(self) -> None:
         for rb, code in self.radios:
@@ -156,6 +167,7 @@ class VietnameseSourceDialog(QDialog):
         btn_row.addStretch(1)
         self.subtitles_btn = QPushButton(i18n.tr("language.vi_subtitles_btn"))
         self.subtitles_btn.setDefault(True)
+        set_button_variant(self.subtitles_btn, "primary")
         self.close_btn = QPushButton(i18n.tr("language.close"))
         btn_row.addWidget(self.subtitles_btn)
         btn_row.addWidget(self.close_btn)
@@ -163,6 +175,10 @@ class VietnameseSourceDialog(QDialog):
 
         self.subtitles_btn.clicked.connect(self._on_subtitles)
         self.close_btn.clicked.connect(self.reject)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        apply_win_dark_titlebar(self)
 
     def _on_subtitles(self) -> None:
         self.choice = "subtitles"

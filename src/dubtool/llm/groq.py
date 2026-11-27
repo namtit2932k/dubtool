@@ -55,12 +55,12 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 # preserving every translation rule, brief, context, glossary and pronoun pick.
 _COMPACT_TRANSLATE_SYSTEM = (
     "Translate video subtitles into concise, natural spoken Vietnamese for dubbing. "
-    "Rules: faithful meaning, no dropped clauses, no added facts, no slang "
-    "unless in source; never leave untranslated Chinese/Japanese/Korean characters "
-    "in Vietnamese (transliterate names/titles into Vietnamese); follow Brief style "
-    "and pronouns if given, otherwise keep default pronouns consistent; apply glossary "
-    "exactly; keep phrasing concise near max_chars (cut filler first, never meaning); "
-    "complete sentences with matching punctuation; reply ONLY with JSON object: "
+    "Rules: faithful meaning, no dropped clauses, no added facts, no slang unless in "
+    "source; never leave Chinese/Japanese/Korean chars (transliterate names/titles); "
+    "follow Brief pronouns if given, for multi-character/period dramas use role-fit "
+    "pronouns (trẫm/ta/ngươi/con/chàng/nàng) consistently instead of 'tôi'/'bạn', "
+    "else keep defaults consistent; apply glossary exactly; stay near max_chars (cut "
+    "filler first); proper casing & punctuation; reply ONLY with JSON object: "
     '{"items":[{"id":<int>,"vi":"<str>"}]}.'
 )
 _GROQ_MAX_OUTPUT_CAP = 950

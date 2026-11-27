@@ -131,6 +131,28 @@ def _validate_ids(data: list[Any], expected_ids: list[int]) -> None:
         raise LLMError(f"expected ids {sorted(expected_ids)} exactly once, got {seen}")
 
 
+# Sentence-initial capitalization after terminal punctuation (., !, ?) when a
+# lowercase letter immediately starts the next sentence (e.g. "Xin lỗi. lúc..."
+# -> "Xin lỗi. Lúc..."). Skips ellipses ("..."), decimals, and common abbreviations.
+_SENTENCE_CAP_RE = re.compile(r"(?<!\.)([.!?])(\s+)([^\W\d_])", re.UNICODE)
+
+
+def normalize_vietnamese_casing(text: str) -> str:
+    """Capitalize lowercase letters immediately following sentence-ending
+    punctuation (`.`, `!`, `?` + whitespace), preserving ellipses and URLs."""
+    s = (text or "").strip()
+    if not s:
+        return s
+
+    def _cap(match: re.Match[str]) -> str:
+        punct, space, ch = match.group(1), match.group(2), match.group(3)
+        if ch.islower():
+            return f"{punct}{space}{ch.upper()}"
+        return match.group(0)
+
+    return _SENTENCE_CAP_RE.sub(_cap, s)
+
+
 def parse_json_array(text: str, expected_ids: list[int]) -> list[dict[str, Any]]:
     """Parse and validate a JSON array of {"id","vi"} objects."""
     if not text or not text.strip():
@@ -149,7 +171,7 @@ def parse_json_array(text: str, expected_ids: list[int]) -> list[dict[str, Any]]
         vi = _extract_vi_field(item)
         if not isinstance(vi, str) or not vi.strip():
             raise LLMError(f"segment id={item.get('id')} has empty or missing 'vi'")
-        out.append({"id": item["id"], "vi": vi.strip()})
+        out.append({"id": item["id"], "vi": normalize_vietnamese_casing(vi)})
     return out
 
 
@@ -160,7 +182,7 @@ def parse_shortened(text: str) -> str:
     vi = _extract_vi_field(data) if isinstance(data, dict) else None
     if not isinstance(vi, str) or not vi.strip():
         raise LLMError("missing 'vi' in shortened response")
-    return vi.strip()
+    return normalize_vietnamese_casing(vi)
 
 
 def parse_batch_shortened(text: str, expected_ids: list[int]) -> list[dict[str, Any]]:
@@ -181,5 +203,5 @@ def parse_batch_shortened(text: str, expected_ids: list[int]) -> list[dict[str, 
         vi = _extract_vi_field(item) if isinstance(item, dict) else None
         if not isinstance(vi, str) or not vi.strip():
             raise LLMError(f"segment id={item.get('id')} has empty or missing 'vi'")
-        out.append({"id": item["id"], "vi": vi.strip()})
+        out.append({"id": item["id"], "vi": normalize_vietnamese_casing(vi)})
     return out

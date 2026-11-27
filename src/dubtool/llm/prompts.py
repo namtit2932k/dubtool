@@ -145,12 +145,17 @@ def render_pronoun_block(pronouns: dict | None, has_brief: bool = False) -> str:
         p.update({k: v for k, v in pronouns.items() if v})
     source = "Video brief above" if has_brief else "video description"
     return (
-        f"Pronoun choices for this whole video (keep them consistent; do not switch between alternatives):\n"
+        f"Pronoun choices for narration / monologue videos (keep them consistent; do not switch between alternatives):\n"
         f"- First person (I/we/me): {p['first']}\n"
         f"- Second person ('you'): plural -> {p['second_plural']}; singular -> {p['second_singular']}\n"
         "- Do not assume the gender or relationship of 'you': never use "
         f"'anh', 'cô', 'chi', or 'em' unless the {source} states them.\n"
-        f"- If the {source} specifies pronouns, use its choices instead.\n\n"
+        f"- If the {source} specifies pronouns, use its choices instead.\n"
+        "- Exception for multi-character dramas, period/historical fiction, or movies: "
+        "when the dialogue clearly involves characters with distinct roles or historical titles "
+        "(e.g. emperor, prince, consort, parent/child, master/servant), use natural, context-appropriate "
+        "Vietnamese pronouns (such as trẫm/ta/ngươi/thần nữ/con/chàng/nàng) consistently for each pair "
+        "of speakers instead of forcing tutorial-style 'tôi'/'bạn'.\n\n"
     )
 
 

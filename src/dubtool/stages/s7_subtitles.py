@@ -32,26 +32,49 @@ def build_burn_filter(
     font_size: float,
     margin_v: float,
     outline: float,
+    *,
+    bg_box: bool = False,
 ) -> str:
     """Pure: the libass subtitles filter string for burning.
 
     Sizes must already be converted to libass units (px_to_ass_units).
+    When ``bg_box`` is True (default), uses ``BorderStyle=3`` with a
+    translucent dark backing box (``&H55000000``, ~67% opacity) so burned
+    Vietnamese subtitles stay legible even when the source video already has
+    hardcoded subtitles near the bottom edge.
     """
-    style = (
-        f"FontName={font_name},FontSize={font_size:.2f},"
-        f"PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
-        f"BorderStyle=1,Outline={outline:.2f},Shadow=0,Alignment=2,"
-        f"MarginV={margin_v:.2f}"
-    )
+    if bg_box:
+        style = (
+            f"FontName={font_name},FontSize={font_size:.2f},"
+            f"PrimaryColour=&H00FFFFFF,OutlineColour=&H38000000,"
+            f"BackColour=&H38000000,BorderStyle=3,Outline={outline:.2f},"
+            f"Shadow=0,Alignment=2,MarginV={margin_v:.2f}"
+        )
+    else:
+        style = (
+            f"FontName={font_name},FontSize={font_size:.2f},"
+            f"PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
+            f"BorderStyle=1,Outline={outline:.2f},Shadow=0,Alignment=2,"
+            f"MarginV={margin_v:.2f}"
+        )
     return f"subtitles={srt_name}:fontsdir={fontsdir}:force_style='{style}'"
 
 
 def style_in_units(height: int, width: int, cfg: dict) -> dict:
     """Intended pixel sizes -> libass units, plus the chosen line width."""
     height = int(height or 720)
-    font_px = max(height / float(cfg.get("size_ratio", 24)), 8 * subs.LIBASS_SRT_PLAYRES_Y / height)
+    width = int(width or 0)
+    size_ratio = float(cfg.get("size_ratio", 24))
+    font_px = height / size_ratio
+    # On portrait videos (height > width, e.g. 720x1280 or 1080x1920), scaling
+    # purely by height makes glyphs 3x wider relative to frame width and forces
+    # libass to wrap 2-line cues into 4 tall lines. Cap by width / 20 so
+    # portrait lines comfortably fit PORTRAIT_LINE_CHARS (~28 chars) in 2 lines.
+    if width > 0 and height > width:
+        font_px = min(font_px, width / 20.0)
+    font_px = max(font_px, 8 * subs.LIBASS_SRT_PLAYRES_Y / height)
     margin_px = max(height / float(cfg.get("margin_ratio", 18)), 2 * subs.LIBASS_SRT_PLAYRES_Y / height)
-    outline_px = max(1.0, height / 540.0)
+    outline_px = max(1.0, (min(width, height) if width > 0 else height) / 540.0)
     max_line_chars = subs.default_line_chars(width or 1, height, cfg.get("max_line_chars"))
     return {
         "font_px": font_px,
@@ -61,6 +84,7 @@ def style_in_units(height: int, width: int, cfg: dict) -> dict:
         "outline_px": outline_px,
         "outline": subs.px_to_ass_units(outline_px, height),
         "max_line_chars": max_line_chars,
+        "bg_box": bool(cfg.get("bg_box", True)),
     }
 
 
@@ -144,6 +168,7 @@ def run(job, config, force: bool = False, cancel=None) -> None:
         font_size=style["font_size"],
         margin_v=style["margin_v"],
         outline=style["outline"],
+        bg_box=bool(style.get("bg_box", True)),
     )
 
     tmp_out = job.dir / "output.tmp.mp4"
@@ -155,7 +180,7 @@ def run(job, config, force: bool = False, cancel=None) -> None:
         "-i", base.name,
         "-vf", graph,
         "-c:v", "libx264",
-        "-crf", str(int(cfg.get("crf", 18))),
+        "-crf", str(int(cfg.get("crf", 21))),
         "-preset", preset,
         "-pix_fmt", "yuv420p",
         "-c:a", "copy",

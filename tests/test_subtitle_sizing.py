@@ -36,7 +36,22 @@ def test_style_in_units_1080p():
 def test_style_in_units_portrait_line_chars():
     style = style_in_units(1920, 1080, {})
     assert style["max_line_chars"] == 28
-    assert style["font_size"] == pytest.approx(288 / 24)
+    # Portrait font_px is capped by width / 20 (= 54 px at 1080x1920) so 2-line
+    # cues never wrap into 4 giant lines on 9:16 vertical videos.
+    assert style["font_px"] == pytest.approx(54.0)
+    assert style["font_size"] == pytest.approx(subs.px_to_ass_units(54.0, 1920))
+
+    style_720 = style_in_units(1280, 720, {})
+    assert style_720["max_line_chars"] == 28
+    assert style_720["font_px"] == pytest.approx(36.0)
+
+
+def test_burn_filter_bg_box_and_plain():
+    boxed = build_burn_filter("c.srt", "fonts", "Arial", 12.0, 16.0, 0.53, bg_box=True)
+    assert "BorderStyle=3" in boxed
+    assert "BackColour=&H38000000" in boxed
+    plain = build_burn_filter("c.srt", "fonts", "Arial", 12.0, 16.0, 0.53, bg_box=False)
+    assert "BorderStyle=1" in plain
 
 
 def test_style_in_units_honors_configured_line_chars():

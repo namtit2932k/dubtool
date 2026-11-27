@@ -144,8 +144,9 @@ readable:
 subtitles:
   burn: true             # false = copy the video stream unchanged
   font: Arial            # Windows font with Vietnamese diacritics
-  size_ratio: 24         # FontSize px = video_height / size_ratio (libass units auto-converted)
+  size_ratio: 24         # FontSize px = video_height / size_ratio (capped by width/20 on portrait)
   margin_ratio: 18       # MarginV px = video_height / margin_ratio
-  max_line_chars: 42     # cue text cap per line; portrait video defaults to 28
-  crf: 18                # burn encode quality
+  # max_line_chars omitted -> auto: 42 for landscape, 28 for portrait (height > width)
+  bg_box: true           # translucent dark backing box so subtitles stay readable over source hardsubs
+  crf: 21                # burn encode quality (balanced size/clarity; 18 bloats low-bitrate web videos 3x)
   preset: medium

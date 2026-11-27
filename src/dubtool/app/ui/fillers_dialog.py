@@ -17,6 +17,7 @@ thread but shown on the GUI thread.
 from __future__ import annotations
 
 from dubtool.app import i18n
+from dubtool.app.ui.theme import apply_win_dark_titlebar, set_button_variant
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtWidgets import (
@@ -93,6 +94,7 @@ class FillersDialog(QDialog):
             i18n.tr("fillers.button.apply"), QDialogButtonBox.ButtonRole.AcceptRole
         )
         apply_btn.setDefault(True)
+        set_button_variant(apply_btn, "primary")
         buttons.addButton(
             i18n.tr("fillers.button.use_defaults"),
             QDialogButtonBox.ButtonRole.RejectRole,
@@ -100,6 +102,10 @@ class FillersDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        apply_win_dark_titlebar(self)
 
     def result_choices(self) -> dict:
         """"Áp dụng" -> the chosen actions; "Dùng mặc định lần này" -> {}."""
@@ -136,7 +142,9 @@ class OverloadDialog(QDialog):
 
         wait_btn = QPushButton(i18n.tr("overload.button.try_later"))
         fast_btn = QPushButton(i18n.tr("overload.button.fallback_fast", model=model))
+        set_button_variant(fast_btn, "primary")
         cancel_btn = QPushButton(i18n.tr("overload.button.cancel"))
+        set_button_variant(cancel_btn, "danger")
         for btn in (wait_btn, fast_btn, cancel_btn):
             layout.addWidget(btn)
         wait_btn.clicked.connect(lambda: self._pick("wait"))
@@ -144,6 +152,10 @@ class OverloadDialog(QDialog):
         cancel_btn.clicked.connect(lambda: self._pick("cancel"))
         self.choice = "wait"
         self._done = False
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        apply_win_dark_titlebar(self)
 
     def _pick(self, value: str) -> None:
         self.choice = value

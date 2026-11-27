@@ -115,9 +115,10 @@ ASR_DEFAULTS: dict = {
 SUBTITLES_DEFAULTS: dict = {
     "burn": True,
     "font": "Arial",  # Windows system font with Vietnamese coverage
-    "size_ratio": 24,   # FontSize ~= video_height / size_ratio
+    "size_ratio": 24,   # FontSize ~= video_height / size_ratio (capped on portrait)
     "margin_ratio": 18, # MarginV ~= video_height / margin_ratio
-    "crf": 18,
+    "bg_box": True,     # translucent dark backing box for readability over source hardsubs
+    "crf": 21,
     "preset": "medium",
 }
 

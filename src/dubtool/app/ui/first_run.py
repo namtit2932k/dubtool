@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from dubtool.app import i18n, settings
+from dubtool.app.ui.theme import apply_win_dark_titlebar, set_button_variant
 
 
 class PrivacyDialog(QDialog):
@@ -39,11 +40,16 @@ class PrivacyDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
         self.continue_btn = QPushButton(i18n.tr("first_run.continue"))
+        set_button_variant(self.continue_btn, "primary")
         self.continue_btn.setEnabled(False)
         self.continue_btn.clicked.connect(self.accept)
         btn_row.addWidget(self.continue_btn)
         layout.addLayout(btn_row)
         self.ack.toggled.connect(self.continue_btn.setEnabled)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        apply_win_dark_titlebar(self)
 
 
 def acknowledged() -> bool:

@@ -12,6 +12,7 @@ nhà cung cấp").
 from __future__ import annotations
 
 from dubtool.app import i18n
+from dubtool.app.ui.theme import apply_win_dark_titlebar, set_button_variant
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -43,9 +44,14 @@ class PaidProviderConfirmDialog(QDialog):
         row.addStretch(1)
         run_btn = QPushButton(i18n.tr("paid.run_once"))
         run_btn.setDefault(True)
+        set_button_variant(run_btn, "primary")
         cancel_btn = QPushButton(i18n.tr("progress.cancel"))
         run_btn.clicked.connect(self.accept)
         cancel_btn.clicked.connect(self.reject)
         row.addWidget(run_btn)
         row.addWidget(cancel_btn)
         layout.addLayout(row)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        apply_win_dark_titlebar(self)

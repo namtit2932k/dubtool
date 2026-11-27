@@ -315,6 +315,9 @@ def run_layout_check(scale: float = 1.0, sizes=SIZES, states=STATES) -> int:
 
     i18n.set_language("vi")
     app = QApplication.instance() or QApplication([])
+    from dubtool.app.main import _init_ui_theme
+
+    _init_ui_theme(app)
     win = _new_window()
     win.show()
     rows: list[tuple[str, str, list[str]]] = []

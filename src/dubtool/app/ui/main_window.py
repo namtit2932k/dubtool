@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -38,12 +39,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from dubtool import api, proc
+from dubtool import __version__, api, proc
 from dubtool.app import diagnostics, errors, i18n, paths, secrets, settings
 from dubtool.app.coalesce import ProgressGate
 from dubtool.app.service import PipelineService
 from dubtool.app.ui import first_run
 from dubtool.app.ui.settings_dialog import VOICE_KEYS, SettingsDialog
+from dubtool.app.ui.theme import (
+    apply_win_dark_titlebar,
+    render_brand_icon_pixmap,
+    set_button_variant,
+)
 from dubtool.app.ui.widgets import DropZone, FileCard, LogView, StageList, STAGES
 
 VIDEO_FILTERS = "Videos (*.mp4 *.mkv *.mov *.webm *.avi *.m4v)"
@@ -201,7 +207,7 @@ class BriefEdit(QTextEdit):
         super().__init__()
         self._counter = counter
         self.setPlaceholderText(i18n.tr("brief.placeholder"))
-        self.setMaximumHeight(72)
+        self.setFixedHeight(76)
         self._truncating = False
         self.textChanged.connect(self._on_change)
         self._on_change()
@@ -269,6 +275,7 @@ class OptionsWidget(QGroupBox):
         self.gain_slider.setRange(-24, -6)
         self.gain_slider.setValue(int(s["original_gain_db"]))
         self.gain_value = QLabel(f"{s['original_gain_db']} dB")
+        self.gain_value.setObjectName("gain_value")
         self.gain_slider.valueChanged.connect(lambda v: self.gain_value.setText(f"{v} dB"))
         self.voice_combo = QComboBox()
         self.voice_combo.setObjectName("voice_combo")
@@ -366,14 +373,17 @@ class ProgressWidget(QGroupBox):
         # are visible, so the row collapses or extends as needed.
         self.action_row = QHBoxLayout()
         self.cancel_btn = QPushButton(i18n.tr("progress.cancel"))
+        set_button_variant(self.cancel_btn, "danger")
         self.cancel_btn.clicked.connect(self._on_cancel_clicked)
         self.resume_btn = QPushButton(i18n.tr("progress.resume"))
+        set_button_variant(self.resume_btn, "primary")
         self.resume_btn.clicked.connect(lambda: self._retry(force=False))
         self.over_btn = QPushButton(i18n.tr("progress.start_over"))
         self.over_btn.clicked.connect(lambda: self._retry(force=True))
         self.open_btn = QPushButton(i18n.tr("progress.open_folder"))
         self.open_btn.clicked.connect(self._open_folder)
         self.play_btn = QPushButton(i18n.tr("progress.play"))
+        set_button_variant(self.play_btn, "primary")
         self.play_btn.clicked.connect(self._play)
         # AGENT_UPDATE_7.md task 4: opens the readable translation file.
         self.readable_btn = QPushButton(i18n.tr("progress.open_readable"))
@@ -754,11 +764,36 @@ class MainWindow(QMainWindow):
         central = QWidget()
         central_layout = QVBoxLayout(central)
         central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
+
+        # Compact brand header strip aligned with README banner identity.
+        self.brand_header = QFrame()
+        self.brand_header.setObjectName("brand_header")
+        brand_row = QHBoxLayout(self.brand_header)
+        brand_row.setContentsMargins(12, 5, 12, 5)
+        brand_row.setSpacing(8)
+        logo_lbl = QLabel()
+        logo_lbl.setObjectName("brand_logo")
+        logo_pm = render_brand_icon_pixmap(44, with_badge=True)
+        logo_pm.setDevicePixelRatio(2.0)
+        logo_lbl.setPixmap(logo_pm)
+        logo_lbl.setFixedSize(22, 22)
+        title_lbl = QLabel("DubTool")
+        title_lbl.setObjectName("brand_title")
+        ver_lbl = QLabel(f"v{__version__}")
+        ver_lbl.setObjectName("brand_version")
+        brand_row.addWidget(logo_lbl)
+        brand_row.addWidget(title_lbl)
+        brand_row.addWidget(ver_lbl)
+        brand_row.addStretch(1)
+        central_layout.addWidget(self.brand_header)
+
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         central_layout.addWidget(self.scroll)
         self.setCentralWidget(central)
+        self._dwm_applied = False
 
         self.left_box = QWidget()
         self.left_layout = QVBoxLayout(self.left_box)
@@ -778,6 +813,7 @@ class MainWindow(QMainWindow):
         self.file_card.removed.connect(self.clear_video)
         video_layout.addWidget(self.file_card)
         self.video_info = QLabel("")
+        self.video_info.setObjectName("video_info")
         self.video_info.setWordWrap(True)
         # A stable minimum: an empty-text word-wrap label has a 0 height hint,
         # and text arriving later changes hints at a moment Qt's layout cache
@@ -801,9 +837,9 @@ class MainWindow(QMainWindow):
         output_layout.addWidget(self.output_edit, 0, 0)
         output_layout.addWidget(self.output_btn, 0, 1)
         self.output_warn = QLabel("")
+        self.output_warn.setObjectName("output_warn")
         self.output_warn.setWordWrap(True)
         self.output_warn.setMinimumHeight(14)  # stable hint, same reason as video_info
-        self.output_warn.setStyleSheet("color: #a40;")
         output_layout.addWidget(self.output_warn, 1, 0, 1, 2)
         self.left_layout.addWidget(self.output_group)
 
@@ -814,6 +850,7 @@ class MainWindow(QMainWindow):
         self.brief_edit = BriefEdit(QLabel(""))
         brief_group_layout.addWidget(self.brief_edit)
         self.brief_counter = QLabel(i18n.tr("brief.counter", n=0))
+        self.brief_counter.setObjectName("brief_counter")
         self.brief_edit._counter = self.brief_counter
         brief_group_layout.addWidget(self.brief_counter)
         self.left_layout.addWidget(self.brief_group)
@@ -855,6 +892,8 @@ class MainWindow(QMainWindow):
         self.model_combo.setToolTip("")
         self.model_combo.currentIndexChanged.connect(self._on_model_combo_changed)
         self.generate_btn = QPushButton(i18n.tr("run.generate"))
+        set_button_variant(self.generate_btn, "primary")
+        self.generate_btn.setMinimumHeight(34)
         self.generate_btn.clicked.connect(self.start_run)
         self._update_mode_tips()
         buttons_row.addWidget(self.model_combo, 1)
@@ -872,7 +911,8 @@ class MainWindow(QMainWindow):
         # One box layout flips direction between split (horizontal) and
         # stacked (vertical) modes — never rebuilt, so it is stable.
         self.page_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, self.page)
-        self.page_layout.setContentsMargins(10, 10, 10, 10)
+        self.page_layout.setContentsMargins(10, 8, 10, 8)
+        self.page_layout.setSpacing(10)
         self.page_layout.addWidget(self.left_box, 1)
         self.page_layout.addWidget(self.progress_group, 1)
         self._refresh_section_layout()
@@ -954,6 +994,12 @@ class MainWindow(QMainWindow):
         stretch = (1, 1) if split else (0, 1)
         self.page_layout.setStretchFactor(self.left_box, stretch[0])
         self.page_layout.setStretchFactor(self.progress_group, stretch[1])
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if not getattr(self, "_dwm_applied", False):
+            self._dwm_applied = True
+            apply_win_dark_titlebar(self)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)

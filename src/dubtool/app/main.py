@@ -108,7 +108,7 @@ def run_gui() -> int:
     # Update 12 task 5 item 2: the bundled Vietnamese-capable font joins
     # the interface's fallback chain (Vietnamese letters can never turn
     # into boxes — same code the README screenshots use).
-    _apply_app_fonts(app)
+    _init_ui_theme(app)
     # AGU8 7.1: from source, PyAV 19+ breaks stage 2 — tell the user the
     # exact repair command before any caption fails deep in the run.
     from dubtool import av_check
@@ -132,6 +132,15 @@ def run_layout_check(scale: float = 1.0) -> int:
     from dubtool.app.layout_check import run_layout_check as _run
 
     return _run(scale=scale)
+
+
+def _init_ui_theme(app) -> str:
+    """Load bundled Vietnamese fallback font + Emerald Studio dark theme."""
+    from dubtool.app.ui.theme import apply_emerald_theme
+
+    family = _apply_app_fonts(app)
+    apply_emerald_theme(app)
+    return family
 
 
 def _apply_app_fonts(app) -> str:
@@ -226,7 +235,7 @@ def run_screenshots(out_dir: Path, scale: float = 1.0) -> int:
             "README images require the real 'windows' platform"
         )
         return 1
-    font_family = _apply_app_fonts(app)
+    font_family = _init_ui_theme(app)
     missing = _verify_no_tofu(app, font_family)
     if missing:
         print(
@@ -700,6 +709,7 @@ def _run_gui_smoke_body(workspace) -> int:
     from dubtool.app.paths import ensure_user_dirs
 
     app = QApplication.instance() or QApplication([])
+    _init_ui_theme(app)
     failguard.install()
     ensure_user_dirs()
     secrets.load_env_if_source()
