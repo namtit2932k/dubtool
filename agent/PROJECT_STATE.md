@@ -1,6 +1,6 @@
 # DubTool — Project State (Single Source of Truth)
 
-> **Cập nhật lần cuối:** 2026-11-24  
+> **Cập nhật lần cuối:** 2026-11-27  
 > **Mục đích:** Lưu trạng thái thực tế của dự án để giữ liên tục 100% qua các lần compact context và giữa các session. Luôn đối chiếu với `git status` / `git log` khi bắt đầu phiên mới.
 
 ---
@@ -8,9 +8,17 @@
 ## 1. Trạng thái Git & Phiên bản hiện tại
 
 - **Repository:** `namtit2932k/dubtool` (public), workspace `d:\Projects\Vibe\Project_K`, build root `D:\Projects\Vibe\Project_K_build`.
-- **Phiên bản đã phát hành gần nhất:** **`v1.0.20`** (commit `6355909d28d5685604a57928695d9eb1bc0b6829`, 2026-11-24) — Official, đã verify đầy đủ qua `scripts/release.py 20` (`DOD_REPORT.md` 9/9 PASS, `RELEASE_EVIDENCE.txt` PASS, `verify_release.py --audit` PASS, `648 passed, 2 skipped`, `DubTool-1.0.20-win64.zip` 210,074,666 B, SHA-256 `e0b397690a8def1a38e71619ef98ad9e37490e460db75d01b01a78c1027a04ac`, `https://github.com/namtit2932k/dubtool/releases/tag/v1.0.20`).
-- **Các phiên bản trước đó:** **`v1.0.19`** (`e04784a7`, 2026-11-24), **`v1.0.18`** (`a9c4680a`, 2026-11-20) — Official.
-- **Nội dung chính đã phát hành trong `v1.0.20` (Update 20 — Hotfix & Hardened Build, `docs/reports/REPORT_UPDATE_20.md`):**
+- **Phiên bản đã phát hành gần nhất:** **`v1.0.21`** (commit `226bc5ec4332d3dad1b2cf76af74160a063f89dd`, 2026-11-27) — Official, đã verify đầy đủ qua `scripts/release.py 21` (`DOD_REPORT.md` 9/9 PASS, `RELEASE_EVIDENCE.txt` PASS, `verify_release.py --audit` PASS, `658 passed, 2 skipped`, `DubTool-1.0.21-win64.zip` 210,084,308 B, SHA-256 `8682b79e053e728f6f6b4d62c25646b4fe994fc33202566e271e259a3868527a`, `https://github.com/namtit2932k/dubtool/releases/tag/v1.0.21`).
+- **Các phiên bản trước đó:** **`v1.0.20`** (`6355909d`, 2026-11-24), **`v1.0.19`** (`e04784a7`, 2026-11-24), **`v1.0.18`** (`a9c4680a`, 2026-11-20) — Official.
+- **Nội dung chính đã phát hành trong `v1.0.21` (Update 21 — Full Codebase Audit & Windows UIA Hardening, `docs/reports/REPORT_UPDATE_21.md`):**
+  - Thực hiện kiểm toán toàn diện `ponytail-audit` + kiểm thử hộp đen Windows UIA (`agent-desktop`) trên `DubTool.exe`, vá trọn bộ **15 hạng mục** + bổ sung 10 test hồi quy (`tests/test_audit_v21_fixes.py`):
+    1. `settings_dialog.py`: sửa crash `AttributeError` (`_accurate_model`), kiểm tra `mismatched_keys()` trước `take_keys()`, đổi `jobs_edit` sang `editingFinished` + guard thư mục bảo vệ, cache khóa/quota trong `_refresh_rows()`, guard `shiboken6.isValid` cho `_WorkResult`.
+    2. `settings.py` + `housekeeping.py` + `cleanup.py`: giữ đúng mặc định `keep_level="light"` trên máy cài mới, bắt buộc `assert_not_protected_dir()` + marker DubTool + chặn NTFS junction (`os.path.isjunction`) khi dọn job/cleanup.
+    3. `failguard.py` + `diagnostics.py` + `main_window.py` + `secrets.py`: che triệt để mọi tiền tố key (`AIza`, `AQ.`, `gsk_`, `sk-ant-`, `sk-`, `*_API_KEY`) qua logger/diagnostics/clipboard, kiểm tra giới hạn UTF-16LE (`<= 2500` B) và lưu trước khi xóa legacy key, liệt kê đủ `_2.._10` trong `env_key_sources`.
+    4. `llm/` (`client.py`, `keypool.py`, `quota_state.py`, `parsing.py`, `anthropic.py`): sửa dead handler `KeyExhaustedError`, sửa spin 100% CPU `wait_for_key()`, tôn trọng hint `retry_after` ngắn của Groq (3–5s thay vì ép 30s), sửa lệch +24h `next_pacific_midnight()` ở giờ VN, `threading.local()` cho `request_units`/`request_chars`/`request_label`, thay `_panel_text_rate_pause` undefined, validate integer IDs, map Anthropic `529`/`overloaded_error`.
+    5. `api.py` + `stages/` + `proc.py` + `cli.py` + `config.py` + `netcheck.py`: ghi atomic `.part` cho `s1`/`s6`/`s7` và kiểm tra artifact tồn tại trước khi skip resume, đồng bộ `_completeness_pass` vào cả `translated.json` & `dub_units.json` (batch `<= 15`, `parse_json_items`), binary search `_words_in_range`, gom `persist()` theo đợt 20 câu ở `s4`, truyền `cancel` + giảm `max_chars` theo vòng ở `s5`, hỗ trợ `timeout` + `input` cùng `cancel` trong `proc.run()`, sửa `cmd_run` + nested config override + `record_offset()`.
+    6. `main_window.py` + `fillers_dialog.py` + `voice_preview.py`: mở hộp thoại menu qua `QTimer.singleShot(0, ...)` để Windows UIA `Invoke` không treo, đặt `objectName`/`accessibleName` duy nhất cho các control `Tùy chọn` & `Ngôn ngữ video`, sửa ẩn ô nhập `FillersDialog`, sửa `PaidNotice` Cancel, đẩy `export_diagnostics` sang thread nền, bơm `processEvents()` chống deadlock `closeEvent`, và ghi atomic + guard `shiboken6.isValid` ở `voice_preview.py`.
+- **Nội dung đã phát hành trước đó trong `v1.0.20` (`docs/reports/REPORT_UPDATE_20.md`):**
   - **Sửa 3 lỗi thực tế trên `v1.0.19`:**
     1. `src/dubtool/app/key_test.py` + `src/dubtool/app/ui/settings_dialog.py`: chuyển kiểm tra khóa Gemini sang `client.models.list(config={"page_size": 1})` miễn phí & chặn truyền `model_id` không phải Gemini (`auto-rotate`, `qwen/...`) — hết lỗi báo sai `✘ không hợp lệ` (`404`) trên key Gemini hợp lệ.
     2. `src/dubtool/app/ui/settings_dialog.py`: lưu/đọc badge kiểm tra khóa hoàn toàn theo `(provider, row)`, gắn `tested_provider` cho kết quả async và xóa badge theo từng nhà cung cấp — hết lỗi dính nhãn `✘ không hợp lệ` từ Gemini sang Groq.
