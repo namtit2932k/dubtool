@@ -15,7 +15,13 @@ export default function init(root, opts = {}) {
   const set = (i, on) => { sw[i].classList.toggle('is-on', on); sw[i].setAttribute('aria-checked', String(on)); };
   const ons = () => sw.filter(s => s.classList.contains('is-on')).length;
   const on0 = initial.filter(Boolean).length;
-  const tally = () => { if (count) count.textContent = ons() === on0 ? count0 : count0.replace(/\d+/, String(ons())); };
+  const tally = () => {
+    if (!count) return;
+    const tpl = count.dataset.tpl;
+    if (tpl) count.textContent = tpl.replace('{n}', String(ons()));
+    else count.textContent = ons() === on0 ? count0 : count0.replace(/\d+/, String(ons()));
+  };
+  window.addEventListener('dubtool:lang', tally);
   let k = 0;
   // one cycle (2.62 s): two switches flip in turn and the count follows; the second is held 0.38 s
   return loop(root, async api => {

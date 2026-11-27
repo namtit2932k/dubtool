@@ -58,6 +58,38 @@
 <style>
   .brand-hex { width: 24px; height: 24px; flex: none; display: inline-block; }
 
+  /* White logo plates across guide steps, provider cards, output files & hub diagram */
+  .ic-tile {
+    --tile-bg: #ffffff;
+    --tile-line: color-mix(in oklab, #0f1f10 12%, transparent);
+    color: #0f1f10;
+    box-shadow: inset 0 0 0 1px var(--tile-line), 0 2px 6px rgb(0 0 0 / .14);
+  }
+  .ui-file__icon {
+    background: #ffffff !important;
+    border-radius: 8px;
+    padding: 4px;
+    box-shadow: inset 0 0 0 1px rgb(15 31 16 / .10);
+  }
+  #features .dg .dg-node--tile,
+  #features .dg .dg-node--pill {
+    background: #ffffff;
+    color: #0f1f10;
+    border-color: rgb(15 31 16 / .14);
+    box-shadow: 0 2px 8px rgb(0 0 0 / .14);
+  }
+  #features .dg .dg-node--tile .dg-ic,
+  #features .dg .dg-node--pill .dg-ic { color: #0f1f10; }
+  #features .dg .dg-node--tile > .dg-cap { color: #162418; }
+  #features .dg .dg-node--tile.is-hit > .dg-cap,
+  #features .dg .dg-node--tile.is-done > .dg-cap { color: #0f1f10; }
+
+  /* Keep window search box single-line & pipeline step names untruncated */
+  .ui-win__search { white-space: nowrap; }
+  .ui-win__search .ui-win__ph { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ui-pipe__steps .ui-pipe__step { padding-inline: 10px; }
+  .ui-pipe__steps .ui-pipe__name { gap: 5px; }
+
   /* Compact EN / VI switcher inside nav bar */
   .lang-switch {
     display: inline-flex; align-items: center; gap: 2px; flex: none;
@@ -161,8 +193,13 @@
     .app > .app__pane + .app__pane { border-top: 0; }
   }
 
-  /* Features 2x2 panel height per breakpoint */
+  /* Features 2x2 panel height & equal card alignment per breakpoint */
+  #features .grid { align-items: stretch; }
   #features .panel { --p-h: 296px; }
+  @media (min-width: 1024px) {
+    #features .card--row > h3 { min-height: 1lh; }
+    #features .card--row > p { min-height: 2lh; max-width: none; }
+  }
   @media (max-width: 1279px) { #features .panel { --p-h: 236px; } }
   @media (min-width: 640px) and (max-width: 1023px) {
     #features .panel { --p-h: 204px; }
@@ -363,7 +400,7 @@
         <article class="card guide-card span-6 m-nolift">
           <div class="guide-card__top">
             <span class="guide-card__step" data-i18n="guide.s1.k">Step 1 · Download</span>
-            <span class="ic-tile"><img data-icon="video" src="assets/icons/video.svg" alt="" width="24" height="24" loading="lazy"></span>
+            <span class="ic-tile"><img class="ic" data-icon="video" src="assets/icons/video.svg" alt="" width="24" height="24" loading="lazy"></span>
           </div>
           <h3 data-i18n="guide.s1.h">Unzip and open DubTool</h3>
           <p data-i18n="guide.s1.p">Download the Windows zip from GitHub Releases, right-click Extract All, and double-click DubTool.exe. Everything needed is already inside.</p>
@@ -372,7 +409,7 @@
         <article class="card guide-card span-6 m-nolift">
           <div class="guide-card__top">
             <span class="guide-card__step" data-i18n="guide.s2.k">Step 2 · One-time setup</span>
-            <span class="ic-tile"><img data-icon="gemini" src="assets/icons/gemini.svg" alt="" width="24" height="24" loading="lazy"></span>
+            <span class="ic-tile"><img class="ic" data-icon="gemini" src="assets/icons/gemini.svg" alt="" width="24" height="24" loading="lazy"></span>
           </div>
           <h3 data-i18n="guide.s2.h">Paste a free translation key</h3>
           <p data-i18n="guide.s2.p">Open Settings → API Keys, paste a free key from Google AI Studio or Groq, and click Test all to see a green check.</p>
@@ -381,7 +418,7 @@
         <article class="card guide-card span-6 m-nolift">
           <div class="guide-card__top">
             <span class="guide-card__step" data-i18n="guide.s3.k">Step 3 · Pick video</span>
-            <span class="ic-tile"><img data-icon="hugging-face" src="assets/icons/hugging-face.svg" alt="" width="24" height="24" loading="lazy"></span>
+            <span class="ic-tile"><img class="ic" data-icon="hugging-face" src="assets/icons/hugging-face.svg" alt="" width="24" height="24" loading="lazy"></span>
           </div>
           <h3 data-i18n="guide.s3.h">Drop your video and pick a voice</h3>
           <p data-i18n="guide.s3.p">Drag your video into the box, choose an output folder, leave language on Auto-detect, and click Preview voice to listen first.</p>
@@ -390,7 +427,7 @@
         <article class="card guide-card span-6 m-nolift">
           <div class="guide-card__top">
             <span class="guide-card__step" data-i18n="guide.s4.k">Step 4 · Click Generate</span>
-            <span class="ic-tile"><img data-icon="docx" src="assets/icons/docx.svg" alt="" width="24" height="24" loading="lazy"></span>
+            <span class="ic-tile"><img class="ic" data-icon="docx" src="assets/icons/docx.svg" alt="" width="24" height="24" loading="lazy"></span>
           </div>
           <h3 data-i18n="guide.s4.h">Get your dubbed video and script</h3>
           <p data-i18n="guide.s4.p">Click Generate and wait. Your original file stays safe, and your folder gets a new Vietnamese MP4 plus a Word translation table.</p>
@@ -418,12 +455,12 @@
 
       <div class="ui app fill" role="img" aria-label="DubTool desktop interface showing recent videos on the left and the live step-by-step progress log on the right" data-ui-pause-host>
         <div class="app__pane app__pane--list">
-          <div class="ui ui-panel ui-win" data-ui="window" data-open="Queued" data-work="Running" data-done="Done">
+          <div class="ui ui-panel ui-win" data-ui="window" data-open="Queued" data-work="Running" data-done="Done" data-i18n-attrs="data-open:ws.st.open,data-work:ws.st.run,data-done:ws.st.done">
             <div class="ui-win__bar">
               <span class="ui-dots" aria-hidden="true"><i></i><i></i><i></i></span>
               <span class="ui-win__crumb">DubTool <i>/</i> <b data-i18n="ws.win.crumb">Recent videos</b></span>
               <span class="ui-spacer"></span>
-              <span class="ui-win__search" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span class="ui-win__ph" data-i18n="ws.win.search">Search files</span><span class="ui-kbd">/</span></span>
+              <span class="ui-win__search" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span class="ui-win__ph" data-i18n="ws.win.search">Search</span><span class="ui-kbd">/</span></span>
             </div>
             <div class="ui-win__body">
               <nav class="ui-win__side" aria-hidden="true">
@@ -438,15 +475,15 @@
               <div class="ui-win__main">
                 <div class="ui-win__cols" aria-hidden="true"><span data-i18n="ws.win.c1">Video</span><span data-i18n="ws.win.c2">Details</span><span data-i18n="ws.win.c3">Status</span><span data-i18n="ws.win.c4">Time</span></div>
                 <ul class="ui-win__rows">
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="1">ZH</span><span class="ui-win__who">drama_ep01.mp4</span><span class="ui-win__sub">2:33:04 · 1,543 lines · Trúc Ly</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">61m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="3">ZH</span><span class="ui-win__who">short_clip_vertical.mp4</span><span class="ui-win__sub">29:15 · Vertical · 264 lines</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">12m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="4">EN</span><span class="ui-win__who">design_tutorial.mp4</span><span class="ui-win__sub">18:40 · Full HD · Đức Trí</span><span class="ui-win__st" data-st data-i18n="ws.st.run">Running</span><span class="ui-win__age">4m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="2">JA</span><span class="ui-win__who">kyoto_travel_vlog.mp4</span><span class="ui-win__sub">14:22 · Full HD · Mai Anh</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">8m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="5">KO</span><span class="ui-win__who">street_food_tour.mp4</span><span class="ui-win__sub">11:05 · Full HD · Trúc Ly</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">6m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="1">EN</span><span class="ui-win__who">course_lesson_04.mp4</span><span class="ui-win__sub">42:10 · Full HD · Minh Quân</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">21m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="3">ZH</span><span class="ui-win__who">history_story.mp4</span><span class="ui-win__sub">35:48 · Full HD · Trúc Ly</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">16m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="4">FR</span><span class="ui-win__who">architecture_film.mp4</span><span class="ui-win__sub">22:15 · Full HD · Bảo Ngọc</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">11m</span></li>
-                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="2">EN</span><span class="ui-win__who">product_demo.mp4</span><span class="ui-win__sub">03:18 · Full HD · Trúc Ly</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">2m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="1">ZH</span><span class="ui-win__who">drama_ep01.mp4</span><span class="ui-win__sub" data-i18n="ws.r1.s">2:33:04 · 1,543 lines · Trúc Ly</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">61m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="3">ZH</span><span class="ui-win__who">short_clip_vertical.mp4</span><span class="ui-win__sub" data-i18n="ws.r2.s">29:15 · Vertical · 264 lines</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">12m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="4">EN</span><span class="ui-win__who">design_tutorial.mp4</span><span class="ui-win__sub" data-i18n="ws.r3.s">18:40 · Full HD · Đức Trí</span><span class="ui-win__st" data-st data-st-kind="open" data-i18n="ws.st.run">Running</span><span class="ui-win__age">4m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="2">JA</span><span class="ui-win__who">kyoto_travel_vlog.mp4</span><span class="ui-win__sub" data-i18n="ws.r4.s">14:22 · Full HD · Mai Anh</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">8m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="5">KO</span><span class="ui-win__who">street_food_tour.mp4</span><span class="ui-win__sub" data-i18n="ws.r5.s">11:05 · Full HD · Trúc Ly</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">6m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="1">EN</span><span class="ui-win__who">course_lesson_04.mp4</span><span class="ui-win__sub" data-i18n="ws.r6.s">42:10 · Full HD · Minh Quân</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">21m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="3">ZH</span><span class="ui-win__who">history_story.mp4</span><span class="ui-win__sub" data-i18n="ws.r7.s">35:48 · Full HD · Trúc Ly</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">16m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="4">FR</span><span class="ui-win__who">architecture_film.mp4</span><span class="ui-win__sub" data-i18n="ws.r8.s">22:15 · Full HD · Bảo Ngọc</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">11m</span></li>
+                  <li class="ui-win__row" data-row><span class="ui-avatar" data-tone="2">EN</span><span class="ui-win__who">product_demo.mp4</span><span class="ui-win__sub" data-i18n="ws.r9.s">03:18 · Full HD · Trúc Ly</span><span class="ui-win__st is-done" data-st data-i18n="ws.st.done">Done</span><span class="ui-win__age">2m</span></li>
                 </ul>
               </div>
             </div>
@@ -460,29 +497,29 @@
               <span class="ui-pipe__run">#1023</span>
               <span class="ui-spacer"></span>
               <span class="ui-pipe__total"><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8.5" r="5.5"/><path d="M8 5.5v3l2 1.25M6.5 1.75h3"/></svg><span data-pipe-total>61m 15s</span></span>
-              <span class="ui-chip ui-chip--ink ui-chip--live ui-pipe__chip" data-pipe-chip data-done="Done" data-i18n="ws.pipe.chip">Run</span>
+              <span class="ui-chip ui-chip--ink ui-chip--live ui-pipe__chip" data-pipe-chip data-idle="Run" data-done="Done" data-i18n="ws.pipe.chip" data-i18n-attrs="data-idle:ws.pipe.chip,data-done:ws.pipe.chipDone">Run</span>
             </div>
             <div class="ui-pipe__commit">
               <span class="ui-avatar" data-tone="4">VI</span>
               <span class="ui-pipe__msg" data-i18n="ws.pipe.msg">Free Auto-Rotate · Trúc Ly voice · Clean subtitles</span>
               <code class="ui-pipe__sha">v1.0.23</code>
-              <button class="ui-btn ui-btn--ghost ui-btn--sm ui-pipe__btn" type="button" tabindex="-1" data-pipe-btn data-done="Run again" data-i18n="ws.pipe.btn">Cancel</button>
+              <button class="ui-btn ui-btn--ghost ui-btn--sm ui-pipe__btn" type="button" tabindex="-1" data-pipe-btn data-idle="Cancel" data-done="Run again" data-i18n="ws.pipe.btn" data-i18n-attrs="data-idle:ws.pipe.btn,data-done:ws.pipe.btnDone">Cancel</button>
             </div>
             <ol class="ui-pipe__steps">
-              <li class="ui-pipe__step is-done" data-step="extract"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="logos:ffmpeg-icon" src="assets/icons/ffmpeg-icon.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p1">Audio</span></span><code class="ui-pipe__cmd">read original sound</code><span class="ui-pipe__time" data-time>7s</span><span class="ui-pipe__bar"><i></i></span></li>
-              <li class="ui-pipe__step is-done" data-step="asr"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="python" src="assets/icons/python.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p2">Listen</span></span><code class="ui-pipe__cmd">detected Chinese</code><span class="ui-pipe__time" data-time>15m</span><span class="ui-pipe__bar"><i></i></span></li>
-              <li class="ui-pipe__step is-run" data-step="translate" style="--k:0.7"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="gemini" src="assets/icons/gemini.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p3">Translate</span></span><code class="ui-pipe__cmd">1,543 sentences</code><span class="ui-pipe__time" data-time="3m">2m</span><span class="ui-pipe__bar"><i></i></span></li>
-              <li class="ui-pipe__step" data-step="tts"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="hugging-face" src="assets/icons/hugging-face.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p4">Voice</span></span><code class="ui-pipe__cmd">Trúc Ly (local)</code><span class="ui-pipe__time" data-time="17m" data-i18n="ws.pipe.wait">Next</span><span class="ui-pipe__bar"><i></i></span></li>
-              <li class="ui-pipe__step" data-step="burn"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="logos:ffmpeg-icon" src="assets/icons/ffmpeg-icon.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p5">Save</span></span><code class="ui-pipe__cmd">MP4 + SRT + Word</code><span class="ui-pipe__time" data-time="25m" data-i18n="ws.pipe.wait">Next</span><span class="ui-pipe__bar"><i></i></span></li>
+              <li class="ui-pipe__step is-done" data-step="extract"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="logos:ffmpeg-icon" src="assets/icons/ffmpeg-icon.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p1">Audio</span></span><code class="ui-pipe__cmd" data-i18n="ws.pipe.c1">read original sound</code><span class="ui-pipe__time" data-time>7s</span><span class="ui-pipe__bar"><i></i></span></li>
+              <li class="ui-pipe__step is-done" data-step="asr"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="python" src="assets/icons/python.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p2">Listen</span></span><code class="ui-pipe__cmd" data-i18n="ws.pipe.c2">detected Chinese</code><span class="ui-pipe__time" data-time>15m</span><span class="ui-pipe__bar"><i></i></span></li>
+              <li class="ui-pipe__step is-run" data-step="translate" style="--k:0.7"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="gemini" src="assets/icons/gemini.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p3">Translate</span></span><code class="ui-pipe__cmd" data-i18n="ws.pipe.c3">1,543 sentences</code><span class="ui-pipe__time" data-time="3m">2m</span><span class="ui-pipe__bar"><i></i></span></li>
+              <li class="ui-pipe__step" data-step="tts"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="hugging-face" src="assets/icons/hugging-face.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p4">Voice</span></span><code class="ui-pipe__cmd" data-i18n="ws.pipe.c4">Trúc Ly (local)</code><span class="ui-pipe__time" data-time="17m" data-wait="Next" data-i18n="ws.pipe.wait" data-i18n-attrs="data-wait:ws.pipe.wait">Next</span><span class="ui-pipe__bar"><i></i></span></li>
+              <li class="ui-pipe__step" data-step="burn"><span class="ui-pipe__ico"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 8.2 2.3 2.3 4.7-5"/></svg></span><span class="ui-pipe__name"><span class="ui-pipe__tool" aria-hidden="true"><img data-icon="logos:ffmpeg-icon" src="assets/icons/ffmpeg-icon.svg" alt="" width="16" height="16" loading="lazy"></span><span class="ui-pipe__nm" data-i18n="ws.pipe.p5">Save</span></span><code class="ui-pipe__cmd" data-i18n="ws.pipe.c5">MP4 + SRT + Word</code><span class="ui-pipe__time" data-time="25m" data-wait="Next" data-i18n="ws.pipe.wait" data-i18n-attrs="data-wait:ws.pipe.wait">Next</span><span class="ui-pipe__bar"><i></i></span></li>
             </ol>
             <div class="ui-pipe__log" aria-hidden="true">
-              <span class="ui-pipe__line" data-step="extract"><b>[1/5]</b> Extracted original audio cleanly in 7 seconds</span>
-              <span class="ui-pipe__line" data-step="asr"><b>[2/5]</b> Detected Chinese speech (99.9%) · 1,543 sentences</span>
-              <span class="ui-pipe__line is-on" data-step="translate"><b>[3/5]</b> Translating with free Gemini + Groq keys automatically</span>
-              <span class="ui-pipe__line is-on" data-step="translate"><b>[3/5]</b> Verified complete Vietnamese sentences · zero foreign letters left</span>
-              <span class="ui-pipe__line" data-step="tts"><b>[4/5]</b> Generated 1,543 natural Vietnamese voice clips on this PC</span>
-              <span class="ui-pipe__line" data-step="burn"><b>[5/5]</b> Synced voice timing · 0 overlaps · kept movie background sound</span>
-              <span class="ui-pipe__line" data-step="burn"><b>[done]</b> Saved drama_ep01_vi.mp4 and drama_ep01_vi_translation.docx</span>
+              <span class="ui-pipe__line" data-step="extract" data-i18n-html="ws.log.1"><b>[1/5]</b> Extracted original audio cleanly in 7 seconds</span>
+              <span class="ui-pipe__line" data-step="asr" data-i18n-html="ws.log.2"><b>[2/5]</b> Detected Chinese speech (99.9%) · 1,543 sentences</span>
+              <span class="ui-pipe__line is-on" data-step="translate" data-i18n-html="ws.log.3"><b>[3/5]</b> Translating with free Gemini + Groq keys automatically</span>
+              <span class="ui-pipe__line is-on" data-step="translate" data-i18n-html="ws.log.4"><b>[3/5]</b> Verified complete Vietnamese sentences · zero foreign letters left</span>
+              <span class="ui-pipe__line" data-step="tts" data-i18n-html="ws.log.5"><b>[4/5]</b> Generated 1,543 natural Vietnamese voice clips on this PC</span>
+              <span class="ui-pipe__line" data-step="burn" data-i18n-html="ws.log.6"><b>[5/5]</b> Synced voice timing · 0 overlaps · kept movie background sound</span>
+              <span class="ui-pipe__line" data-step="burn" data-i18n-html="ws.log.7"><b>[done]</b> Saved drama_ep01_vi.mp4 and drama_ep01_vi_translation.docx</span>
             </div>
           </div>
         </div>
@@ -499,11 +536,11 @@
         <div class="grid">
           <article class="card card--row span-6">
             <h3 data-i18n="feat.c1.h">Free translation that keeps going</h3>
-            <p data-i18n="feat.c1.p">Add several free Google Gemini or Groq keys. If one hits its free limit, DubTool switches automatically so long movies finish smoothly.</p>
+            <p data-i18n="feat.c1.p">Add multiple free Gemini or Groq keys. If one hits its limit, DubTool switches automatically.</p>
             <div class="panel panel--flush" data-fx="gradient-mesh" data-fx-seed="11" data-fx-palette='{"bg":"#cdd6c6","surface":"#dce3d6","ink":"#262d24","accent":"#6c8e63"}' data-fx-params='{"speed":0,"drift":0,"calmY":0.95}'>
               <div class="stage stage--fade-b">
                 <div class="at-rise fit" style="--fit-max:390px;--ax:max(24px, 50% - 195px);--ay:calc(100% - 190px);--ay-sm:calc(100% - 140px)" data-ui-loop>
-                  <div class="ui ui-notify" data-ui="notify">
+                  <div class="ui ui-notify" data-ui="notify" data-times="now|1m|3m" data-i18n-attrs="data-times:feat.n.times">
                     <ul class="ui-notify__list" data-notify-list>
                       <li class="ui-note"><span class="ui-agent ui-note__av" aria-hidden="true"></span><span class="ui-note__text"><span class="ui-note__title"><span data-i18n="feat.n1.t">Switched to free Groq key</span><time data-i18n="feat.n1.time">now</time></span><span class="ui-note__body" data-i18n="feat.n1.b">Google busy for a moment · no progress lost</span></span></li>
                       <li class="ui-note"><span class="ui-note__ico"><svg class="ui-icon" viewBox="0 0 16 16"><path d="m3.5 8.4 2.8 2.8 6.2-6.4"/></svg></span><span class="ui-note__text"><span class="ui-note__title"><span data-i18n="feat.n2.t">Fixed 2 untranslated lines</span><time data-i18n="feat.n2.time">1m</time></span><span class="ui-note__body" data-i18n="feat.n2.b">Checked automatically · kept clean lines</span></span></li>
@@ -517,7 +554,7 @@
 
           <article class="card card--row span-6">
             <h3 data-i18n="feat.c2.h">Natural Vietnamese voices built in</h3>
-            <p data-i18n="feat.c2.p">Choose from 25 studio-quality voices or 11 lightweight voices for older PCs. Preview any voice offline before you start.</p>
+            <p data-i18n="feat.c2.p">Pick from 25 studio voices or 11 lightweight voices for older PCs, and preview any offline.</p>
             <div class="panel panel--flush" data-fx="gradient-mesh" data-fx-seed="22" data-fx-palette='{"bg":"#d9ccb7","surface":"#e9e0d2","ink":"#2a2622","accent":"#a8794a"}' data-fx-params='{"speed":0,"drift":0,"calmY":0.95}'>
               <div class="stage stage--fade-b">
                 <div class="at-right to-edge" style="--ax:32px;--ay:36px">
@@ -526,7 +563,7 @@
                       <svg class="ui-icon ui-toggles__ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8 13 4v3.6c0 3-2.1 5.4-5 6.6-2.9-1.2-5-3.6-5-6.6V4z"/><path d="m5.8 8 1.6 1.6 3-3.2"/></svg>
                       <div class="ui-title" data-i18n="feat.tg.title">Safe defaults out of the box</div>
                       <span class="ui-spacer"></span>
-                      <div class="ui-meta" data-tg-count data-i18n="feat.tg.count">4 / 5 on</div>
+                      <div class="ui-meta" data-tg-count data-tpl="{n} / 5 on" data-i18n-attrs="data-tpl:feat.tg.tpl">4 / 5 on</div>
                     </div>
                     <ul class="ui-toggles__list">
                       <li class="ui-tg">
@@ -561,12 +598,12 @@
       <div class="grid">
         <article class="card card--row span-6">
           <h3 data-i18n="feat.c3.h">Ready-to-share video, subtitles and Word file</h3>
-          <p data-i18n="feat.c3.p">Automatically sizes subtitles for both widescreen YouTube videos and vertical phone clips, and never overwrites your source file.</p>
+          <p data-i18n="feat.c3.p">Auto-sizes subtitles for widescreen and vertical clips, and never overwrites your source.</p>
           <div class="panel panel--flush" data-fx="gradient-mesh" data-fx-seed="33" data-fx-palette='{"bg":"#c6d3df","surface":"#d6e0e9","ink":"#25303a","accent":"#3f6a92"}' data-fx-params='{"speed":0,"drift":0,"calmY":0.95}'>
             <div class="stage stage--fade-br">
               <div class="at-corner wide" style="--ax:32px;--ay:28px;--w:620px">
-                <div class="ui ui-files" data-ui="files" data-ui-still data-reading="Saving {n} of {total}">
-                  <div class="ui-files__status"><span class="ui-dot"></span><span data-files-status data-i18n="feat.f.status">6 output &amp; project files</span></div>
+                <div class="ui ui-files" data-ui="files" data-ui-still data-reading="Saving {n} of {total}" data-i18n-attrs="data-reading:feat.f.reading">
+                  <div class="ui-files__status"><span class="ui-dot"></span><span data-files-status data-idle="6 output & project files" data-i18n="feat.f.status" data-i18n-attrs="data-idle:feat.f.status">6 output &amp; project files</span></div>
                   <ul class="ui-files__grid">
                     <li class="ui-file is-done">
                       <span class="ui-file__icon"><img data-icon="video" src="assets/icons/video.svg" alt="" width="24" height="24" loading="lazy"></span>
@@ -619,7 +656,7 @@
 
         <article class="card card--row span-6">
           <h3 data-i18n="feat.c4.h">Works with 5 translators and built-in tools</h3>
-          <p data-i18n="feat.c4.p">Start free with Google Gemini and Groq, switch to OpenAI or Claude anytime, or stay 100% offline with Ollama.</p>
+          <p data-i18n="feat.c4.p">Start free with Gemini and Groq, use OpenAI or Claude anytime, or run 100% offline with Ollama.</p>
           <div class="panel panel--flush">
             <div class="dg" data-diagram data-dg-still><script type="application/json">{"layout":"hub","alt":"Diagram showing DubTool connecting to Gemini, Groq, OpenAI, Anthropic, Ollama and FFmpeg","ground":"rings","motion":{"cycle":3.2},"center":{"label":"DubTool","icon":"ui:audio-waveform"},"spokes":[{"label":"Gemini","icon":"gemini"},{"label":"Groq","icon":"groq"},{"label":"OpenAI","icon":"openai"},{"label":"Anthropic","icon":"anthropic"},{"label":"Ollama","icon":"ollama"},{"label":"FFmpeg","icon":"logos:ffmpeg-icon"}]}</script></div>
           </div>
@@ -683,8 +720,8 @@
           <div class="panel" data-visual role="img" aria-label="Google Gemini and Groq icons for free automatic translation">
             <div class="mode-card__top">
               <div class="mode-card__icons">
-                <span class="ic-tile"><img data-icon="gemini" src="assets/icons/gemini.svg" alt="" width="24" height="24" loading="lazy"></span>
-                <span class="ic-tile ic-wide"><img data-icon="groq" src="assets/icons/groq.svg" alt="" width="48" height="16" loading="lazy"></span>
+                <span class="ic-tile"><img class="ic" data-icon="gemini" src="assets/icons/gemini.svg" alt="" width="24" height="24" loading="lazy"></span>
+                <span class="ic-tile ic-tile--wide"><img class="ic ic-wide" data-icon="groq" src="assets/icons/groq.svg" alt="" width="68" height="22" loading="lazy"></span>
               </div>
               <span class="mode-card__tag" data-i18n="prov.tag">Recommended</span>
             </div>
@@ -702,8 +739,8 @@
           <div class="panel" data-visual role="img" aria-label="OpenAI and Anthropic icons for optional paid accounts">
             <div class="mode-card__top">
               <div class="mode-card__icons">
-                <span class="ic-tile"><img data-icon="openai" src="assets/icons/openai.svg" alt="" width="24" height="24" loading="lazy"></span>
-                <span class="ic-tile"><img data-icon="anthropic" src="assets/icons/anthropic.svg" alt="" width="24" height="24" loading="lazy"></span>
+                <span class="ic-tile"><img class="ic" data-icon="openai" src="assets/icons/openai.svg" alt="" width="24" height="24" loading="lazy"></span>
+                <span class="ic-tile"><img class="ic" data-icon="anthropic" src="assets/icons/anthropic.svg" alt="" width="24" height="24" loading="lazy"></span>
               </div>
             </div>
             <p class="mode-card__caption" data-i18n="prov.c2.m">Optional · Use your own account</p>
@@ -720,7 +757,7 @@
           <div class="panel" data-visual role="img" aria-label="Ollama icon for 100 percent offline translation on your PC">
             <div class="mode-card__top">
               <div class="mode-card__icons">
-                <span class="ic-tile"><img data-icon="ollama" src="assets/icons/ollama.svg" alt="" width="24" height="24" loading="lazy"></span>
+                <span class="ic-tile"><img class="ic" data-icon="ollama" src="assets/icons/ollama.svg" alt="" width="24" height="24" loading="lazy"></span>
               </div>
             </div>
             <p class="mode-card__caption" data-i18n="prov.c3.m">No internet required · Private</p>

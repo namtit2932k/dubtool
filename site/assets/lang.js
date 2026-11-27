@@ -85,10 +85,10 @@ const STRINGS = {
     "guide.tip.text": "If you drop a Vietnamese video by mistake, DubTool detects it automatically, stops before using any translation key, and lets you export clean subtitles instead.",
 
     "ws.h2": "One clear DubTool window tracks every step",
-    "ws.lead": "You always see which step is running, how many lines are left, and the exact files saved — and if you pause or close the app, you can resume right where it stopped.",
+    "ws.lead": "You always see which step is running, how many lines are left, and the exact files saved. If you pause or close the app, you can resume right where it stopped.",
     "ws.link": "See screenshots on GitHub",
     "ws.win.crumb": "Recent videos",
-    "ws.win.search": "Search files",
+    "ws.win.search": "Search",
     "ws.win.s1": "Recent",
     "ws.win.s2": "Finished",
     "ws.win.s3": "Paused",
@@ -100,22 +100,47 @@ const STRINGS = {
     "ws.win.c2": "Details",
     "ws.win.c3": "Status",
     "ws.win.c4": "Time",
+    "ws.r1.s": "2:33:04 · 1,543 lines · Trúc Ly",
+    "ws.r2.s": "29:15 · Vertical · 264 lines",
+    "ws.r3.s": "18:40 · Full HD · Đức Trí",
+    "ws.r4.s": "14:22 · Full HD · Mai Anh",
+    "ws.r5.s": "11:05 · Full HD · Trúc Ly",
+    "ws.r6.s": "42:10 · Full HD · Minh Quân",
+    "ws.r7.s": "35:48 · Full HD · Trúc Ly",
+    "ws.r8.s": "22:15 · Full HD · Bảo Ngọc",
+    "ws.r9.s": "03:18 · Full HD · Trúc Ly",
+    "ws.st.open": "Queued",
     "ws.st.done": "Done",
     "ws.st.run": "Running",
     "ws.pipe.chip": "Run",
+    "ws.pipe.chipDone": "Done",
     "ws.pipe.msg": "Free Auto-Rotate · Trúc Ly voice · Clean subtitles",
     "ws.pipe.btn": "Cancel",
+    "ws.pipe.btnDone": "Run again",
     "ws.pipe.p1": "Audio",
     "ws.pipe.p2": "Listen",
     "ws.pipe.p3": "Translate",
     "ws.pipe.p4": "Voice",
     "ws.pipe.p5": "Save",
+    "ws.pipe.c1": "read original sound",
+    "ws.pipe.c2": "detected Chinese",
+    "ws.pipe.c3": "1,543 sentences",
+    "ws.pipe.c4": "Trúc Ly (local)",
+    "ws.pipe.c5": "MP4 + SRT + Word",
     "ws.pipe.wait": "Next",
+    "ws.log.1": "<b>[1/5]</b> Extracted original audio cleanly in 7 seconds",
+    "ws.log.2": "<b>[2/5]</b> Detected Chinese speech (99.9%) · 1,543 sentences",
+    "ws.log.3": "<b>[3/5]</b> Translating with free Gemini + Groq keys automatically",
+    "ws.log.4": "<b>[3/5]</b> Verified complete Vietnamese sentences · zero foreign letters left",
+    "ws.log.5": "<b>[4/5]</b> Generated 1,543 natural Vietnamese voice clips on this PC",
+    "ws.log.6": "<b>[5/5]</b> Synced voice timing · 0 overlaps · kept movie background sound",
+    "ws.log.7": "<b>[done]</b> Saved drama_ep01_vi.mp4 and drama_ep01_vi_translation.docx",
 
     "feat.h2.a": "Built to be simple and reliable.",
     "feat.h2.b": "Your video never leaves your computer.",
     "feat.c1.h": "Free translation that keeps going",
-    "feat.c1.p": "Add several free Google Gemini or Groq keys. If one hits its free limit, DubTool switches automatically so long movies finish smoothly.",
+    "feat.c1.p": "Add multiple free Gemini or Groq keys. If one hits its limit, DubTool switches automatically.",
+    "feat.n.times": "now|1m|3m",
     "feat.n1.t": "Switched to free Groq key",
     "feat.n1.time": "now",
     "feat.n1.b": "Google busy for a moment · no progress lost",
@@ -126,9 +151,9 @@ const STRINGS = {
     "feat.n3.time": "3m",
     "feat.n3.b": "Natural movie dialogue · zero leftover characters",
     "feat.c2.h": "Natural Vietnamese voices built in",
-    "feat.c2.p": "Choose from 25 studio-quality voices or 11 lightweight voices for older PCs. Preview any voice offline before you start.",
+    "feat.c2.p": "Pick from 25 studio voices or 11 lightweight voices for older PCs, and preview any offline.",
     "feat.tg.title": "Safe defaults out of the box",
-    "feat.tg.count": "4 / 5 on",
+    "feat.tg.tpl": "{n} / 5 on",
     "feat.tg1.t": "Natural Vietnamese voice",
     "feat.tg1.s": "Runs on your PC · Trúc Ly voice",
     "feat.tg2.t": "Dark box behind subtitles",
@@ -140,8 +165,9 @@ const STRINGS = {
     "feat.tg5.t": "Overwrite original video",
     "feat.tg5.s": "Always off to protect your file",
     "feat.c3.h": "Ready-to-share video, subtitles and Word file",
-    "feat.c3.p": "Automatically sizes subtitles for both widescreen YouTube videos and vertical phone clips, and never overwrites your source file.",
+    "feat.c3.p": "Auto-sizes subtitles for widescreen and vertical clips, and never overwrites your source.",
     "feat.f.status": "6 output & project files",
+    "feat.f.reading": "Saving {n} of {total}",
     "feat.f1.k": "Dubbed HD video",
     "feat.f2.k": "Readable Word script",
     "feat.f3.k": "Synced subtitle file",
@@ -149,17 +175,17 @@ const STRINGS = {
     "feat.f5.k": "Voice timing map",
     "feat.f6.k": "Saved preferences",
     "feat.c4.h": "Works with 5 translators and built-in tools",
-    "feat.c4.p": "Start free with Google Gemini and Groq, switch to OpenAI or Claude anytime, or stay 100% offline with Ollama.",
+    "feat.c4.p": "Start free with Gemini and Groq, use OpenAI or Claude anytime, or run 100% offline with Ollama.",
 
     "stmt.h2": "DubTool keeps the original picture sharp and the sound natural",
-    "stmt.lead": "Every Vietnamese sentence is paced to fit the speaker's timing, mixed cleanly over lowered movie background sound so nothing clips or overlaps — even on a 2.5-hour film.",
+    "stmt.lead": "Every Vietnamese sentence is paced to fit the speaker's timing and mixed cleanly over lowered movie background sound so nothing clips or overlaps, even on a 2.5-hour film.",
     "stmt.link": "Explore source code on GitHub",
     "stmt.f1.dt": "2.5× faster",
     "stmt.f1.dd": "Tested on a normal PC without a graphics card: a 2h 33m Full HD movie finished in 61 minutes.",
     "stmt.f2.dt": "0 overlaps",
     "stmt.f2.dd": "All 1,543 spoken lines stayed in sync with the video, with clean subtitles and zero leftover foreign script.",
     "stmt.f3.dt": "0 extra installs",
-    "stmt.f3.dd": "One Windows 64-bit zip includes everything needed — unzip and double-click DubTool.exe.",
+    "stmt.f3.dd": "One Windows 64-bit zip includes everything needed. Just unzip and double-click DubTool.exe.",
     "stmt.bar.t": "Real timing for a 2h 33m Full HD movie on a regular Windows PC (61 min total)",
     "stmt.bar.m": "100% finished · 0 errors · original file untouched",
     "stmt.bar.l1": "Listen 15m",
@@ -304,10 +330,10 @@ const STRINGS = {
     "guide.tip.text": "DubTool tự nhận ra video đã là tiếng Việt, tự dừng lại để không tốn lượt dịch và đề xuất xuất ngay phụ đề kèm bản chép lời cho bạn.",
 
     "ws.h2": "Một cửa sổ DubTool theo dõi rõ từng bước",
-    "ws.lead": "Bạn luôn biết phần mềm đang làm tới đâu, còn bao nhiêu câu và đã lưu tệp nào — nếu cần tạm dừng hay tắt máy, lần sau mở lại vẫn chạy tiếp đúng chỗ cũ.",
+    "ws.lead": "Bạn luôn biết phần mềm đang làm tới đâu, còn bao nhiêu câu và đã lưu tệp nào. Nếu cần tạm dừng hay tắt máy, lần sau mở lại vẫn chạy tiếp đúng chỗ cũ.",
     "ws.link": "Xem ảnh giao diện trên GitHub",
     "ws.win.crumb": "Video gần đây",
-    "ws.win.search": "Tìm tệp",
+    "ws.win.search": "Tìm",
     "ws.win.s1": "Gần đây",
     "ws.win.s2": "Đã xong",
     "ws.win.s3": "Tạm dừng",
@@ -319,22 +345,47 @@ const STRINGS = {
     "ws.win.c2": "Chi tiết",
     "ws.win.c3": "Trạng thái",
     "ws.win.c4": "Thời gian",
+    "ws.r1.s": "2:33:04 · 1.543 câu · Trúc Ly",
+    "ws.r2.s": "29:15 · Video dọc · 264 câu",
+    "ws.r3.s": "18:40 · Full HD · Đức Trí",
+    "ws.r4.s": "14:22 · Full HD · Mai Anh",
+    "ws.r5.s": "11:05 · Full HD · Trúc Ly",
+    "ws.r6.s": "42:10 · Full HD · Minh Quân",
+    "ws.r7.s": "35:48 · Full HD · Trúc Ly",
+    "ws.r8.s": "22:15 · Full HD · Bảo Ngọc",
+    "ws.r9.s": "03:18 · Full HD · Trúc Ly",
+    "ws.st.open": "Đang chờ",
     "ws.st.done": "Xong",
     "ws.st.run": "Đang chạy",
     "ws.pipe.chip": "Chạy",
+    "ws.pipe.chipDone": "Xong",
     "ws.pipe.msg": "Tự xoay khóa miễn phí · Giọng Trúc Ly · Phụ đề rõ nét",
     "ws.pipe.btn": "Hủy",
+    "ws.pipe.btnDone": "Chạy lại",
     "ws.pipe.p1": "Âm thanh",
     "ws.pipe.p2": "Nghe",
     "ws.pipe.p3": "Dịch",
     "ws.pipe.p4": "Giọng",
     "ws.pipe.p5": "Xuất",
+    "ws.pipe.c1": "tách âm thanh gốc",
+    "ws.pipe.c2": "nhận diện tiếng Trung",
+    "ws.pipe.c3": "1.543 câu thoại",
+    "ws.pipe.c4": "Trúc Ly (trên máy)",
+    "ws.pipe.c5": "MP4 + SRT + Word",
     "ws.pipe.wait": "Chờ",
+    "ws.log.1": "<b>[1/5]</b> Đã tách âm thanh gốc sạch sẽ trong 7 giây",
+    "ws.log.2": "<b>[2/5]</b> Nhận diện tiếng Trung (99.9%) · 1.543 câu thoại",
+    "ws.log.3": "<b>[3/5]</b> Đang dịch tự động bằng khóa miễn phí Gemini + Groq",
+    "ws.log.4": "<b>[3/5]</b> Đã kiểm tra đủ câu tiếng Việt · không sót chữ ngoại ngữ",
+    "ws.log.5": "<b>[4/5]</b> Đã tạo 1.543 đoạn giọng Việt tự nhiên ngay trên máy",
+    "ws.log.6": "<b>[5/5]</b> Đã khớp nhịp giọng · 0 chồng tiếng · giữ nguyên nhạc nền",
+    "ws.log.7": "<b>[xong]</b> Đã lưu drama_ep01_vi.mp4 và drama_ep01_vi_translation.docx",
 
     "feat.h2.a": "Dễ dùng và ổn định cho phim dài.",
     "feat.h2.b": "Video gốc luôn nằm yên trên máy bạn.",
     "feat.c1.h": "Dịch miễn phí không lo đứt quãng",
-    "feat.c1.p": "Dán sẵn vài khóa miễn phí của Google và Groq. Khi một khóa chạm giới hạn, DubTool tự đổi sang khóa khác để phim dài chạy liền mạch.",
+    "feat.c1.p": "Thêm nhiều khóa miễn phí Google và Groq. Khóa này hết lượt, phần mềm tự đổi sang khóa khác.",
+    "feat.n.times": "vừa xong|1p|3p",
     "feat.n1.t": "Tự chuyển sang khóa Groq miễn phí",
     "feat.n1.time": "vừa xong",
     "feat.n1.b": "Google bận tạm thời · không mất tiến độ",
@@ -345,9 +396,9 @@ const STRINGS = {
     "feat.n3.time": "3p",
     "feat.n3.b": "Xưng hô tự nhiên đúng phim · không sót chữ ngoại",
     "feat.c2.h": "Giọng đọc tiếng Việt có sẵn trên máy",
-    "feat.c2.p": "Có sẵn 25 giọng tự nhiên rõ nét và 11 giọng nhẹ cho máy cấu hình thấp. Bấm nghe thử trực tiếp ngay trên máy không cần mạng.",
+    "feat.c2.p": "Chọn 25 giọng tự nhiên hoặc 11 giọng nhẹ cho máy yếu. Nghe thử trực tiếp không cần mạng.",
     "feat.tg.title": "Cài sẵn an toàn cho người mới",
-    "feat.tg.count": "4 / 5 bật",
+    "feat.tg.tpl": "{n} / 5 bật",
     "feat.tg1.t": "Giọng tiếng Việt tự nhiên",
     "feat.tg1.s": "Chạy ngay trên máy · giọng Trúc Ly",
     "feat.tg2.t": "Hộp nền tối sau phụ đề",
@@ -359,8 +410,9 @@ const STRINGS = {
     "feat.tg5.t": "Ghi đè tệp video gốc",
     "feat.tg5.s": "Luôn tắt để bảo vệ video của bạn",
     "feat.c3.h": "Xuất sẵn video, phụ đề và tệp Word",
-    "feat.c3.p": "Tự căn cỡ chữ đẹp cho cả video ngang YouTube lẫn video dọc điện thoại, luôn tạo tệp mới và giữ nguyên bản gốc.",
+    "feat.c3.p": "Tự căn cỡ phụ đề cho video ngang lẫn video dọc, luôn lưu tệp mới và giữ nguyên video gốc.",
     "feat.f.status": "6 tệp đầu ra & dự án",
+    "feat.f.reading": "Đang lưu {n} / {total}",
     "feat.f1.k": "Video lồng tiếng HD",
     "feat.f2.k": "Bản dịch Word dễ sửa",
     "feat.f3.k": "Tệp phụ đề khớp tiếng",
@@ -368,7 +420,7 @@ const STRINGS = {
     "feat.f5.k": "Mốc thời gian giọng đọc",
     "feat.f6.k": "Tùy chỉnh đã lưu",
     "feat.c4.h": "Linh hoạt 5 nguồn dịch khác nhau",
-    "feat.c4.p": "Bắt đầu miễn phí với Google Gemini và Groq, chuyển sang OpenAI hoặc Claude lúc cần, hoặc chạy hoàn toàn không cần mạng với Ollama.",
+    "feat.c4.p": "Bắt đầu miễn phí với Gemini và Groq, chuyển sang OpenAI/Claude hoặc chạy offline bằng Ollama.",
 
     "stmt.h2": "DubTool giữ hình ảnh gốc sắc nét và âm thanh hài hòa",
     "stmt.lead": "Mỗi câu tiếng Việt được căn vừa đúng nhịp nói của nhân vật, hòa êm trên nền nhạc phim gốc để không bị chồng tiếng hay vỡ âm — ngay cả với phim dài hơn 2 tiếng rưỡi.",
@@ -459,6 +511,16 @@ function applyLang(lang, persist = true) {
     const key = el.getAttribute("data-i18n-html");
     if (key && dict[key] !== undefined) el.innerHTML = dict[key];
   });
+  document.querySelectorAll("[data-i18n-attrs]").forEach((el) => {
+    const pairs = (el.getAttribute("data-i18n-attrs") || "").split(",");
+    pairs.forEach((pair) => {
+      const idx = pair.indexOf(":");
+      if (idx <= 0) return;
+      const attr = pair.slice(0, idx).trim();
+      const key = pair.slice(idx + 1).trim();
+      if (attr && key && dict[key] !== undefined) el.setAttribute(attr, dict[key]);
+    });
+  });
 
   document.querySelectorAll("[data-lang-btn]").forEach((btn) => {
     const active = btn.getAttribute("data-lang-btn") === code;
@@ -469,6 +531,8 @@ function applyLang(lang, persist = true) {
   if (persist) {
     try { localStorage.setItem("dubtool-site-lang", code); } catch (_) {}
   }
+
+  window.dispatchEvent(new CustomEvent("dubtool:lang", { detail: { lang: code } }));
 }
 
 function initLang() {
@@ -489,16 +553,11 @@ function initLang() {
     });
   });
 
-  // Always sync button state; only rewrite DOM text if non-default (vi).
-  if (initial === "vi") {
-    applyLang("vi", false);
-  } else {
-    document.querySelectorAll("[data-lang-btn]").forEach((btn) => {
-      const active = btn.getAttribute("data-lang-btn") === "en";
-      btn.classList.toggle("is-active", active);
-      btn.setAttribute("aria-pressed", active ? "true" : "false");
-    });
-  }
+  // Always apply language & notify live UI fragments once mounted.
+  applyLang(initial, false);
+  setTimeout(() => {
+    window.dispatchEvent(new CustomEvent("dubtool:lang", { detail: { lang: document.documentElement.lang || initial } }));
+  }, 120);
 }
 
 if (document.readyState === "loading") {

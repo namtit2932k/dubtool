@@ -34,11 +34,16 @@ export default function init(root) {
   // the markup as written: the finished picture
   const first = steps.map((s, i) => ({ done: s.classList.contains('is-done'), run: s.classList.contains('is-run'), k: s.style.getPropertyValue('--k'), text: times[i].textContent }));
   const final = times.map((t, i) => t.dataset.time || (first[i].done ? t.textContent : ''));
-  const waitText = first.map(f => (f.done || f.run ? '' : f.text));
+  const waitText0 = first.map(f => (f.done || f.run ? '' : f.text));
   const T = final.map(secs);
   const total0 = total ? total.textContent : '';
-  const chip0 = chip ? chip.textContent : '', chipDone = chip?.dataset.done ?? chip0;
-  const btn0 = btn ? btn.textContent : '', btnDone = btn?.dataset.done ?? btn0;
+  const chip0 = chip ? chip.textContent : '';
+  const btn0 = btn ? btn.textContent : '';
+  const getChipIdle = () => chip?.dataset.idle ?? chip0;
+  const getChipDone = () => chip?.dataset.done ?? getChipIdle();
+  const getBtnIdle = () => btn?.dataset.idle ?? btn0;
+  const getBtnDone = () => btn?.dataset.done ?? getBtnIdle();
+  const getWait = i => times[i]?.dataset.wait ?? waitText0[i];
   const colon = [total0, ...final].some(s => /:/.test(s));
   const counts = T.every(Number.isFinite);
   const fmt = v => {
@@ -65,16 +70,17 @@ export default function init(root) {
       s.classList.toggle('is-done', done);
       s.classList.toggle('is-run', run);
       s.style.setProperty('--k', done ? '1' : run ? k.toFixed(3) : '0');
-      text(times[i], done ? final[i] : run ? (counts ? fmt(k * T[i]) : first[i].run ? first[i].text : '') : waitText[i]);
+      text(times[i], done ? final[i] : run ? (counts ? fmt(k * T[i]) : first[i].run ? first[i].text : '') : getWait(i));
     });
     const passed = j >= N;
     root.classList.toggle('is-passed', passed);
-    if (chip) { text(chip, passed ? chipDone : chip0); chip.classList.toggle('ui-chip--live', !passed); }
-    text(btn, passed ? btnDone : btn0);
+    if (chip) { text(chip, passed ? getChipDone() : getChipIdle()); chip.classList.toggle('ui-chip--live', !passed); }
+    text(btn, passed ? getBtnDone() : getBtnIdle());
     if (total && counts && Number.isFinite(secs(total0))) text(total, fmt(T.slice(0, Math.min(j, N)).reduce((a, b) => a + b, 0) + (passed ? 0 : k * T[j])));
     const on = steps[Math.min(j, N - 1)].dataset.step;
     lines.forEach(l => l.classList.toggle('is-on', l.dataset.step === on));
   };
+  window.addEventListener('dubtool:lang', paint);
   // the markup as written, exactly: the running step's time and the total as written
   const restore = () => {
     j = j0; k = k0;

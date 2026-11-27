@@ -10,20 +10,26 @@ export default function init(root, opts = {}) {
   if (!tiles.length) return null;
   const status = root.querySelector('[data-files-status]');
   const status0 = status ? status.textContent : '';
-  const num = status0.match(/\d[\d,.]*/);
-  const total = num ? parseInt(num[0].replace(/[,.]/g, ''), 10) || tiles.length : tiles.length;
-  const reading = opts.reading || root.dataset.reading || '';
+  const num0 = status0.match(/\d[\d,.]*/);
+  const total = num0 ? parseInt(num0[0].replace(/[,.]/g, ''), 10) || tiles.length : tiles.length;
+  const reading0 = opts.reading || root.dataset.reading || '';
   const n = tiles.length;
+  let lastI = n;
   const say = i => {
+    lastI = i;
     if (!status) return;
-    let s = status0;
+    const base = status.dataset.idle || status0;
+    const reading = opts.reading || root.dataset.reading || reading0;
+    const num = base.match(/\d[\d,.]*/);
+    let s = base;
     if (i < n) {
       const k = Math.max(1, Math.round(total * (i + 1) / n));
       if (reading) s = reading.replace('{n}', k).replace('{total}', total);
-      else if (num) s = status0.slice(0, num.index) + k + status0.slice(num.index + num[0].length);
+      else if (num) s = base.slice(0, num.index) + k + base.slice(num.index + num[0].length);
     }
     if (status.textContent !== s) status.textContent = s;
   };
+  window.addEventListener('dubtool:lang', () => say(lastI));
   // a tile the panel cuts keeps its icon but never shows half a word: a name or app line that does not
   // fit inside the box that clips the grid (the panel) is hidden, measured again on every resize
   const labels = [...root.querySelectorAll('.ui-file__name, .ui-file__kind')];
