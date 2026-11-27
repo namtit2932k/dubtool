@@ -1,6 +1,6 @@
 # DubTool — Project State (Single Source of Truth)
 
-> **Cập nhật lần cuối:** 2026-11-27  
+> **Cập nhật lần cuối:** 2026-11-28  
 > **Mục đích:** Lưu trạng thái thực tế của dự án để giữ liên tục 100% qua các lần compact context và giữa các session. Luôn đối chiếu với `git status` / `git log` khi bắt đầu phiên mới.
 
 ---
@@ -8,9 +8,14 @@
 ## 1. Trạng thái Git & Phiên bản hiện tại
 
 - **Repository:** `namtit2932k/dubtool` (public), workspace `d:\Projects\Vibe\Project_K`, build root `D:\Projects\Vibe\Project_K_build`.
-- **Phiên bản đã phát hành gần nhất:** **`v1.0.21`** (commit `226bc5ec4332d3dad1b2cf76af74160a063f89dd`, 2026-11-27) — Official, đã verify đầy đủ qua `scripts/release.py 21` (`DOD_REPORT.md` 9/9 PASS, `RELEASE_EVIDENCE.txt` PASS, `verify_release.py --audit` PASS, `658 passed, 2 skipped`, `DubTool-1.0.21-win64.zip` 210,084,308 B, SHA-256 `8682b79e053e728f6f6b4d62c25646b4fe994fc33202566e271e259a3868527a`, `https://github.com/namtit2932k/dubtool/releases/tag/v1.0.21`).
-- **Các phiên bản trước đó:** **`v1.0.20`** (`6355909d`, 2026-11-24), **`v1.0.19`** (`e04784a7`, 2026-11-24), **`v1.0.18`** (`a9c4680a`, 2026-11-20) — Official.
-- **Nội dung chính đã phát hành trong `v1.0.21` (Update 21 — Full Codebase Audit & Windows UIA Hardening, `docs/reports/REPORT_UPDATE_21.md`):**
+- **Phiên bản đã phát hành gần nhất:** **`v1.0.22`** (commit `6ac6319843640977d6a0f5ee7eba86d23d6fc843`, 2026-11-28) — Official, đã verify đầy đủ qua `scripts/release.py 22` (`DOD_REPORT.md` 9/9 PASS, `RELEASE_EVIDENCE.txt` PASS, `verify_release.py --audit` PASS 21/21 tags, `664 passed, 2 skipped`, `DubTool-1.0.22-win64.zip` 210,108,897 B, SHA-256 `b9b37165f261dde5cde1d0386c8921ecde107828119c2e3a1bead18a5c2d247e`, `https://github.com/namtit2932k/dubtool/releases/tag/v1.0.22`).
+- **Các phiên bản trước đó:** **`v1.0.21`** (`226bc5ec`, 2026-11-27), **`v1.0.20`** (`6355909d`, 2026-11-24), **`v1.0.19`** (`e04784a7`, 2026-11-24), **`v1.0.18`** (`a9c4680a`, 2026-11-20) — Official.
+- **Nội dung chính đã phát hành trong `v1.0.22` (Update 22 — Emerald Studio Dark UI, Synced Icon & Portrait Subtitle / S3–S7 Fixes, `docs/reports/REPORT_UPDATE_22.md`):**
+  - Xuất phát từ lượt chạy E2E thật 29:15 (`test_china06.mp4`, dọc `720×1280`, 264 units, xong trong `749.8s`, 0 TTS fail, 0 CJK leak, max shift `0.153s`):
+    1. **Phụ đề video dọc & dung lượng xuất (`S7`):** bỏ `max_line_chars: 42` cứng trong `config.yaml` để tự kích hoạt `PORTRAIT_LINE_CHARS = 28` trên video dọc, chặn `font_px <= width / 20` trên khung 9:16 (tránh tràn 4 dòng), bật hộp nền tối mờ mặc định `bg_box: true` (`BorderStyle=3`, `BackColour=&H38000000`) chống đè hardsub nguồn, đổi mặc định `crf: 21` giảm phình file 3× trên video nén thấp.
+    2. **Chất lượng dịch (`S3`):** cập nhật `prompts.py` + `groq.py` để giữ xưng hô `tôi`/`bạn` cho thuyết minh nhưng ưu tiên xưng hô tự nhiên đúng bối cảnh nhân vật cho phim truyện/cổ trang; thêm `normalize_vietnamese_casing()` trong `parsing.py` viết hoa chữ đầu câu sau `.`/`!`/`?`.
+    3. **Giao diện Emerald Studio (Dark Pro) & Accessibility (`UI`):** thêm `src/dubtool/app/ui/theme.py` (`EmeraldProxyStyle` vẽ vector checkbox/radio/chevron, Win32 DWM dark titlebar, QPalette/QSS Obsidian+Emerald), `StageItemDelegate`, brand header strip, đồng bộ tất cả dialog phụ, chuyển `DropZone` sang `QPushButton` hỗ trợ bàn phím và Windows UIA `InvokePattern`, đồng bộ `packaging/icon.ico` + `packaging/icon.png` theo logo lục giác Emerald + Play trên `docs/images/brand/banner.svg`, và đồng bộ toàn bộ 35 ảnh README mới (`--layout-check` 0 violations ở 100%/125%/150% DPI). (Tệp hướng dẫn cục bộ `docs/UI_EMERALD_STUDIO_GUIDE.md` được loại trừ trong `.git/info/exclude`, không đẩy lên GitHub.)
+- **Nội dung đã phát hành trước đó trong `v1.0.21` (Update 21 — Full Codebase Audit & Windows UIA Hardening, `docs/reports/REPORT_UPDATE_21.md`):**
   - Thực hiện kiểm toán toàn diện `ponytail-audit` + kiểm thử hộp đen Windows UIA (`agent-desktop`) trên `DubTool.exe`, vá trọn bộ **15 hạng mục** + bổ sung 10 test hồi quy (`tests/test_audit_v21_fixes.py`):
     1. `settings_dialog.py`: sửa crash `AttributeError` (`_accurate_model`), kiểm tra `mismatched_keys()` trước `take_keys()`, đổi `jobs_edit` sang `editingFinished` + guard thư mục bảo vệ, cache khóa/quota trong `_refresh_rows()`, guard `shiboken6.isValid` cho `_WorkResult`.
     2. `settings.py` + `housekeeping.py` + `cleanup.py`: giữ đúng mặc định `keep_level="light"` trên máy cài mới, bắt buộc `assert_not_protected_dir()` + marker DubTool + chặn NTFS junction (`os.path.isjunction`) khi dọn job/cleanup.
