@@ -95,9 +95,10 @@
   #features .dg .dg-node--tile.is-hit > .dg-cap,
   #features .dg .dg-node--tile.is-done > .dg-cap { color: #0f1f10; }
 
-  /* Keep window search box single-line & pipeline step names untruncated */
+  /* Keep window search box single-line, sidebar nowrap & pipeline step names untruncated */
   .ui-win__search { white-space: nowrap; }
   .ui-win__search .ui-win__ph { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ui-win__nav { white-space: nowrap; }
   .ui-pipe__steps .ui-pipe__step { padding-inline: 10px; }
   .ui-pipe__steps .ui-pipe__name { gap: 5px; }
 
@@ -171,6 +172,9 @@
       radial-gradient(60% 50% at 90% 100%, color-mix(in oklab, var(--ground-bg) 80%, var(--ground-accent)), transparent 70%),
       var(--ground-bg); }
   .hero__art > .ly-piece--note { left: var(--s-6); bottom: var(--s-6); width: 300px; z-index: 2; }
+  .hero__art .d-card__row { align-items: center; margin-bottom: 8px; }
+  .hero__art .d-card__row h5 { margin: 0; line-height: 22px; }
+  .hero__art .d-card__row .d-chip { margin: 0; flex: none; }
   .d-note__line { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 13px; color: #3d4247; border-top: 1px solid rgb(0 0 0 / .06); }
   .d-note__line:first-of-type { border-top: 0; }
   .d-note__line i { width: 18px; height: 18px; border-radius: 50%; flex: none; display: grid; place-items: center; background: #e7f4ec; color: #17673f; font-style: normal; font-size: 13px; font-weight: 700; }
@@ -574,7 +578,7 @@
       </div>
 
       <div class="ui app fill" role="img" aria-label="DubTool desktop interface showing recent videos on the left and the live step-by-step progress log on the right" data-ui-pause-host>
-        <div class="app__pane app__pane--list">
+        <div class="app__pane app__pane--list" data-ui-loop>
           <div class="ui ui-panel ui-win" data-ui="window" data-open="Queued" data-work="Running" data-done="Done" data-i18n-attrs="data-open:ws.st.open,data-work:ws.st.run,data-done:ws.st.done">
             <div class="ui-win__bar">
               <span class="ui-dots" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -677,8 +681,8 @@
             <p data-i18n="feat.c2.p">Pick from 25 studio voices or 11 lightweight voices for older PCs, and preview any offline.</p>
             <div class="panel panel--flush" data-fx="gradient-mesh" data-fx-seed="22" data-fx-palette='{"bg":"#d9ccb7","surface":"#e9e0d2","ink":"#2a2622","accent":"#a8794a"}' data-fx-params='{"speed":0,"drift":0,"calmY":0.95}'>
               <div class="stage stage--fade-b">
-                <div class="at-right to-edge" style="--ax:32px;--ay:36px">
-                  <div class="ui ui-panel ui-toggles" data-ui="toggles" data-ui-still>
+                <div class="at-right to-edge" style="--ax:32px;--ay:36px" data-ui-loop>
+                  <div class="ui ui-panel ui-toggles" data-ui="toggles">
                     <div class="ui-head">
                       <svg class="ui-icon ui-toggles__ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8 13 4v3.6c0 3-2.1 5.4-5 6.6-2.9-1.2-5-3.6-5-6.6V4z"/><path d="m5.8 8 1.6 1.6 3-3.2"/></svg>
                       <div class="ui-title" data-i18n="feat.tg.title">Safe defaults out of the box</div>
@@ -721,8 +725,8 @@
           <p data-i18n="feat.c3.p">Auto-sizes subtitles for widescreen and vertical clips, and never overwrites your source.</p>
           <div class="panel panel--flush" data-fx="gradient-mesh" data-fx-seed="33" data-fx-palette='{"bg":"#c6d3df","surface":"#d6e0e9","ink":"#25303a","accent":"#3f6a92"}' data-fx-params='{"speed":0,"drift":0,"calmY":0.95}'>
             <div class="stage stage--fade-br">
-              <div class="at-corner wide" style="--ax:32px;--ay:28px;--w:620px">
-                <div class="ui ui-files" data-ui="files" data-ui-still data-reading="Saving {n} of {total}" data-i18n-attrs="data-reading:feat.f.reading">
+              <div class="at-corner wide" style="--ax:32px;--ay:28px;--w:620px" data-ui-loop>
+                <div class="ui ui-files" data-ui="files" data-reading="Saving {n} of {total}" data-i18n-attrs="data-reading:feat.f.reading">
                   <div class="ui-files__status"><span class="ui-dot"></span><span data-files-status data-idle="6 output & project files" data-i18n="feat.f.status" data-i18n-attrs="data-idle:feat.f.status">6 output &amp; project files</span></div>
                   <ul class="ui-files__grid">
                     <li class="ui-file is-done">
@@ -778,7 +782,7 @@
           <h3 data-i18n="feat.c4.h">Works with 5 translators and built-in tools</h3>
           <p data-i18n="feat.c4.p">Start free with Gemini and Groq, use OpenAI or Claude anytime, or run 100% offline with Ollama.</p>
           <div class="panel panel--flush">
-            <div class="dg" data-diagram data-dg-still><script type="application/json">{"layout":"hub","alt":"Diagram showing DubTool connecting to Gemini, Groq, OpenAI, Anthropic, Ollama and FFmpeg","ground":"rings","motion":{"cycle":3.2},"center":{"label":"DubTool","icon":"ui:audio-waveform"},"spokes":[{"label":"Gemini","icon":"gemini"},{"label":"Groq","icon":"groq"},{"label":"OpenAI","icon":"openai"},{"label":"Anthropic","icon":"anthropic"},{"label":"Ollama","icon":"ollama"},{"label":"FFmpeg","icon":"logos:ffmpeg-icon"}]}</script></div>
+            <div class="dg" data-diagram><script type="application/json">{"layout":"hub","alt":"Diagram showing DubTool connecting to Gemini, Groq, OpenAI, Anthropic, Ollama and FFmpeg","ground":"rings","motion":{"cycle":3.2},"center":{"label":"DubTool","icon":"ui:audio-waveform"},"spokes":[{"label":"Gemini","icon":"gemini"},{"label":"Groq","icon":"groq"},{"label":"OpenAI","icon":"openai"},{"label":"Anthropic","icon":"anthropic"},{"label":"Ollama","icon":"ollama"},{"label":"FFmpeg","icon":"logos:ffmpeg-icon"}]}</script></div>
           </div>
         </article>
       </div>

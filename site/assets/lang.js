@@ -356,7 +356,7 @@ const STRINGS = {
     "ws.win.search": "Tìm",
     "ws.win.s1": "Gần đây",
     "ws.win.s2": "Đã xong",
-    "ws.win.s3": "Tạm dừng",
+    "ws.win.s3": "Dừng",
     "ws.win.lang": "Ngôn ngữ",
     "ws.win.l1": "Tiếng Trung",
     "ws.win.l2": "Tiếng Anh",
