@@ -215,6 +215,7 @@
   .guide-mock__ok { font: 500 12px/1 var(--font-mono); color: #166534; background: #dff3e4; padding: 5px 9px; border-radius: 999px; white-space: nowrap; }
   .guide-visual__foot { font: 500 14px/1.45 var(--font-text); color: #162418; margin: 0; }
   @media (max-width: 1023px) {
+    .guide-col-copy { order: -1; }
     .guide-visual { min-height: 360px; margin-top: var(--s-5); }
   }
   @media (max-width: 639px) {
@@ -245,20 +246,26 @@
     .app > .app__pane + .app__pane { border-top: 0; }
   }
 
-  /* Features 2x2 panel height & equal card alignment per breakpoint */
+  /* Features 2x2 tight grid & equal card alignment per breakpoint */
+  main > section#features.section.g2 { height: auto; min-height: 100svh; }
+  main > section#features.section.g2 > .wrap {
+    height: auto;
+    grid-template-rows: auto auto;
+    row-gap: var(--gutter);
+    align-content: start;
+  }
   #features .grid { align-items: stretch; }
-  #features .panel { --p-h: 296px; }
+  #features .panel { --p-h: 340px; }
   @media (min-width: 1024px) {
     #features .card--row > h3 { min-height: 1lh; }
     #features .card--row > p { min-height: 2lh; max-width: none; }
   }
-  @media (max-width: 1279px) { #features .panel { --p-h: 236px; } }
+  @media (max-width: 1279px) { #features .panel { --p-h: 280px; } }
   @media (min-width: 640px) and (max-width: 1023px) {
-    #features .panel { --p-h: 410px; }
-    #features { --h: 2; }
+    #features .panel { --p-h: 260px; }
   }
   @media (max-width: 639px) {
-    #features .panel { --p-h: 148px; }
+    #features .panel { --p-h: 168px; }
     #features .stage { --fade-h: 40px; }
   }
 
@@ -349,21 +356,13 @@
   .closing__eyebrow { font: 500 13px/1.3 var(--font-mono); color: var(--accent); margin: 0; }
   .closing__cta.close--type h2 { max-width: 24ch; }
   .closing__cta.close--type .t-lead { color: color-mix(in oklab, var(--ink) 84%, transparent); max-width: 56ch; }
-  .closing__cta.close--type > .btn--xl.btn--wide {
-    margin-top: var(--s-2);
-    height: clamp(64px, 2.2vw + 48px, 80px);
-    padding-inline: var(--s-7);
-    font-size: clamp(19px, 0.9vw + 14px, 26px);
-    box-shadow: 0 16px 40px -16px rgb(198 241 157 / .45);
-  }
-  .closing__cta.close--type > .btn--xl.btn--wide .m-arrow { width: 18px; height: 18px; }
-  .closing__subrow {
-    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
-    gap: var(--s-3) var(--s-6); font-size: var(--t-small); color: color-mix(in oklab, var(--ink) 78%, transparent);
-  }
+  .closing__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); margin-top: var(--s-2); }
+  .closing__actions .btn--primary { box-shadow: 0 10px 28px -12px rgb(198 241 157 / .45); }
+  .closing__note { margin: 0; font-size: var(--t-small); color: color-mix(in oklab, var(--ink) 74%, transparent); }
   .closing__links { padding-top: var(--s-6); }
   @media (max-width: 639px) {
-    .closing__cta.close--type > .btn--xl.btn--wide { height: 44px; padding-inline: var(--s-5); font-size: var(--t-body); }
+    .closing__actions { flex-direction: column; align-items: stretch; }
+    .closing__actions .btn { width: 100%; }
     .closing__links { padding-top: var(--s-5); }
   }
 </style>
@@ -497,31 +496,7 @@
   <section class="section" id="guide" aria-labelledby="guide-h">
     <div class="wrap">
       <div class="grid guide-split">
-        <div class="span-5">
-          <h2 id="guide-h" data-i18n="guide.h2">How to use DubTool in 4 simple steps</h2>
-          <p class="t-lead" style="margin-top:var(--s-4)" data-i18n="guide.sub">No programming or extra installs. Set up once in about two minutes.</p>
-          <ol class="guide-steps">
-            <li class="guide-step">
-              <h3><span class="guide-step__n">01</span><span data-i18n="guide.s1.h">Unzip and open DubTool</span></h3>
-              <p data-i18n="guide.s1.p">Extract the Windows zip and double-click DubTool.exe. Everything is built in.</p>
-            </li>
-            <li class="guide-step">
-              <h3><span class="guide-step__n">02</span><span data-i18n="guide.s2.h">Paste a free translation key</span></h3>
-              <p data-i18n="guide.s2.p">Open Settings → API Keys, paste a Google or Groq key, and click Test all.</p>
-            </li>
-            <li class="guide-step">
-              <h3><span class="guide-step__n">03</span><span data-i18n="guide.s3.h">Drop your video and pick a voice</span></h3>
-              <p data-i18n="guide.s3.p">Choose an output folder, leave Auto-detect on, and preview any local voice.</p>
-            </li>
-            <li class="guide-step">
-              <h3><span class="guide-step__n">04</span><span data-i18n="guide.s4.h">Click Generate for video &amp; Word script</span></h3>
-              <p data-i18n="guide.s4.p">Your original stays untouched; you get a new Vietnamese MP4 and Word table.</p>
-            </li>
-          </ol>
-          <p class="guide-tip"><strong data-i18n="guide.tip.title">Already in Vietnamese?</strong> <span data-i18n="guide.tip.text">DubTool detects it automatically, stops before using any key, and offers clean subtitles instead.</span></p>
-        </div>
-
-        <div class="span-6 start-7">
+        <div class="span-6 guide-col-visual">
           <div class="guide-visual" data-visual role="img" aria-label="DubTool quick setup panel showing verified free Gemini and Groq keys, local voice preview, and safe output defaults">
             <div class="guide-icons-bar" aria-hidden="true">
               <span class="ic-tile"><img class="ic" data-icon="video" src="assets/icons/video.svg" alt="" width="24" height="24" loading="lazy"></span>
@@ -554,6 +529,30 @@
             </div>
             <p class="guide-visual__foot" data-i18n="guide.mock.foot">One-time 2-minute setup · Everything runs from a single Windows folder</p>
           </div>
+        </div>
+
+        <div class="span-5 start-8 guide-col-copy">
+          <h2 id="guide-h" data-i18n="guide.h2">How to use DubTool in 4 simple steps</h2>
+          <p class="t-lead" style="margin-top:var(--s-4)" data-i18n="guide.sub">No programming or extra installs. Set up once in about two minutes.</p>
+          <ol class="guide-steps">
+            <li class="guide-step">
+              <h3><span class="guide-step__n">01</span><span data-i18n="guide.s1.h">Unzip and open DubTool</span></h3>
+              <p data-i18n="guide.s1.p">Extract the Windows zip and double-click DubTool.exe. Everything is built in.</p>
+            </li>
+            <li class="guide-step">
+              <h3><span class="guide-step__n">02</span><span data-i18n="guide.s2.h">Paste a free translation key</span></h3>
+              <p data-i18n="guide.s2.p">Open Settings → API Keys, paste a Google or Groq key, and click Test all.</p>
+            </li>
+            <li class="guide-step">
+              <h3><span class="guide-step__n">03</span><span data-i18n="guide.s3.h">Drop your video and pick a voice</span></h3>
+              <p data-i18n="guide.s3.p">Choose an output folder, leave Auto-detect on, and preview any local voice.</p>
+            </li>
+            <li class="guide-step">
+              <h3><span class="guide-step__n">04</span><span data-i18n="guide.s4.h">Click Generate for video &amp; Word script</span></h3>
+              <p data-i18n="guide.s4.p">Your original stays untouched; you get a new Vietnamese MP4 and Word table.</p>
+            </li>
+          </ol>
+          <p class="guide-tip"><strong data-i18n="guide.tip.title">Already in Vietnamese?</strong> <span data-i18n="guide.tip.text">DubTool detects it automatically, stops before using any key, and offers clean subtitles instead.</span></p>
         </div>
       </div>
     </div>
@@ -936,14 +935,17 @@
         <h2 id="close-h" data-i18n="close.h2">Download DubTool for Windows</h2>
         <p class="t-lead" data-i18n="close.lead">Unzip one file, paste a free key, and start dubbing foreign videos into natural Vietnamese.</p>
       </div>
-      <a class="btn btn--primary btn--xl btn--wide" href="https://github.com/namtit2932k/dubtool/releases/download/v1.0.23/DubTool-1.0.23-win64.zip" download data-download-zip>
-        <span data-i18n="cta.download">Download DubTool</span>
-        <svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg>
-      </a>
-      <div class="closing__subrow">
-        <span data-i18n="close.note">MIT License · No watermarks · Original video stays untouched</span>
-        <a class="link" href="https://github.com/namtit2932k/dubtool" target="_blank" rel="noopener" data-i18n="close.github">View project on GitHub</a>
+      <div class="closing__actions">
+        <a class="btn btn--primary" href="https://github.com/namtit2932k/dubtool/releases/download/v1.0.23/DubTool-1.0.23-win64.zip" download data-download-zip>
+          <span data-i18n="cta.download">Download DubTool</span>
+          <svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg>
+        </a>
+        <a class="btn btn--secondary" href="https://github.com/namtit2932k/dubtool" target="_blank" rel="noopener">
+          <svg class="nav__gh-ico" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          <span data-i18n="close.github">View project on GitHub</span>
+        </a>
       </div>
+      <p class="closing__note" data-i18n="close.note">MIT License · No watermarks · Original video stays untouched</p>
     </div>
     <div class="closing__links">
       <div class="grid">
